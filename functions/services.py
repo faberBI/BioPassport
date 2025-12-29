@@ -7,7 +7,7 @@ from io import BytesIO
 from openai import OpenAI
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-
+import streamlit as st
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 
