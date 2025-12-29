@@ -77,7 +77,7 @@ Restituisci SOLO JSON con campi: {', '.join(campi)}
 Usa solo informazioni deducibili visivamente.
 """
     response = client.chat.completions.create(
-        model="gpt-4-turbo",
+        model="gpt-4",
         messages=[{
             "role": "user",
             "content": [
