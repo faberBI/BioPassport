@@ -1,9 +1,10 @@
 import streamlit as st
 import uuid
 from datetime import datetime
-import hashlib
 from openai import OpenAI
 from functions import services
+from auth import check_login, create_user
+import os
 
 # ======================================================
 # CONFIG
@@ -18,53 +19,43 @@ for key in ["logged_in", "username", "pdf_data", "image_data", "validated_pdf", 
         st.session_state[key] = False if key == "logged_in" else None
 
 # ======================================================
-# USERS DB (Sostituire con DB reale in produzione)
-# ======================================================
-users_db = {
-    "admin": hashlib.sha256("password123".encode()).hexdigest(),
-    "user1": hashlib.sha256("123456".encode()).hexdigest()
-}
-
-# ======================================================
-# LOGIN FUNCTIONS
-# ======================================================
-def check_login(username, password):
-    hashed = hashlib.sha256(password.encode()).hexdigest()
-    if username in users_db and users_db[username] == hashed:
-        st.session_state.logged_in = True
-        st.session_state.username = username
-        return True
-    return False
-
-def logout():
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-    st.experimental_rerun()
-
-# ======================================================
 # OPENAI CLIENT
 # ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# LOGIN FORM
+# LOGIN / REGISTRAZIONE
 # ======================================================
 if not st.session_state.logged_in:
-    st.title("🔒 Login")
+    st.title("🔒 Login / Registrazione")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    if st.button("Accedi"):
-        if check_login(username, password):
-            st.success(f"Benvenuto {username}!")
-            st.experimental_rerun()
-        else:
-            st.error("Username o password errati")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Accedi"):
+            if check_login(username, password):
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.success(f"Benvenuto {username}!")
+                st.experimental_rerun()
+            else:
+                st.error("Username o password errati")
+    with col2:
+        if st.button("Crea account"):
+            if create_user(username, password):
+                st.success("Account creato con successo!")
+            else:
+                st.error("Username già esistente")
+
 else:
-    # Sidebar info
+    # Sidebar info e logout
     st.sidebar.success(f"Connesso come: {st.session_state.username}")
     if st.sidebar.button("Logout"):
-        logout()
-    
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.experimental_rerun()
+
     st.sidebar.info("""
 📞 Numero telefono: +39 0123 456789  
 ✉️ Email aziendale: info@azienda.it
