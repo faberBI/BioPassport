@@ -10,6 +10,8 @@ from functions.services import (
     export_passport_pdf,
     generate_qr
 )
+from openai import OpenAI
+client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ==============================
 # CONFIG
