@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from openai import OpenAI
 from functions import services
-from auth.auth import (check_login, create_user, load_users, save_users)
+from auth.user_login import (check_login, create_user, load_users, save_users)
 
 # ======================================================
 # CONFIG
