@@ -3,8 +3,6 @@ import uuid
 from datetime import datetime
 from openai import OpenAI
 from functions import services
-from auth.user_login import (check_login, create_user, load_users, save_users)
-
 import json
 import os
 import bcrypt
