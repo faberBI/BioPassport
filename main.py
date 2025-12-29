@@ -1,78 +1,78 @@
 import streamlit as st
 import uuid
 from datetime import datetime
-from functions.services import (
-    extract_text_from_pdf,
-    image_to_base64,
-    gpt_extract_from_pdf,
-    gpt_analyze_image,
-    save_passport_to_file,
-    export_passport_pdf,
-    generate_qr
-)
+import hashlib
 from openai import OpenAI
+from functions import services
 
-# ==============================
+# ======================================================
 # CONFIG
-# ==============================
+# ======================================================
 st.set_page_config(page_title="Passaporto Digitale del Mobile", layout="wide")
 
-# ==============================
-# CLIENT OPENAI
-# ==============================
+# ======================================================
+# SESSION STATE
+# ======================================================
+for key in ["logged_in", "username", "pdf_data", "image_data", "validated_pdf", "validated_image"]:
+    if key not in st.session_state:
+        st.session_state[key] = False if key == "logged_in" else None
+
+# ======================================================
+# USERS DB (Sostituire con DB reale in produzione)
+# ======================================================
+users_db = {
+    "admin": hashlib.sha256("password123".encode()).hexdigest(),
+    "user1": hashlib.sha256("123456".encode()).hexdigest()
+}
+
+# ======================================================
+# LOGIN FUNCTIONS
+# ======================================================
+def check_login(username, password):
+    hashed = hashlib.sha256(password.encode()).hexdigest()
+    if username in users_db and users_db[username] == hashed:
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        return True
+    return False
+
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.experimental_rerun()
+
+# ======================================================
+# OPENAI CLIENT
+# ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
-# ==============================
-# SESSION STATE
-# ==============================
-for key in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
+# ======================================================
+# LOGIN FORM
+# ======================================================
+if not st.session_state.logged_in:
+    st.title("🔒 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Accedi"):
+        if check_login(username, password):
+            st.success(f"Benvenuto {username}!")
+            st.experimental_rerun()
+        else:
+            st.error("Username o password errati")
+else:
+    # Sidebar info
+    st.sidebar.success(f"Connesso come: {st.session_state.username}")
+    if st.sidebar.button("Logout"):
+        logout()
+    
+    st.sidebar.info("""
+📞 Numero telefono: +39 0123 456789  
+✉️ Email aziendale: info@azienda.it
+""")
 
-# ==============================
-# FUNZIONI DI SUPPORTO
-# ==============================
-
-def analyze_files(pdf_file, image_file):
-    """Estrazione GPT con gestione errori"""
-    try:
-        pdf_text = extract_text_from_pdf(pdf_file)
-        pdf_data = gpt_extract_from_pdf(pdf_text, client)
-        st.session_state.pdf_data = pdf_data
-    except Exception as e:
-        st.error(f"Errore estrazione PDF: {e}")
-        st.session_state.pdf_data = {}
-
-    try:
-        image_b64 = image_to_base64(image_file)
-        image_data = gpt_analyze_image(image_b64, client)
-        st.session_state.image_data = image_data
-    except Exception as e:
-        st.error(f"Errore analisi immagine: {e}")
-        st.session_state.image_data = {}
-
-def render_validation_form(data_dict, title="Validazione", columns_per_row=2):
-    """Mostra form con validazione user-friendly e checkbox"""
-    st.subheader(title)
-    validated = {}
-    keys = list(data_dict.keys())
-    for i in range(0, len(keys), columns_per_row):
-        cols = st.columns(columns_per_row)
-        for j, key in enumerate(keys[i:i+columns_per_row]):
-            value = data_dict[key]
-            if isinstance(value, list) or len(str(value)) > 40:
-                val = cols[j].text_area(key, value=", ".join(value) if isinstance(value, list) else str(value))
-            else:
-                val = cols[j].text_input(key, str(value) if value else "")
-            confirm = cols[j].checkbox(f"Conferma {key}", value=True)
-            if confirm:
-                validated[key] = val.split(",") if isinstance(value, list) else val
-    return validated
-
-# ==============================
-# MAIN
-# ==============================
-def main():
+    # ======================================================
+    # MAIN APP
+    # ======================================================
     st.title("🪑 Passaporto Digitale del Mobile")
 
     tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione PDF", "👁️ Validazione Immagine", "📄 PDF & QR"])
@@ -89,13 +89,25 @@ def main():
                     st.warning("Carica sia il PDF che l'immagine.")
                 else:
                     with st.spinner("Analisi in corso..."):
-                        analyze_files(pdf_file, image_file)
+                        try:
+                            pdf_text = services.extract_text_from_pdf(pdf_file)
+                            st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client)
+                        except Exception as e:
+                            st.error(f"Errore estrazione PDF: {e}")
+                            st.session_state.pdf_data = {}
+
+                        try:
+                            image_b64 = services.image_to_base64(image_file)
+                            st.session_state.image_data = services.gpt_analyze_image(image_b64, client)
+                        except Exception as e:
+                            st.error(f"Errore analisi immagine: {e}")
+                            st.session_state.image_data = {}
                     st.success("Analisi completata!")
 
     # --- Tab 2: Validazione PDF ---
     with tabs[1]:
         if st.session_state.pdf_data:
-            st.session_state.validated_pdf = render_validation_form(
+            st.session_state.validated_pdf = services.render_validation_form(
                 st.session_state.pdf_data, title="✔ Dati Certificati (PDF)"
             )
         else:
@@ -104,7 +116,7 @@ def main():
     # --- Tab 3: Validazione Immagine ---
     with tabs[2]:
         if st.session_state.image_data:
-            st.session_state.validated_image = render_validation_form(
+            st.session_state.validated_image = services.render_validation_form(
                 st.session_state.image_data, title="👁️ Dati Visivi Stimati"
             )
         else:
@@ -135,23 +147,20 @@ def main():
                         }
 
                         # Salvataggio JSON
-                        path = save_passport_to_file(passaporto)
+                        path = services.save_passport_to_file(passaporto)
                         st.success(f"Passaporto salvato: {path}")
                         st.json(passaporto)
 
                         # Preview PDF + download
-                        pdf_buf = export_passport_pdf(passaporto)
+                        pdf_buf = services.export_passport_pdf(passaporto)
                         st.download_button("📄 Scarica Passaporto PDF", pdf_buf, "passaporto.pdf", "application/pdf")
 
                         # QR code
                         url = f"https://tuo-app.streamlit.app/passaporto/{mobile_id}"
-                        qr_buf = generate_qr(url)
+                        qr_buf = services.generate_qr(url)
                         st.subheader("🔗 QR Code / NFC")
                         st.image(qr_buf)
                         st.caption("Usa lo stesso URL per NFC")
                         st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
         else:
             st.info("Completa prima la validazione PDF e immagine")
-
-if __name__ == "__main__":
-    main()
