@@ -63,7 +63,7 @@ TESTO:
 {text}
 """
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
@@ -77,7 +77,7 @@ Restituisci SOLO JSON con campi: {', '.join(campi)}
 Usa solo informazioni deducibili visivamente.
 """
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-3.5-turbo",
         messages=[{
             "role": "user",
             "content": [
