@@ -31,7 +31,6 @@ client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 if not st.session_state.logged_in:
     st.title("🔒 Login / Registrazione")
 
-    # input utente deve stare **prima dei bottoni**
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
@@ -42,7 +41,6 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.username = username
                 st.success(f"Benvenuto {username}!")
-                st.experimental_rerun()
             else:
                 st.error("Username o password errati")
     with col2:
@@ -61,7 +59,11 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
-        st.experimental_rerun()
+        st.session_state.pdf_data = None
+        st.session_state.image_data = None
+        st.session_state.validated_pdf = None
+        st.session_state.validated_image = None
+        st.stop()  # ferma l'esecuzione, niente rerun necessario
 
     st.sidebar.info("""
 📞 Numero telefono: +39 0123 456789  
@@ -70,9 +72,10 @@ else:
 
     st.title("🪑 Passaporto Digitale del Prodotto")
 
-    # selezione tipo prodotto
+    # Selezione tipo prodotto
     tipo_prodotto = st.selectbox(
-        "Seleziona il tipo di prodotto", ["mobile", "lampada", "bicicletta"]
+        "Seleziona il tipo di prodotto",
+        ["mobile", "lampada", "bicicletta"]
     )
     st.session_state.tipo_prodotto = tipo_prodotto
 
@@ -85,37 +88,32 @@ else:
 
     # ---------------- Tab 1: Upload & Analisi ----------------
     with tabs[0]:
-        with st.form("upload_form"):
-            pdf_file = st.file_uploader("Carica PDF del prodotto", type=["pdf"])
-            image_file = st.file_uploader("Carica foto del prodotto", type=["jpg", "png", "jpeg"])
-            submitted = st.form_submit_button("🔍 Analizza con AI")
+        pdf_file = st.file_uploader("Carica PDF del prodotto", type=["pdf"])
+        image_file = st.file_uploader("Carica foto del prodotto", type=["jpg", "png", "jpeg"])
+        if st.button("🔍 Analizza con AI"):
+            if not pdf_file or not image_file:
+                st.warning("Carica sia il PDF che l'immagine.")
+            else:
+                with st.spinner("Analisi in corso..."):
+                    try:
+                        pdf_text = services.extract_text_from_pdf(pdf_file)
+                        st.session_state.pdf_data = services.gpt_extract_from_pdf(
+                            pdf_text, client, tipo_prodotto
+                        )
+                    except Exception as e:
+                        st.error(f"Errore estrazione PDF: {e}")
+                        st.session_state.pdf_data = {}
 
-            if submitted:
-                if not pdf_file or not image_file:
-                    st.warning("Carica sia il PDF che l'immagine.")
-                else:
-                    with st.spinner("Analisi in corso..."):
-                        # PDF
-                        try:
-                            pdf_text = services.extract_text_from_pdf(pdf_file)
-                            st.session_state.pdf_data = services.gpt_extract_from_pdf(
-                                pdf_text, client, tipo_prodotto
-                            )
-                        except Exception as e:
-                            st.error(f"Errore estrazione PDF: {e}")
-                            st.session_state.pdf_data = {}
+                    try:
+                        image_b64 = services.image_to_base64(image_file)
+                        st.session_state.image_data = services.gpt_analyze_image(
+                            image_b64, client, tipo_prodotto
+                        )
+                    except Exception as e:
+                        st.error(f"Errore analisi immagine: {e}")
+                        st.session_state.image_data = {}
 
-                        # Immagine
-                        try:
-                            image_b64 = services.image_to_base64(image_file)
-                            st.session_state.image_data = services.gpt_analyze_image(
-                                image_b64, client, tipo_prodotto
-                            )
-                        except Exception as e:
-                            st.error(f"Errore analisi immagine: {e}")
-                            st.session_state.image_data = {}
-
-                    st.success("Analisi completata!")
+                st.success("Analisi completata!")
 
     # ---------------- Tab 2: Validazione PDF ----------------
     with tabs[1]:
@@ -142,47 +140,45 @@ else:
     # ---------------- Tab 4: PDF + QR ----------------
     with tabs[3]:
         if st.session_state.validated_pdf and st.session_state.validated_image:
-            with st.form("create_passport_form"):
-                submitted_pass = st.form_submit_button("💾 Crea Passaporto")
-                if submitted_pass:
-                    required_fields = services.get_required_fields(tipo_prodotto)
-                    missing = [
-                        f for f in required_fields
-                        if not st.session_state.validated_pdf.get(f)
-                    ]
-                    if missing:
-                        st.warning(f"Compila i campi obbligatori: {', '.join(missing)}")
-                    else:
-                        product_id = f"{tipo_prodotto.upper()}-{str(uuid.uuid4())[:8]}"
-                        passport_data = {
-                            "id": product_id,
-                            "tipo_prodotto": tipo_prodotto,
-                            "metadata": {
-                                "creato_il": datetime.now().isoformat(),
-                                "versione": "1.0"
-                            },
-                            "dati_certificati_pdf": st.session_state.validated_pdf,
-                            "dati_visivi_stimati": st.session_state.validated_image
-                        }
+            if st.button("💾 Crea Passaporto"):
+                required_fields = services.get_required_fields(tipo_prodotto)
+                missing = [
+                    f for f in required_fields
+                    if not st.session_state.validated_pdf.get(f)
+                ]
+                if missing:
+                    st.warning(f"Compila i campi obbligatori: {', '.join(missing)}")
+                else:
+                    product_id = f"{tipo_prodotto.upper()}-{str(uuid.uuid4())[:8]}"
+                    passport_data = {
+                        "id": product_id,
+                        "tipo_prodotto": tipo_prodotto,
+                        "metadata": {
+                            "creato_il": datetime.now().isoformat(),
+                            "versione": "1.0"
+                        },
+                        "dati_certificati_pdf": st.session_state.validated_pdf,
+                        "dati_visivi_stimati": st.session_state.validated_image
+                    }
 
-                        # Salvataggio JSON
-                        path = services.save_passport_to_file(passport_data)
-                        st.success(f"Passaporto salvato: {path}")
-                        st.json(passport_data)
+                    # Salvataggio JSON
+                    path = services.save_passport_to_file(passport_data)
+                    st.success(f"Passaporto salvato: {path}")
+                    st.json(passport_data)
 
-                        # PDF download
-                        pdf_buf = services.export_passport_pdf(passport_data)
-                        st.download_button(
-                            "📄 Scarica Passaporto PDF",
-                            pdf_buf,
-                            "passaporto.pdf",
-                            "application/pdf"
-                        )
+                    # PDF download
+                    pdf_buf = services.export_passport_pdf(passport_data)
+                    st.download_button(
+                        "📄 Scarica Passaporto PDF",
+                        pdf_buf,
+                        "passaporto.pdf",
+                        "application/pdf"
+                    )
 
-                        # QR offline
-                        qr_buf = services.generate_qr_from_json(passport_data)
-                        st.subheader("🔗 QR Code / NFC (funziona offline)")
-                        st.image(qr_buf)
-                        st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
+                    # QR offline
+                    qr_buf = services.generate_qr_from_json(passport_data)
+                    st.subheader("🔗 QR Code / NFC (funziona offline)")
+                    st.image(qr_buf)
+                    st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
         else:
             st.info("Completa prima la validazione PDF e immagine")
