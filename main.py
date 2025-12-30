@@ -2,7 +2,7 @@ import streamlit as st
 import uuid
 from datetime import datetime
 from openai import OpenAI
-import openai.error as openai_error
+import openai
 from functions import services
 from auth.user_login import check_login, create_user
 
@@ -96,10 +96,10 @@ else:
                             st.session_state.pdf_data = services.gpt_extract_from_pdf(
                                 pdf_text, client, tipo_prodotto
                             )
-                        except openai_error.RateLimitError as e:
+                        except openai.error.RateLimitError as e:
                             st.session_state.error_log.append(f"Rate limit OpenAI: {e}")
                             st.error(f"Rate limit OpenAI: {e}")
-                        except openai_error.OpenAIError as e:
+                        except openai.error.OpenAIError as e:
                             st.session_state.error_log.append(f"Errore OpenAI: {e}")
                             st.error(f"Errore OpenAI: {e}")
                         except Exception as e:
@@ -113,10 +113,10 @@ else:
                             st.session_state.image_data = services.gpt_analyze_image(
                                 image_b64, client, tipo_prodotto
                             )
-                        except openai_error.RateLimitError as e:
+                        except openai.error.RateLimitError as e:
                             st.session_state.error_log.append(f"Rate limit OpenAI immagine: {e}")
                             st.error(f"Rate limit OpenAI immagine: {e}")
-                        except openai_error.OpenAIError as e:
+                        except openai.error.OpenAIError as e:
                             st.session_state.error_log.append(f"Errore OpenAI immagine: {e}")
                             st.error(f"Errore OpenAI immagine: {e}")
                         except Exception as e:
