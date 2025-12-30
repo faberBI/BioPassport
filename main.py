@@ -1,7 +1,7 @@
 import streamlit as st
 import uuid
 from datetime import datetime
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
 from functions import services
 from auth.user_login import check_login, create_user
 
@@ -95,13 +95,9 @@ else:
                             st.session_state.pdf_data = services.gpt_extract_from_pdf(
                                 pdf_text, client, tipo_prodotto
                             )
-                        except OpenAIError as e:
-                            st.session_state.error_log.append(f"Errore OpenAI PDF: {e}")
-                            st.error(f"Errore OpenAI PDF: {e}")
-                            st.session_state.pdf_data = {}
                         except Exception as e:
-                            st.session_state.error_log.append(f"Errore generico PDF: {e}")
-                            st.error(f"Errore generico PDF: {e}")
+                            st.session_state.error_log.append(f"Errore PDF: {type(e).__name__}: {e}")
+                            st.error(f"Errore PDF: {e}")
                             st.session_state.pdf_data = {}
 
                         # --- Analisi immagine ---
@@ -110,14 +106,11 @@ else:
                             st.session_state.image_data = services.gpt_analyze_image(
                                 image_b64, client, tipo_prodotto
                             )
-                        except OpenAIError as e:
-                            st.session_state.error_log.append(f"Errore OpenAI Immagine: {e}")
-                            st.error(f"Errore OpenAI Immagine: {e}")
-                            st.session_state.image_data = {}
                         except Exception as e:
-                            st.session_state.error_log.append(f"Errore generico Immagine: {e}")
-                            st.error(f"Errore generico Immagine: {e}")
+                            st.session_state.error_log.append(f"Errore immagine: {type(e).__name__}: {e}")
+                            st.error(f"Errore immagine: {e}")
                             st.session_state.image_data = {}
+
                     st.success("Analisi completata!")
 
     # --- Tab 2: Validazione PDF ---
