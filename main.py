@@ -1,7 +1,8 @@
 import streamlit as st
 import uuid
 from datetime import datetime
-from openai import OpenAI, error as openai_error
+from openai import OpenAI
+import openai.error as openai_error
 from functions import services
 from auth.user_login import check_login, create_user
 
