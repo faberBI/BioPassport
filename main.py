@@ -13,7 +13,10 @@ st.set_page_config(page_title="Passaporto Digitale del Prodotto", layout="wide")
 # ======================================================
 # SESSION STATE
 # ======================================================
-for key in ["logged_in","username","pdf_data","image_data","validated_pdf","validated_image","tipo_prodotto"]:
+for key in [
+    "logged_in", "username", "pdf_data", "image_data",
+    "validated_pdf", "validated_image", "tipo_prodotto"
+]:
     if key not in st.session_state:
         st.session_state[key] = False if key == "logged_in" else None
 
@@ -29,7 +32,7 @@ if not st.session_state.logged_in:
     st.title("🔒 Accesso al sistema")
     tab_login, tab_signup = st.tabs(["Accedi", "Crea account"])
 
-    # --- LOGIN ---
+    # --- Tab Login ---
     with tab_login:
         username_login = st.text_input("Username", key="login_user")
         password_login = st.text_input("Password", type="password", key="login_pass")
@@ -42,7 +45,7 @@ if not st.session_state.logged_in:
             else:
                 st.error("Username o password errati")
 
-    # --- CREAZIONE ACCOUNT ---
+    # --- Tab Registrazione ---
     with tab_signup:
         username_signup = st.text_input("Nuovo Username", key="signup_user")
         password_signup = st.text_input("Nuova Password", type="password", key="signup_pass")
@@ -62,29 +65,51 @@ else:
         st.session_state.username = ""
         st.experimental_rerun()
 
-    st.sidebar.info("📞 Numero telefono: +39 0123 456789\n✉️ Email aziendale: info@azienda.it")
+    st.sidebar.info("""
+📞 Numero telefono: +39 0123 456789  
+✉️ Email aziendale: info@azienda.it
+""")
 
     st.title("🪑 Passaporto Digitale del Prodotto")
-    tipo_prodotto = st.selectbox("Seleziona il tipo di prodotto", ["mobile","lampada","bicicletta"])
+
+    # Scelta tipo prodotto
+    tipo_prodotto = st.selectbox("Seleziona il tipo di prodotto", ["mobile", "lampada", "bicicletta"])
     st.session_state.tipo_prodotto = tipo_prodotto
 
-    tabs = st.tabs(["📤 Upload & Analisi","📝 Validazione PDF","👁️ Validazione Immagine","📄 PDF & QR"])
+    tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione PDF", "👁️ Validazione Immagine", "📄 PDF & QR"])
 
-    # --- Upload & Analisi ---
+    # --- Tab 1: Upload & Analisi ---
     with tabs[0]:
         with st.form("upload_form"):
-            pdf_file = st.file_uploader("Carica PDF", type=["pdf"])
-            image_file = st.file_uploader("Carica immagine", type=["jpg","png","jpeg"])
+            pdf_file = st.file_uploader("Carica PDF del prodotto", type=["pdf"])
+            image_file = st.file_uploader("Carica foto del prodotto", type=["jpg", "png", "jpeg"])
             submitted = st.form_submit_button("🔍 Analizza con AI")
+
             if submitted:
                 if not pdf_file or not image_file:
-                    st.warning("Carica sia PDF che immagine")
+                    st.warning("Carica sia il PDF che l'immagine.")
                 else:
-                    st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_file, client, tipo_prodotto)
-                    st.session_state.image_data = services.gpt_analyze_image(image_file, client, tipo_prodotto)
+                    with st.spinner("Analisi in corso..."):
+                        try:
+                            pdf_text = services.extract_text_from_pdf(pdf_file)
+                            st.session_state.pdf_data = services.gpt_extract_from_pdf(
+                                pdf_text, client, tipo_prodotto
+                            )
+                        except Exception as e:
+                            st.error(f"Errore estrazione PDF: {e}")
+                            st.session_state.pdf_data = {}
+
+                        try:
+                            image_b64 = services.image_to_base64(image_file)
+                            st.session_state.image_data = services.gpt_analyze_image(
+                                image_b64, client, tipo_prodotto
+                            )
+                        except Exception as e:
+                            st.error(f"Errore analisi immagine: {e}")
+                            st.session_state.image_data = {}
                     st.success("Analisi completata!")
 
-    # --- Validazione PDF ---
+    # --- Tab 2: Validazione PDF ---
     with tabs[1]:
         if st.session_state.pdf_data:
             st.session_state.validated_pdf = services.render_validation_form(
@@ -95,7 +120,7 @@ else:
         else:
             st.info("Analizza prima il PDF nella tab Upload & Analisi")
 
-    # --- Validazione Immagine ---
+    # --- Tab 3: Validazione Immagine ---
     with tabs[2]:
         if st.session_state.image_data:
             st.session_state.validated_image = services.render_validation_form(
@@ -106,25 +131,43 @@ else:
         else:
             st.info("Analizza prima l'immagine nella tab Upload & Analisi")
 
-    # --- PDF + QR Download ---
+    # --- Tab 4: PDF + QR Download ---
     with tabs[3]:
         if st.session_state.validated_pdf and st.session_state.validated_image:
-            if st.button("💾 Crea Passaporto"):
-                product_id = f"{tipo_prodotto.upper()}-{str(uuid.uuid4())[:8]}"
-                passport_data = {
-                    "id": product_id,
-                    "tipo_prodotto": tipo_prodotto,
-                    "metadata": {"creato_il": datetime.now().isoformat(), "versione":"1.0"},
-                    "dati_certificati_pdf": st.session_state.validated_pdf,
-                    "dati_visivi_stimati": st.session_state.validated_image
-                }
-                path = services.save_passport_to_file(passport_data)
-                st.success(f"Passaporto salvato: {path}")
-                st.json(passport_data)
-                pdf_buf = services.export_passport_pdf(passport_data)
-                st.download_button("📄 Scarica PDF", pdf_buf, "passaporto.pdf", "application/pdf")
-                qr_buf = services.generate_qr_from_json(passport_data)
-                st.image(qr_buf)
-                st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
+            with st.form("create_passport_form"):
+                submitted_pass = st.form_submit_button("💾 Crea Passaporto")
+
+                if submitted_pass:
+                    required_fields = services.get_required_fields(tipo_prodotto)
+                    missing = [f for f in required_fields if not st.session_state.validated_pdf.get(f)]
+                    if missing:
+                        st.warning(f"Compila i campi obbligatori: {', '.join(missing)}")
+                    else:
+                        product_id = f"{tipo_prodotto.upper()}-{str(uuid.uuid4())[:8]}"
+                        passport_data = {
+                            "id": product_id,
+                            "tipo_prodotto": tipo_prodotto,
+                            "metadata": {
+                                "creato_il": datetime.now().isoformat(),
+                                "versione": "1.0"
+                            },
+                            "dati_certificati_pdf": st.session_state.validated_pdf,
+                            "dati_visivi_stimati": st.session_state.validated_image
+                        }
+
+                        # Salvataggio JSON
+                        path = services.save_passport_to_file(passport_data)
+                        st.success(f"Passaporto salvato: {path}")
+                        st.json(passport_data)
+
+                        # PDF download
+                        pdf_buf = services.export_passport_pdf(passport_data)
+                        st.download_button("📄 Scarica Passaporto PDF", pdf_buf, "passaporto.pdf", "application/pdf")
+
+                        # QR offline
+                        qr_buf = services.generate_qr_from_json(passport_data)
+                        st.subheader("🔗 QR Code / NFC (funziona offline)")
+                        st.image(qr_buf)
+                        st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
         else:
             st.info("Completa prima la validazione PDF e immagine")
