@@ -111,3 +111,16 @@ def export_passport_pdf(passaporto: dict) -> BytesIO:
     c.save()
     buffer.seek(0)
     return buffer
+
+def render_validation_form(data: dict, title="Validazione", tipo_prodotto="mobile"):
+    st.subheader(title)
+    validated_data = {}
+    for key, value in data.items():
+        # crea un input per ogni campo
+        if isinstance(value, str):
+            validated_data[key] = st.text_input(key, value)
+        elif isinstance(value, list):
+            validated_data[key] = st.text_area(key, ", ".join(value))
+        else:
+            validated_data[key] = st.text_input(key, str(value))
+    return validated_data
