@@ -51,6 +51,9 @@ def image_to_base64(image_file) -> str:
 # GPT
 # ======================================================
 def gpt_extract_from_pdf(text: str, client: OpenAI, tipo_prodotto="mobile") -> dict:
+    """
+    Estrae informazioni strutturate da un PDF usando GPT.
+    """
     campi = PRODUCT_FIELDS.get(tipo_prodotto, {}).get("pdf", [])
     prompt = f"""
 Estrai informazioni tecniche di un {tipo_prodotto} dal testo seguente.
@@ -63,13 +66,17 @@ TESTO:
 {text}
 """
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-5-mini",  # modello aggiornato
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
     return json.loads(response.choices[0].message.content)
 
+
 def gpt_analyze_image(image_b64: str, client: OpenAI, tipo_prodotto="mobile") -> dict:
+    """
+    Analizza un'immagine e restituisce informazioni strutturate in JSON.
+    """
     campi = PRODUCT_FIELDS.get(tipo_prodotto, {}).get("image", [])
     prompt = f"""
 Analizza l'immagine di un {tipo_prodotto}.
@@ -77,7 +84,7 @@ Restituisci SOLO JSON con campi: {', '.join(campi)}
 Usa solo informazioni deducibili visivamente.
 """
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-5-mini",  # modello aggiornato
         messages=[{
             "role": "user",
             "content": [
@@ -88,6 +95,8 @@ Usa solo informazioni deducibili visivamente.
         temperature=0
     )
     return json.loads(response.choices[0].message.content)
+
+
 
 # ======================================================
 # STORAGE
