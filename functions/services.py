@@ -4,6 +4,7 @@ import base64
 import qrcode
 import os
 from io import BytesIO
+from openai import OpenAI
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
@@ -22,7 +23,7 @@ PRODUCT_FIELDS = {
         "image": ["colore","stile","forma"]
     },
     "bicicletta": {
-        "pdf": ["nome_prodotto","produttore","modello","anno_produzione","tipo_freni", "tipo_telaio", "tipo_ruote", "tipo_cambio"],
+        "pdf": ["nome_prodotto","produttore","modello","anno_produzione","tipo_freni", "tipo_telaio", "tipo_ruote", "tipo_cambio" ],
         "image": ["colore_telaio","tipo_sella","condizioni"]
     }
 }
@@ -47,18 +48,46 @@ def image_to_base64(image_file) -> str:
     return base64.b64encode(image_file.getvalue()).decode("utf-8")
 
 # ======================================================
-# GPT placeholder
+# GPT
 # ======================================================
-def gpt_extract_from_pdf(text: str, client, tipo_prodotto="mobile") -> dict:
-    # Qui puoi inserire GPT-3.5 turbo se vuoi
+def gpt_extract_from_pdf(text: str, client: OpenAI, tipo_prodotto="mobile") -> dict:
     campi = PRODUCT_FIELDS.get(tipo_prodotto, {}).get("pdf", [])
-    # Placeholder vuoto
-    return {k: "esempio" for k in campi}
+    prompt = f"""
+Estrai informazioni tecniche di un {tipo_prodotto} dal testo seguente.
+Se un dato NON è presente usa null.
+Non inventare.
 
-def gpt_analyze_image(image_b64: str, client=None, tipo_prodotto="mobile") -> dict:
+Restituisci SOLO JSON con campi: {', '.join(campi)}
+
+TESTO:
+{text}
+"""
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+    return json.loads(response.choices[0].message.content)
+
+def gpt_analyze_image(image_b64: str, client: OpenAI, tipo_prodotto="mobile") -> dict:
     campi = PRODUCT_FIELDS.get(tipo_prodotto, {}).get("image", [])
-    # placeholder vuoto
-    return {k: None for k in campi}
+    prompt = f"""
+Analizza l'immagine di un {tipo_prodotto}.
+Restituisci SOLO JSON con campi: {', '.join(campi)}
+Usa solo informazioni deducibili visivamente.
+"""
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_b64}"}
+            ]
+        }],
+        temperature=0
+    )
+    return json.loads(response.choices[0].message.content)
 
 # ======================================================
 # STORAGE
@@ -112,15 +141,21 @@ def export_passport_pdf(passaporto: dict) -> BytesIO:
     buffer.seek(0)
     return buffer
 
-def render_validation_form(data: dict, title="Validazione", tipo_prodotto="mobile"):
+# ======================================================
+# RENDER VALIDATION FORM
+# ======================================================
+def render_validation_form(data: dict, title="Validazione", tipo_prodotto="mobile", columns_per_row=1):
     st.subheader(title)
     validated_data = {}
+    cols = st.columns(columns_per_row)
+    i = 0
     for key, value in data.items():
-        # crea un input per ogni campo
+        col = cols[i % columns_per_row]
         if isinstance(value, str):
-            validated_data[key] = st.text_input(key, value)
+            validated_data[key] = col.text_input(key, value)
         elif isinstance(value, list):
-            validated_data[key] = st.text_area(key, ", ".join(value))
+            validated_data[key] = col.text_area(key, ", ".join(value))
         else:
-            validated_data[key] = st.text_input(key, str(value))
+            validated_data[key] = col.text_input(key, str(value))
+        i += 1
     return validated_data
