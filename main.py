@@ -8,14 +8,23 @@ from auth.user_login import check_login, create_user
 # ======================================================
 # CONFIG
 # ======================================================
-st.set_page_config(page_title="Passaporto Digitale del Prodotto", layout="wide")
+st.set_page_config(
+    page_title="Digital Product Passport (EU)",
+    layout="wide"
+)
 
 # ======================================================
 # SESSION STATE
 # ======================================================
 for key in [
-    "logged_in", "username", "pdf_data", "image_data",
-    "validated_pdf", "validated_image", "tipo_prodotto", "error_log"
+    "logged_in",
+    "username",
+    "pdf_data",
+    "image_data",
+    "validated_pdf",
+    "validated_image",
+    "tipo_prodotto",
+    "error_log"
 ]:
     if key not in st.session_state:
         st.session_state[key] = False if key == "logged_in" else None
@@ -30,28 +39,28 @@ client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 # ======================================================
 if not st.session_state.logged_in:
     st.title("🔒 Accesso al sistema")
+
     tab_login, tab_signup = st.tabs(["Accedi", "Crea account"])
 
-    # --- Tab Login ---
     with tab_login:
         username_login = st.text_input("Username", key="login_user")
         password_login = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Accedi", key="btn_login"):
+
+        if st.button("Accedi"):
             if check_login(username_login, password_login):
                 st.session_state.logged_in = True
                 st.session_state.username = username_login
-                st.success(f"Benvenuto {username_login}!")
                 st.rerun()
             else:
                 st.error("Username o password errati")
 
-    # --- Tab Registrazione ---
     with tab_signup:
         username_signup = st.text_input("Nuovo Username", key="signup_user")
         password_signup = st.text_input("Nuova Password", type="password", key="signup_pass")
-        if st.button("Crea account", key="btn_signup"):
+
+        if st.button("Crea account"):
             if create_user(username_signup, password_signup):
-                st.success("Account creato con successo! Ora puoi accedere nella tab 'Accedi'.")
+                st.success("Account creato. Ora puoi accedere.")
             else:
                 st.error("Username già esistente")
 
@@ -59,123 +68,151 @@ if not st.session_state.logged_in:
 # MAIN APP
 # ======================================================
 else:
+    # ---------------- Sidebar ----------------
     st.sidebar.success(f"Connesso come: {st.session_state.username}")
+
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.rerun()
 
-    st.sidebar.info("""
-📞 Numero telefono: +39 0123 456789  
-✉️ Email aziendale: info@azienda.it
-""")
+    st.sidebar.info(
+        "📞 +39 0123 456789\n\n"
+        "✉️ info@azienda.it"
+    )
 
-    st.title("🪑 Passaporto Digitale del Prodotto")
-    tipo_prodotto = st.selectbox("Seleziona il tipo di prodotto", ["mobile", "lampada", "bicicletta"])
+    # ---------------- Header ----------------
+    st.title("🪑 Digital Product Passport (EU)")
+
+    tipo_prodotto = st.selectbox(
+        "Seleziona il tipo di prodotto",
+        ["mobile", "lampada", "bicicletta"]
+    )
     st.session_state.tipo_prodotto = tipo_prodotto
 
-    tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione PDF", "👁️ Validazione Immagine", "📄 PDF & QR"])
+    tabs = st.tabs([
+        "📤 Upload & Analisi",
+        "📝 Validazione Dati (PDF)",
+        "👁️ Validazione Dati (Immagine)",
+        "🔗 Digital Product Passport"
+    ])
 
-    # --- Tab 1: Upload & Analisi ---
+    # ======================================================
+    # TAB 1 — Upload & Analisi
+    # ======================================================
     with tabs[0]:
         with st.form("upload_form"):
-            pdf_file = st.file_uploader("Carica PDF del prodotto", type=["pdf"])
-            image_file = st.file_uploader("Carica foto del prodotto", type=["jpg", "png", "jpeg"])
-            submitted = st.form_submit_button("🔍 Analizza con AI")
+            pdf_file = st.file_uploader(
+                "Carica PDF del prodotto",
+                type=["pdf"]
+            )
+            image_file = st.file_uploader(
+                "Carica immagine del prodotto",
+                type=["jpg", "jpeg", "png"]
+            )
+
+            submitted = st.form_submit_button("🔍 Analizza")
 
             if submitted:
                 st.session_state.error_log = []
+
                 if not pdf_file or not image_file:
                     st.warning("Carica sia il PDF che l'immagine.")
                 else:
-                    with st.spinner("Analisi in corso..."):
-                        # --- Estrazione PDF ---
+                    with st.spinner("Analisi in corso…"):
                         try:
                             pdf_text = services.extract_text_from_pdf(pdf_file)
                             st.session_state.pdf_data = services.gpt_extract_from_pdf(
                                 pdf_text, client, tipo_prodotto
                             )
                         except Exception as e:
-                            st.session_state.error_log.append(f"Errore PDF: {type(e).__name__}: {e}")
-                            st.error(f"Errore PDF: {e}")
                             st.session_state.pdf_data = {}
+                            st.session_state.error_log.append(str(e))
 
-                        # --- Analisi immagine ---
                         try:
                             image_b64 = services.image_to_base64(image_file)
                             st.session_state.image_data = services.gpt_analyze_image(
                                 image_b64, client, tipo_prodotto
                             )
                         except Exception as e:
-                            st.session_state.error_log.append(f"Errore immagine: {type(e).__name__}: {e}")
-                            st.error(f"Errore immagine: {e}")
                             st.session_state.image_data = {}
+                            st.session_state.error_log.append(str(e))
 
-                    st.success("Analisi completata!")
+                    st.success("Analisi completata")
 
-    # --- Tab 2: Validazione PDF ---
+    # ======================================================
+    # TAB 2 — Validazione PDF
+    # ======================================================
     with tabs[1]:
         if st.session_state.pdf_data:
             st.session_state.validated_pdf = services.render_validation_form(
                 st.session_state.pdf_data,
-                title=f"✔ Dati Certificati (PDF) - {tipo_prodotto}"
+                title="✔ Dati certificati (PDF)"
             )
         else:
-            st.info("Analizza prima il PDF nella tab Upload & Analisi")
+            st.info("Completa prima l’analisi del PDF")
 
-    # --- Tab 3: Validazione Immagine ---
+    # ======================================================
+    # TAB 3 — Validazione Immagine
+    # ======================================================
     with tabs[2]:
         if st.session_state.image_data:
             st.session_state.validated_image = services.render_validation_form(
                 st.session_state.image_data,
-                title=f"👁️ Dati Visivi Stimati - {tipo_prodotto}"
+                title="👁️ Dati stimati da immagine"
             )
         else:
-            st.info("Analizza prima l'immagine nella tab Upload & Analisi")
+            st.info("Completa prima l’analisi dell’immagine")
 
-    # --- Tab 4: PDF + QR Download ---
+    # ======================================================
+    # TAB 4 — DIGITAL PRODUCT PASSPORT (EU)
+    # ======================================================
     with tabs[3]:
         if st.session_state.validated_pdf and st.session_state.validated_image:
             with st.form("create_passport_form"):
-                submitted_pass = st.form_submit_button("💾 Crea Passaporto")
+                submitted_pass = st.form_submit_button("🚀 Pubblica Digital Product Passport")
+
                 if submitted_pass:
-                    required_fields = services.get_required_fields(tipo_prodotto)
-                    missing = [f for f in required_fields if not st.session_state.validated_pdf.get(f)]
+                    required = services.get_required_fields(tipo_prodotto)
+                    missing = [
+                        f for f in required
+                        if not st.session_state.validated_pdf.get(f)
+                    ]
+
                     if missing:
-                        st.warning(f"Compila i campi obbligatori: {', '.join(missing)}")
+                        st.warning(
+                            f"Campi obbligatori mancanti: {', '.join(missing)}"
+                        )
                     else:
-                        product_id = f"{tipo_prodotto.upper()}-{str(uuid.uuid4())[:8]}"
+                        product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+
                         passport_data = {
                             "id": product_id,
-                            "tipo_prodotto": tipo_prodotto,
-                            "metadata": {
-                                "creato_il": datetime.now().isoformat(),
-                                "versione": "1.0"
-                            },
-                            "dati_certificati_pdf": st.session_state.validated_pdf,
-                            "dati_visivi_stimati": st.session_state.validated_image
+                            "product_type": tipo_prodotto,
+                            "created_at": datetime.utcnow().isoformat(),
+                            "data_source_pdf": st.session_state.validated_pdf,
+                            "data_source_image": st.session_state.validated_image,
+                            "dpp_version": "EU-DPP-1.0"
                         }
 
-                        # Salvataggio JSON
-                        path = services.save_passport_to_file(passport_data)
-                        st.success(f"Passaporto salvato: {path}")
-                        st.json(passport_data)
+                        services.save_passport_to_file(passport_data)
 
-                        # PDF download
-                        pdf_buf = services.export_passport_pdf(passport_data)
-                        st.download_button("📄 Scarica Passaporto PDF", pdf_buf, "passaporto.pdf", "application/pdf")
-
-                        # QR offline
                         public_url = services.build_passport_url(product_id)
                         qr_buf = services.generate_qr_from_url(public_url)
 
-                        st.subheader("🔗 QR Code pubblico – Digital Product Passport")
+                        st.success("Digital Product Passport pubblicato")
+
+                        st.subheader("🔗 Accesso pubblico")
                         st.image(qr_buf)
-                        st.write(public_url)
+                        st.code(public_url)
 
+        else:
+            st.info("Completa prima la validazione dei dati")
 
-    # --- Mostra log errori se ci sono ---
+    # ======================================================
+    # ERROR LOG
+    # ======================================================
     if st.session_state.error_log:
-        st.subheader("🛑 Log Errori")
+        st.subheader("🛑 Errori")
         for err in st.session_state.error_log:
             st.text(err)
