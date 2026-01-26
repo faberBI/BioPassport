@@ -181,3 +181,7 @@ def load_passport_from_file(passport_id: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def build_passport_url(product_id: str):
+    base_url = "https://TUOAPP.streamlit.app/passport"
+    return f"{base_url}?id={product_id}"
+
