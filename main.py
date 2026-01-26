@@ -166,10 +166,13 @@ else:
                         st.download_button("📄 Scarica Passaporto PDF", pdf_buf, "passaporto.pdf", "application/pdf")
 
                         # QR offline
-                        qr_buf = services.generate_qr_from_json(passport_data)
-                        st.subheader("🔗 QR Code / NFC (funziona offline)")
+                        public_url = services.build_passport_url(product_id)
+                        qr_buf = services.generate_qr_from_url(public_url)
+
+                        st.subheader("🔗 QR Code pubblico – Digital Product Passport")
                         st.image(qr_buf)
-                        st.download_button("⬇️ Scarica QR", qr_buf, "qrcode.png", "image/png")
+                        st.write(public_url)
+
 
     # --- Mostra log errori se ci sono ---
     if st.session_state.error_log:
