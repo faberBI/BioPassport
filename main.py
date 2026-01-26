@@ -41,7 +41,7 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.username = username_login
                 st.success(f"Benvenuto {username_login}!")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Username o password errati")
 
@@ -63,7 +63,7 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
-        st.experimental_rerun()
+        st.rerun()
 
     st.sidebar.info("""
 📞 Numero telefono: +39 0123 456789  
