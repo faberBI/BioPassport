@@ -168,3 +168,16 @@ def render_validation_form(data: dict, title="Validazione", tipo_prodotto="mobil
             validated_data[key] = col.text_input(key, str(value))
         i += 1
     return validated_data
+
+import json
+import os
+
+PASSPORT_DIR = "passports"
+
+def load_passport_from_file(passport_id: str):
+    path = os.path.join(PASSPORT_DIR, f"{passport_id}.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
