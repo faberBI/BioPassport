@@ -2,22 +2,16 @@ import streamlit as st
 from functions import services
 
 st.set_page_config(
-    page_title="Digital Product Passport",
+    page_title="EU Digital Product Passport",
     layout="centered"
 )
 
-# =========================
-# READ QUERY PARAM
-# =========================
 passport_id = st.query_params.get("id")
 
 if not passport_id:
     st.error("Digital Product Passport not found")
     st.stop()
 
-# =========================
-# LOAD PASSPORT JSON
-# =========================
 passport = services.load_passport_from_file(passport_id)
 
 if not passport:
@@ -25,10 +19,10 @@ if not passport:
     st.stop()
 
 # =========================
-# RENDER DPP (EU-STYLE)
+# HEADER
 # =========================
 st.title("🇪🇺 Digital Product Passport")
-st.caption("EU Ecodesign / ESPR Regulation")
+st.caption("Regulation (EU) – Ecodesign for Sustainable Products (ESPR)")
 
 st.markdown(f"""
 **Product ID:** `{passport['id']}`  
@@ -39,16 +33,52 @@ st.markdown(f"""
 
 st.divider()
 
-st.subheader("📄 Certified Product Data")
+# =========================
+# 1. PRODUCT IDENTITY
+# =========================
+st.subheader("1️⃣ Product Identity")
 for k, v in passport["dati_certificati_pdf"].items():
     st.write(f"**{k}**: {v}")
 
 st.divider()
 
-st.subheader("👁️ Visual / Estimated Data")
+# =========================
+# 2. VISUAL / ESTIMATED DATA
+# =========================
+st.subheader("2️⃣ Visual & Estimated Information")
+st.caption("Automatically estimated from product image")
+
 for k, v in passport["dati_visivi_stimati"].items():
     st.write(f"**{k}**: {v}")
 
 st.divider()
 
-st.caption("Public, read-only Digital Product Passport")
+# =========================
+# 3. SUSTAINABILITY (PLACEHOLDER)
+# =========================
+st.subheader("3️⃣ Sustainability & Circularity")
+st.write("Repairability: N/A")
+st.write("Recyclability: N/A")
+st.write("Recycled content: N/A")
+
+st.divider()
+
+# =========================
+# 4. END OF LIFE
+# =========================
+st.subheader("4️⃣ End of Life Information")
+st.write("Disposal instructions: N/A")
+st.write("Recycling streams: N/A")
+
+st.divider()
+
+# =========================
+# METADATA
+# =========================
+st.subheader("📑 Metadata & Compliance")
+st.json(passport["metadata"])
+
+st.caption(
+    "This Digital Product Passport is provided for transparency, traceability "
+    "and compliance with EU sustainability regulations. Public read-only access."
+)
