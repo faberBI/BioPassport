@@ -70,7 +70,6 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
-
     st.stop()
 
 # ======================================================
@@ -120,22 +119,30 @@ with tabs[0]:
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
-                        services.image_to_base64(image_file), client, tipo_prodotto
+                        image_file, client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati estratti dal PDF e dall'immagine sono stati popolati automaticamente nei form di validazione.")
+                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
 # ======================================================
+OBBLIGATORI_PDF = [
+    "nome_prodotto","produttore","materiali","dimensioni","manufacturer_name",
+    "manufacturer_address","gtin","serial_number"
+]
+
 with tabs[1]:
     if st.session_state.pdf_data:
-        # Popola automaticamente la validazione con i dati estratti
-        st.session_state.validated_pdf = services.render_validation_form(
-            st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)"
-        )
+        validated_pdf = {}
+        st.subheader("✔ Dati certificati (PDF)")
+        for k, v in st.session_state.pdf_data.items():
+            label = k
+            if k in OBBLIGATORI_PDF:
+                label += " *"
+            validated_pdf[k] = st.text_input(label, "" if v is None else str(v))
+        st.session_state.validated_pdf = validated_pdf
     else:
         st.info("Esegui prima l’analisi")
 
@@ -144,11 +151,11 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.image_data:
-        # Popola automaticamente la validazione con i dati stimati
-        st.session_state.validated_image = services.render_validation_form(
-            st.session_state.image_data,
-            title="👁️ Dati stimati da immagine"
-        )
+        validated_image = {}
+        st.subheader("👁️ Dati stimati da immagine")
+        for k, v in st.session_state.image_data.items():
+            validated_image[k] = st.text_input(k, "" if v is None else str(v))
+        st.session_state.validated_image = validated_image
 
         # Mostra immagine caricata
         if st.session_state.uploaded_image_file:
@@ -168,35 +175,43 @@ with tabs[3]:
 
         if st.button("🚀 Pubblica Digital Product Passport"):
 
-            product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+            # Controlla campi obbligatori
+            missing_fields = [
+                k for k in OBBLIGATORI_PDF
+                if not st.session_state.validated_pdf.get(k)
+            ]
+            if missing_fields:
+                st.error(f"Completa i campi obbligatori prima di pubblicare: {', '.join(missing_fields)}")
+            else:
+                product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-            passport_data = {
-                "id": product_id,
-                "product_type": tipo_prodotto,
-                "metadata": {
-                    "created_at": datetime.utcnow().isoformat(),
-                    "version": "EU-DPP-1.0"
-                },
-                "data_source_pdf": st.session_state.validated_pdf,
-                "data_source_image": st.session_state.validated_image.copy()
-            }
+                passport_data = {
+                    "id": product_id,
+                    "product_type": tipo_prodotto,
+                    "metadata": {
+                        "created_at": datetime.utcnow().isoformat(),
+                        "version": "EU-DPP-1.0"
+                    },
+                    "data_source_pdf": st.session_state.validated_pdf,
+                    "data_source_image": st.session_state.validated_image.copy()
+                }
 
-            # Salva anche immagine Base64
-            if st.session_state.uploaded_image_file:
-                passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
-                    st.session_state.uploaded_image_file
-                )
+                # Salva anche immagine Base64
+                if st.session_state.uploaded_image_file:
+                    passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
+                        st.session_state.uploaded_image_file
+                    )
 
-            services.save_passport_to_file(passport_data)
+                services.save_passport_to_file(passport_data)
 
-            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
-            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
-            qr_buf = services.generate_qr_from_url(public_url)
+                # URL pubblico
+                public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
+                qr_buf = services.generate_qr_from_url(public_url)
 
-            st.success("Digital Product Passport pubblicato ✅")
-            st.subheader("🔗 Accesso pubblico")
-            st.image(qr_buf)
-            st.code(public_url)
+                st.success("Digital Product Passport pubblicato ✅")
+                st.subheader("🔗 Accesso pubblico")
+                st.image(qr_buf)
+                st.code(public_url)
 
     else:
         st.info("Completa validazione PDF e immagine")
