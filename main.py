@@ -62,7 +62,7 @@ div[data-testid="stAppViewContainer"] > div:first-child {{
 
 <div style="display:flex; align-items:center; margin-bottom:20px;">
     <img src="data:image/jpeg;base64,{logo_base64}" width="100">
-    <h1 style="margin:0; font-family:'Nunito Sans', sans-serif; color:#3a2607;"> Nuvia - Digital Product Passport</h1>
+    <h1 style="margin:0; font-family:'Nunito Sans', sans-serif; color:#3a2607;"></h1>
 </div>
 """, unsafe_allow_html=True)
 
