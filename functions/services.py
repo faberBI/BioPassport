@@ -246,17 +246,17 @@ def image_to_base64(image_file):
     """
     return base64.b64encode(image_file.getvalue()).decode()
 
-def render_validation_form(data, title="", prefix=""):
-    """
-    Crea form Streamlit per validare manualmente i dati estratti.
-    Non salva direttamente in session_state.
-    prefix: stringa opzionale per distinguere chiavi PDF/immagine
-    """
+def render_validation_form(data, title="Validazione", prefix=""):
+    """Crea form Streamlit per validare manualmente i dati estratti."""
     st.subheader(title)
     validated = {}
+
     for k, v in data.items():
-        key = f"{prefix}_{k}" if prefix else k
-        validated[k] = st.text_input(k, "" if v is None else str(v), key=key)
+        form_key = f"{prefix}_{k}" if prefix else k
+        # Popola il form con il valore estratto, oppure vuoto se None
+        validated[k] = st.text_input(k, "" if v is None else str(v), key=form_key)
+
     return validated
+
 
 
