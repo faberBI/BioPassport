@@ -61,7 +61,7 @@ div[data-testid="stAppViewContainer"] > div:first-child {{
 </style>
 
 <div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
-    <img src="data:image/jpeg;base64,{logo_base64}" width="80">
+    <img src="data:image/jpeg;base64,{logo_base64}" width="450">
     <h1 style="margin:0;"></h1>
 </div>
 """, unsafe_allow_html=True)
