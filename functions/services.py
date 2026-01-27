@@ -105,8 +105,8 @@ def image_to_base64(image_file):
 # ======================================================
 import re
 
-def gpt_extract_from_pdf(text, client: OpenAI, tipo):
-    campi = PRODUCT_FIELDS[tipo]["pdf"]
+def gpt_extract_from_pdf(text, client, tipo):
+    campi = services.PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
 Estrai i dati tecnici del prodotto di tipo '{tipo}' dal seguente testo PDF.
 Se un dato non è presente nel PDF, restituisci null.
@@ -124,8 +124,18 @@ TESTO:
 
     resp_text = r.choices[0].message.content.strip()
 
-    # Pulisce solo spazi e newline iniziali/finali
-    resp_text_clean = resp_text.strip()
+    # ======================================================
+    # PULIZIA ROBUSTA DEL JSON
+    # ======================================================
+    # Estrae solo il JSON contenuto tra { ... }
+    match = re.search(r"\{.*\}", resp_text, re.DOTALL)
+    if match:
+        resp_text_clean = match.group(0)
+    else:
+        resp_text_clean = resp_text  # fallback
+
+    # Sostituisce virgolette “tipografiche” con virgolette standard
+    resp_text_clean = resp_text_clean.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
 
     try:
         data_gpt = json.loads(resp_text_clean)
@@ -138,7 +148,9 @@ TESTO:
     data_finale = {}
     for campo in campi:
         # Se il campo esiste nel JSON di GPT lo prendi, altrimenti None
-        data_finale[campo] = data_gpt.get(campo, None)
+        val = data_gpt.get(campo, None)
+        # converti None -> stringa vuota per Streamlit
+        data_finale[campo] = "" if val is None else val
 
     return data_finale
 
