@@ -3,14 +3,75 @@ import uuid
 from datetime import datetime
 from openai import OpenAI
 from functions import services
+from PIL import Image
 
 # ======================================================
-# CONFIG
+# CONFIG STREAMLIT
 # ======================================================
 st.set_page_config(
     page_title="EU Digital Product Passport",
     layout="centered"
 )
+
+# Carica il logo
+logo = Image.open("functions/logo_nuvia.jpeg")
+
+# Mostra logo in alto
+st.image(logo, width=150)
+
+# ======================================================
+# CSS PERSONALIZZATO
+# ======================================================
+st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+/* Font generale */
+body, div, span, input, button {
+    font-family: 'Nunito Sans', sans-serif;
+}
+
+/* Sfondo generale */
+body {
+    background-color: #f5f1ed;
+    color: #3a2607;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #f5f1ed;
+    color: #3a2607;
+}
+
+/* Nascondi header/footer di Streamlit */
+header, footer {
+    visibility: hidden;
+}
+
+/* Pulsanti e accenti */
+.stButton>button {
+    background-color: #25ce6c;
+    color: white;
+    border-radius: 8px;
+    border: none;
+}
+.stSelectbox>div>div>div {
+    border-color: #25ce6c !important;
+}
+
+/* Titoli */
+h1, h2, h3, h4, h5, h6 {
+    color: #3a2607;
+}
+
+/* Icone e colori extra (puoi aggiungere altre classi se serve) */
+.icon-red { color: #f06449; }
+.icon-blue { color: #2b3a67; }
+.icon-dark { color: #0b021f; }
+.icon-purple { color: #6320ee; }
+</style>
+""", unsafe_allow_html=True)
+
 
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
