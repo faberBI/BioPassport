@@ -117,7 +117,7 @@ Esempio output: {{"colore": "bianco", "condizioni": "nuovo"}}
     try:
         # Chiamata all'endpoint chat multimodale
         response = client.chat.completions.create(
-            model="chatgpt-image-latest",   # o "gpt-4o" se vuoi GPT multimodale
+            model="gpt-4o",   # o "gpt-4o" se vuoi GPT multimodale
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             files=[("image", image_file)]   # Passaggio diretto dell'immagine
