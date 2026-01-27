@@ -124,12 +124,8 @@ TESTO:
 
     resp_text = r.choices[0].message.content.strip()
 
-    # Rimuove eventuali caratteri prima/dopo il JSON
-    match = re.search(r"\{.*\}", resp_text, re.DOTALL)
-    if match:
-        resp_text_clean = match.group(0)
-    else:
-        resp_text_clean = resp_text
+    # Pulisce solo spazi e newline iniziali/finali
+    resp_text_clean = resp_text.strip()
 
     try:
         data_gpt = json.loads(resp_text_clean)
@@ -138,10 +134,14 @@ TESTO:
         st.code(resp_text)
         data_gpt = {}
 
-    # Assicura che tutti i campi obbligatori siano presenti
-    data_finale = {campo: data_gpt.get(campo, None) for campo in campi}
+    # Popola tutti i campi definiti in PRODUCT_FIELDS
+    data_finale = {}
+    for campo in campi:
+        # Se il campo esiste nel JSON di GPT lo prendi, altrimenti None
+        data_finale[campo] = data_gpt.get(campo, None)
 
     return data_finale
+
 
 
 
