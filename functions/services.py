@@ -95,6 +95,9 @@ import streamlit as st
 from openai import OpenAI
 
 def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
+    import json
+    import streamlit as st
+
     campi = ["tipologia_prodotto", "colore", "condizioni"]
 
     prompt = f"""
@@ -109,7 +112,7 @@ Se non determinabile, usa null.
 NON scrivere altro testo.
 
 Esempio:
-{{"colore": "bianco", "condizioni": "nuovo"}}
+{{"tipologia prodotto": "mobile", "colore": "bianco", "condizioni": "nuovo"}}
 """
 
     try:
@@ -129,14 +132,22 @@ Esempio:
         )
 
         result_text = response.output_text.strip()
-        data = json.loads(result_text)
+        data_raw = json.loads(result_text)
 
-        # ✅ assicurati che tutti i campi siano stringhe valide per Streamlit
-        for k in campi:
-            if k not in data or data[k] is None:
-                data[k] = "non rilevato"  # o ""
+        # 🔹 mapping GPT → chiavi form
+        mapping = {
+            "tipologia prodotto": "tipologia_prodotto",
+            "colore": "colore",
+            "condizioni": "condizioni"
+        }
+
+        data = {}
+        for gpt_key, form_key in mapping.items():
+            val = data_raw.get(gpt_key, None)
+            if val is None or str(val).strip().lower() in ["null", ""]:
+                data[form_key] = "non rilevato"
             else:
-                data[k] = str(data[k]).strip()
+                data[form_key] = str(val).strip()
 
         return data
 
@@ -148,6 +159,7 @@ Esempio:
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         st.stop()
+
 
 
 # ======================================================
