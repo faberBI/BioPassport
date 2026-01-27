@@ -70,12 +70,12 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
+
     st.stop()
 
 # ======================================================
 # BACKOFFICE
 # ======================================================
-# Inizializza session state
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploaded_image_file"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -113,13 +113,15 @@ with tabs[0]:
                 with st.spinner("Analisi GPT in corso…"):
                     # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
-                    raw_pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
-                    st.session_state.pdf_data = services.map_gpt_fields(raw_pdf_data, tipo_prodotto, "pdf")
+                    st.session_state.pdf_data = services.gpt_extract_from_pdf(
+                        pdf_text, client, tipo_prodotto
+                    )
 
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
-                    raw_image_data = services.gpt_analyze_image(image_file, client, tipo_prodotto)
-                    st.session_state.image_data = services.map_gpt_fields(raw_image_data, tipo_prodotto, "image")
+                    st.session_state.image_data = services.gpt_analyze_image(
+                        image_file, client, tipo_prodotto
+                    )
 
                 st.success("Analisi completata")
                 st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
@@ -131,11 +133,10 @@ with tabs[1]:
     if st.session_state.pdf_data:
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)",
-            prefix="pdf"
+            title="✔ Dati certificati (PDF)"
         )
     else:
-        st.info("Esegui prima l’analisi del PDF")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -144,8 +145,7 @@ with tabs[2]:
     if st.session_state.image_data:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
-            title="👁️ Dati stimati da immagine",
-            prefix="image"
+            title="👁️ Dati stimati da immagine"
         )
 
         # Mostra immagine caricata
@@ -155,16 +155,20 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
+
     else:
-        st.info("Esegui prima l’analisi dell’immagine")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
 # ======================================================
 with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
         if st.button("🚀 Pubblica Digital Product Passport"):
+
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+
             passport_data = {
                 "id": product_id,
                 "product_type": tipo_prodotto,
@@ -184,7 +188,7 @@ with tabs[3]:
 
             services.save_passport_to_file(passport_data)
 
-            # URL pubblico
+            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
@@ -192,5 +196,6 @@ with tabs[3]:
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
+
     else:
-        st.info("Completa validazione PDF e immagine prima della pubblicazione")
+        st.info("Completa validazione PDF e immagine")
