@@ -41,8 +41,18 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def image_to_base64(image_file):
-    """Converte immagine in base64 per invio a GPT."""
-    return base64.b64encode(image_file.getvalue()).decode()
+    """Converte un file o un PIL Image in base64 per invio a GPT o salvataggio."""
+    import io
+    import base64
+
+    if hasattr(image_file, "getvalue"):  # file-like object
+        return base64.b64encode(image_file.getvalue()).decode()
+    else:  # probabilmente un PIL.Image
+        buf = io.BytesIO()
+        image_file.save(buf, format="JPEG")
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode()
+
 
 # ======================================================
 # GPT EXTRACTION
