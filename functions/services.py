@@ -11,7 +11,6 @@ import streamlit as st
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
-
 PRODUCT_FIELDS = {
     "mobile": {
         "pdf": ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione"],
@@ -183,3 +182,15 @@ def generate_qr_from_url(url):
     img.save(buf)
     buf.seek(0)
     return buf
+
+# ======================================================
+# CONVERTER
+# ======================================================
+
+def image_to_base64(image_file):
+    """
+    Converte un file immagine caricato da Streamlit in stringa Base64.
+    image_file: st.file_uploader (UploadedFile)
+    """
+    return base64.b64encode(image_file.getvalue()).decode()
+
