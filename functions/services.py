@@ -193,9 +193,29 @@ def generate_qr_from_url(url):
     buf.seek(0)
     return buf
 
-def upload_image_to_openai(image_file, client: OpenAI):
+def upload_image_to_openai(image_file, client):
+    resized = resize_image_for_vision(image_file)
+
     uploaded = client.files.create(
-        file=image_file,
+        file=resized,
         purpose="vision"
     )
     return uploaded.id
+
+
+from PIL import Image
+from io import BytesIO
+
+def resize_image_for_vision(image_file, max_size=512):
+    img = Image.open(image_file).convert("RGB")
+    img.thumbnail((max_size, max_size))
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+
+    # 🔥 QUESTA RIGA È LA CHIAVE
+    buf.name = "image.jpg"
+
+    return buf
+
