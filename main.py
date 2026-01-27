@@ -15,6 +15,12 @@ st.set_page_config(
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
+# CAMPi OBBLIGATORI PER VALIDAZIONE
+# ======================================================
+OBBLIGATORI_PDF = ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione"]
+OBBLIGATORI_IMAGE = ["colore","condizioni"]
+
+# ======================================================
 # ROUTING (QR → PAGINA PUBBLICA)
 # ======================================================
 passport_id = st.query_params.get("passport_id")
@@ -70,6 +76,7 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
+
     st.stop()
 
 # ======================================================
@@ -123,25 +130,22 @@ with tabs[0]:
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
+                st.info("I dati sono stati estratti e saranno precompilati nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
 # ======================================================
-OBBLIGATORI_PDF = [
-    "nome_prodotto","produttore","materiali","dimensioni","manufacturer_name",
-    "manufacturer_address","gtin","serial_number"
-]
-
 with tabs[1]:
     if st.session_state.pdf_data:
         validated_pdf = {}
         st.subheader("✔ Dati certificati (PDF)")
         for k, v in st.session_state.pdf_data.items():
+            # Prendi valore già inserito dall'utente se presente
+            default_value = st.session_state.validated_pdf[k] if st.session_state.validated_pdf and k in st.session_state.validated_pdf else v
             label = k
             if k in OBBLIGATORI_PDF:
                 label += " *"
-            validated_pdf[k] = st.text_input(label, "" if v is None else str(v))
+            validated_pdf[k] = st.text_input(label, "" if default_value is None else str(default_value))
         st.session_state.validated_pdf = validated_pdf
     else:
         st.info("Esegui prima l’analisi")
@@ -154,7 +158,8 @@ with tabs[2]:
         validated_image = {}
         st.subheader("👁️ Dati stimati da immagine")
         for k, v in st.session_state.image_data.items():
-            validated_image[k] = st.text_input(k, "" if v is None else str(v))
+            default_value = st.session_state.validated_image[k] if st.session_state.validated_image and k in st.session_state.validated_image else v
+            validated_image[k] = st.text_input(k, "" if default_value is None else str(default_value))
         st.session_state.validated_image = validated_image
 
         # Mostra immagine caricata
@@ -164,6 +169,7 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
+
     else:
         st.info("Esegui prima l’analisi")
 
@@ -175,43 +181,35 @@ with tabs[3]:
 
         if st.button("🚀 Pubblica Digital Product Passport"):
 
-            # Controlla campi obbligatori
-            missing_fields = [
-                k for k in OBBLIGATORI_PDF
-                if not st.session_state.validated_pdf.get(k)
-            ]
-            if missing_fields:
-                st.error(f"Completa i campi obbligatori prima di pubblicare: {', '.join(missing_fields)}")
-            else:
-                product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+            product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-                passport_data = {
-                    "id": product_id,
-                    "product_type": tipo_prodotto,
-                    "metadata": {
-                        "created_at": datetime.utcnow().isoformat(),
-                        "version": "EU-DPP-1.0"
-                    },
-                    "data_source_pdf": st.session_state.validated_pdf,
-                    "data_source_image": st.session_state.validated_image.copy()
-                }
+            passport_data = {
+                "id": product_id,
+                "product_type": tipo_prodotto,
+                "metadata": {
+                    "created_at": datetime.utcnow().isoformat(),
+                    "version": "EU-DPP-1.0"
+                },
+                "data_source_pdf": st.session_state.validated_pdf,
+                "data_source_image": st.session_state.validated_image.copy()
+            }
 
-                # Salva anche immagine Base64
-                if st.session_state.uploaded_image_file:
-                    passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
-                        st.session_state.uploaded_image_file
-                    )
+            # Salva anche immagine Base64
+            if st.session_state.uploaded_image_file:
+                passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
+                    st.session_state.uploaded_image_file
+                )
 
-                services.save_passport_to_file(passport_data)
+            services.save_passport_to_file(passport_data)
 
-                # URL pubblico
-                public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
-                qr_buf = services.generate_qr_from_url(public_url)
+            # URL pubblico
+            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
+            qr_buf = services.generate_qr_from_url(public_url)
 
-                st.success("Digital Product Passport pubblicato ✅")
-                st.subheader("🔗 Accesso pubblico")
-                st.image(qr_buf)
-                st.code(public_url)
+            st.success("Digital Product Passport pubblicato ✅")
+            st.subheader("🔗 Accesso pubblico")
+            st.image(qr_buf)
+            st.code(public_url)
 
     else:
         st.info("Completa validazione PDF e immagine")
