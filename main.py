@@ -49,14 +49,14 @@ if passport_id:
 
     st.subheader("1️⃣ Product Identity (Certified)")
     for k, v in passport["data_source_pdf"].items():
-        st.write(f"**{k.replace('_',' ').capitalize()}**: {v}")
+        st.write(f"**{k}**: {v}")
 
     st.divider()
 
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
         if k != "immagine_base64":
-            st.write(f"**{k.replace('_',' ').capitalize()}**: {v}")
+            st.write(f"**{k}**: {v}")
 
     # Mostra immagine se presente
     if "immagine_base64" in passport["data_source_image"]:
@@ -70,6 +70,7 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
+
     st.stop()
 
 # ======================================================
@@ -97,6 +98,35 @@ tabs = st.tabs([
 ])
 
 # ======================================================
+# Funzione di mappatura automatica dei campi
+# ======================================================
+def map_gpt_fields(pdf_or_image_data, tipo, source="pdf"):
+    """Mappa i campi GPT a quelli previsti dal form, per precompilare i form."""
+    mapped = {}
+    campi = services.PRODUCT_FIELDS[tipo][source]
+    for campo in campi:
+        # Se il JSON GPT ha lo stesso campo, lo usa
+        if campo in pdf_or_image_data:
+            mapped[campo] = pdf_or_image_data.get(campo)
+        else:
+            # Controlla versioni alternative (per esempio nome_produttore -> produttore)
+            alt_map = {
+                "produttore": pdf_or_image_data.get("nome_produttore"),
+                "nome_produttore": pdf_or_image_data.get("produttore"),
+                "indirizzo_produttore": pdf_or_image_data.get("indirizzo_produttore"),
+                "composizione_materiali_dettagliata": pdf_or_image_data.get("materiale_dettagliato"),
+                "impronta_carbonio": pdf_or_image_data.get("carbon_footprint"),
+                "consumo_energia": pdf_or_image_data.get("energy_use"),
+                "documenti_conformita": pdf_or_image_data.get("compliance_documents"),
+                "istruzioni_uso": pdf_or_image_data.get("usage_instructions"),
+                "istruzioni_fine_vita": pdf_or_image_data.get("end_of_life_instructions"),
+                "numero_serie": pdf_or_image_data.get("serial_number"),
+                "gtin": pdf_or_image_data.get("gtin"),
+            }
+            mapped[campo] = alt_map.get(campo, None)
+    return mapped
+
+# ======================================================
 # TAB 1 — UPLOAD & GPT
 # ======================================================
 with tabs[0]:
@@ -112,18 +142,16 @@ with tabs[0]:
                 with st.spinner("Analisi GPT in corso…"):
                     # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
-                    st.session_state.pdf_data = services.gpt_extract_from_pdf(
-                        pdf_text, client, tipo_prodotto
-                    )
+                    raw_pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
+                    st.session_state.pdf_data = map_gpt_fields(raw_pdf_data, tipo_prodotto, "pdf")
 
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
-                    st.session_state.image_data = services.gpt_analyze_image(
-                        image_file, client, tipo_prodotto
-                    )
+                    raw_image_data = services.gpt_analyze_image(image_file, client, tipo_prodotto)
+                    st.session_state.image_data = map_gpt_fields(raw_image_data, tipo_prodotto, "image")
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e saranno precompilati nei form di validazione.")
+                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -132,8 +160,7 @@ with tabs[1]:
     if st.session_state.pdf_data:
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)",
-            prefix=f"pdf_{tipo_prodotto}"
+            title="✔ Dati certificati (PDF)"
         )
     else:
         st.info("Esegui prima l’analisi")
@@ -145,8 +172,7 @@ with tabs[2]:
     if st.session_state.image_data:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
-            title="👁️ Dati stimati da immagine",
-            prefix=f"image_{tipo_prodotto}"
+            title="👁️ Dati stimati da immagine"
         )
 
         # Mostra immagine caricata
@@ -156,7 +182,6 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
-
     else:
         st.info("Esegui prima l’analisi")
 
