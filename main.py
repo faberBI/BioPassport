@@ -26,7 +26,7 @@ if passport_id:
         st.error("Digital Product Passport not found")
         st.stop()
 
-    # NASCONDI UI STREAMLIT
+    # NASCONDI TUTTA LA UI STREAMLIT
     st.markdown("""
         <style>
         [data-testid="stSidebar"] {display: none;}
@@ -67,8 +67,6 @@ if passport_id:
 # ======================================================
 # BACKOFFICE
 # ======================================================
-
-# SESSION STATE
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -125,7 +123,7 @@ with tabs[1]:
             title="✔ Dati certificati (PDF)"
         )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi PDF")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -137,7 +135,7 @@ with tabs[2]:
             title="👁️ Dati stimati da immagine"
         )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi immagine")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
@@ -160,23 +158,21 @@ with tabs[3]:
                 "data_source_image": st.session_state.validated_image
             }
 
-            # Salva su file
             services.save_passport_to_file(passport_data)
 
-            # URL pubblico
-            try:
-                app_url = st.secrets["APP_URL"]
-            except KeyError:
-                st.error("Devi aggiungere APP_URL in st.secrets, ad esempio https://nome-tuo-app.streamlit.app")
+            # Usa l'URL della tua app Streamlit (impostalo in Secrets come APP_URL)
+            if "APP_URL" not in st.secrets:
+                st.error("Devi aggiungere APP_URL nei secrets con il link della tua app Streamlit!")
                 st.stop()
 
-            public_url = f"{app_url}?passport_id={product_id}"
+            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
             st.success("Digital Product Passport pubblicato")
+
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
 
     else:
-        st.info("Completa validazione PDF e immagine")
+        st.info("Completa prima la validazione PDF e immagine")
