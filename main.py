@@ -55,7 +55,16 @@ if passport_id:
 
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
-        st.write(f"**{k}**: {v}")
+        if k != "immagine_base64":  # non mostrare il campo base64
+            st.write(f"**{k}**: {v}")
+
+    # Mostra immagine se presente
+    if "immagine_base64" in passport["data_source_image"]:
+        st.image(
+            f"data:image/jpeg;base64,{passport['data_source_image']['immagine_base64']}",
+            caption="Foto prodotto",
+            use_column_width=True
+        )
 
     st.caption(
         "Public read-only Digital Product Passport. "
@@ -67,7 +76,7 @@ if passport_id:
 # ======================================================
 # BACKOFFICE
 # ======================================================
-for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
+for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploaded_image_file"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
@@ -107,11 +116,13 @@ with tabs[0]:
                         pdf_text, client, tipo_prodotto
                     )
 
+                    st.session_state.uploaded_image_file = image_file  # salva per pubblicazione
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
+                st.info("I dati sono stati estratti e saranno popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -123,7 +134,7 @@ with tabs[1]:
             title="✔ Dati certificati (PDF)"
         )
     else:
-        st.info("Esegui prima l’analisi PDF")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -135,7 +146,7 @@ with tabs[2]:
             title="👁️ Dati stimati da immagine"
         )
     else:
-        st.info("Esegui prima l’analisi immagine")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
@@ -155,24 +166,24 @@ with tabs[3]:
                     "version": "EU-DPP-1.0"
                 },
                 "data_source_pdf": st.session_state.validated_pdf,
-                "data_source_image": st.session_state.validated_image
+                "data_source_image": st.session_state.validated_image.copy()
             }
 
-            services.save_passport_to_file(passport_data)
+            # Salva anche immagine Base64 per pagina pubblica
+            if st.session_state.uploaded_image_file:
+                passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
+                    st.session_state.uploaded_image_file
+                )
 
-            # Usa l'URL della tua app Streamlit (impostalo in Secrets come APP_URL)
-            if "APP_URL" not in st.secrets:
-                st.error("Devi aggiungere APP_URL nei secrets con il link della tua app Streamlit!")
-                st.stop()
+            services.save_passport_to_file(passport_data)
 
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
-            st.success("Digital Product Passport pubblicato")
-
+            st.success("Digital Product Passport pubblicato ✅")
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
 
     else:
-        st.info("Completa prima la validazione PDF e immagine")
+        st.info("Completa validazione PDF e immagine")
