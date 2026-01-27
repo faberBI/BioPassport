@@ -13,7 +13,7 @@ import base64
 # CONFIG STREAMLIT
 # ======================================================
 st.set_page_config(
-    page_title="EU Digital Product Passport",
+    page_title="Nuvia Digital Product Passport",
     layout="centered"
 )
 
