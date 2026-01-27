@@ -88,17 +88,21 @@ TESTO:
         st.stop()
 
 
-def gpt_analyze_image(image_file, client: OpenAI, tipo):
+def gpt_analyze_image(image_file_or_b64, client: OpenAI, tipo):
     """
     Analizza un'immagine prodotto e restituisce JSON con i campi stimati (solo colore e condizioni).
-    image_file: file caricato da Streamlit (UploadedFile)
+    
+    image_file_or_b64: UploadedFile di Streamlit o stringa Base64
     client: oggetto OpenAI
     tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
     """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
-    # Converti in base64 per includere nel prompt come riferimento
-    image_b64 = base64.b64encode(image_file.getvalue()).decode()
+    # Se riceve un UploadedFile, converte in Base64; altrimenti assume già Base64
+    if hasattr(image_file_or_b64, "getvalue"):
+        image_b64 = base64.b64encode(image_file_or_b64.getvalue()).decode()
+    else:
+        image_b64 = image_file_or_b64
 
     # Prompt chiaro e limitato ai campi richiesti
     prompt = f"""
@@ -119,19 +123,26 @@ NON inventare altre informazioni.
         )
 
         result_text = r.choices[0].message.content.strip()
+
         # Prova a parsare JSON
         data = json.loads(result_text)
+
+        # Assicura che tutti i campi siano presenti
+        for c in campi:
+            if c not in data:
+                data[c] = None
+
         return data
 
     except json.JSONDecodeError:
         st.error("Errore: GPT non ha restituito JSON valido dall'immagine")
         st.code(result_text)
-        # ritorna campi vuoti se JSON non valido
         return {k: None for k in campi}
 
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
+
 
 
 
