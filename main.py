@@ -14,70 +14,51 @@ st.set_page_config(
     layout="centered"
 )
 
-# Carica il logo
-logo = Image.open("functions/logo_nuvia.jpeg")
-
-buffered = BytesIO()
-logo.save(buffered, format="PNG")
-img_str = base64.b64encode(buffered.getvalue()).decode()
-
-# Mostra logo in alto
-st.image(logo, width=350)
-
 # ======================================================
-# CSS PERSONALIZZATO
+# STILE GLOBALE + LOGO
 # ======================================================
-st.markdown("""
-<img src="data:image/png;base64,{img_str}" width="260">
-<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700&display=swap" rel="stylesheet">
+# Carica logo
+logo = Image.open("logo.jpeg")  # sostituisci con il tuo percorso
+logo_base64 = services.image_to_base64(logo)
 
+st.markdown(f"""
 <style>
-/* Font generale */
-body, div, span, input, button {
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans&display=swap');
+
+body, div, span, input, button {{
     font-family: 'Nunito Sans', sans-serif;
-}
-
-/* Sfondo generale */
-body {
     background-color: #f5f1ed;
     color: #3a2607;
-}
+}}
 
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background-color: #f5f1ed;
+h1, h2, h3, h4, h5, h6 {{
     color: #3a2607;
-}
+}}
 
-/* Nascondi header/footer di Streamlit */
-header, footer {
-    visibility: hidden;
-}
-
-/* Pulsanti e accenti */
-.stButton>button {
+.stButton>button {{
     background-color: #25ce6c;
     color: white;
     border-radius: 8px;
     border: none;
-}
-.stSelectbox>div>div>div {
-    border-color: #25ce6c !important;
-}
+}}
 
-/* Titoli */
-h1, h2, h3, h4, h5, h6 {
-    color: #3a2607;
-}
+.icon-red {{ color: #f06449; }}
+.icon-blue {{ color: #2b3a67; }}
+.icon-dark {{ color: #0b021f; }}
+.icon-purple {{ color: #6320ee; }}
 
-/* Icone e colori extra (puoi aggiungere altre classi se serve) */
-.icon-red { color: #f06449; }
-.icon-blue { color: #2b3a67; }
-.icon-dark { color: #0b021f; }
-.icon-purple { color: #6320ee; }
+/* Logo centrato in cima */
+div[data-testid="stAppViewContainer"] > div:first-child {{
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+}}
 </style>
-""", unsafe_allow_html=True)
 
+<div style="text-align:center; margin-bottom: 20px;">
+    <img src="data:image/jpeg;base64,{logo_base64}" width="200">
+</div>
+""", unsafe_allow_html=True)
 
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
