@@ -258,13 +258,14 @@ def render_validation_form(data: dict, title: str = "", prefix: str = "") -> dic
     for k, v in data.items():
         field_key = f"{prefix}_{k}" if prefix else k
 
-        # Usa il valore estratto come default, lascia vuoto se None
-        default_value = "" if v is None else v
+        # CONVERSIONE None -> stringa vuota
+        default_value = "" if v is None else str(v)
 
         # Campo di testo per qualsiasi valore
         validated_value = st.text_input(f"{k.replace('_',' ').capitalize()}:", value=default_value, key=field_key)
         validated[k] = validated_value.strip() if validated_value else None
 
     return validated
+
 
 
