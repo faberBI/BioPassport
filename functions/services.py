@@ -165,13 +165,36 @@ Esempio:
 # ======================================================
 # VALIDATION FORM
 # ======================================================
-def render_validation_form(data, title):
-    """Crea form Streamlit per validare manualmente i dati estratti."""
+
+def render_validation_form(data, title: str):
+    """
+    Crea un form Streamlit per validare manualmente i dati estratti.
+    Supporta:
+    - valori singoli
+    - liste
+    - dizionari annidati
+    """
     st.subheader(title)
     validated = {}
+
+    def render_item(key, value, parent=""):
+        full_key = f"{parent} > {key}" if parent else key
+
+        if isinstance(value, dict):
+            for k, v in value.items():
+                render_item(k, v, full_key)
+        elif isinstance(value, list):
+            # converte lista in stringa separata da virgola
+            val_str = ", ".join(map(str, value)) if value else "non rilevato"
+            validated[full_key] = st.text_input(full_key, val_str)
+        else:
+            validated[full_key] = st.text_input(full_key, "" if value is None else str(value))
+
     for k, v in data.items():
-        validated[k] = st.text_input(k, "" if v is None else str(v))
+        render_item(k, v)
+
     return validated
+
 
 # ======================================================
 # PASSPORT STORAGE
