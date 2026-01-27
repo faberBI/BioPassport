@@ -17,7 +17,7 @@ st.set_page_config(
 logo = Image.open("functions/logo_nuvia.jpeg")
 
 # Mostra logo in alto
-st.image(logo, width=150)
+st.image(logo, width=350)
 
 # ======================================================
 # CSS PERSONALIZZATO
