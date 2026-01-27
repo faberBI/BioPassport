@@ -7,6 +7,9 @@ from io import BytesIO
 from openai import OpenAI
 import streamlit as st
 
+# ======================================================
+# CONFIG
+# ======================================================
 PASSPORT_DIR = "passports"
 
 PRODUCT_FIELDS = {
@@ -24,7 +27,11 @@ PRODUCT_FIELDS = {
     }
 }
 
+# ======================================================
+# PDF / IMAGE UTILITIES
+# ======================================================
 def extract_text_from_pdf(pdf_file):
+    """Estrae tutto il testo da un PDF."""
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
@@ -32,9 +39,14 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def image_to_base64(image_file):
+    """Converte immagine in base64 per invio a GPT."""
     return base64.b64encode(image_file.getvalue()).decode()
 
+# ======================================================
+# GPT EXTRACTION
+# ======================================================
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
+    """Estrae dati tecnici dal PDF tramite GPT."""
     campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
 Estrai dati tecnici di un {tipo}.
@@ -47,53 +59,87 @@ TESTO:
 """
     r = client.chat.completions.create(
         model="gpt-4.1",
-        messages=[{"role":"user","content":prompt}],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
-    return json.loads(r.choices[0].message.content)
+
+    resp_text = r.choices[0].message.content.strip()
+    try:
+        data = json.loads(resp_text)
+    except json.JSONDecodeError:
+        st.error("GPT non ha restituito JSON valido. Ecco la risposta grezza:")
+        st.code(resp_text)
+        data = {k: None for k in campi}
+    return data
 
 def gpt_analyze_image(image_b64, client: OpenAI, tipo):
+    """Analizza immagine tramite GPT (gpt-4o-mini)."""
     campi = PRODUCT_FIELDS[tipo]["image"]
     prompt = f"""
-Analizza l'immagine.
-Restituisci SOLO JSON con: {', '.join(campi)}
+Analizza l'immagine e restituisci SOLO JSON con: {', '.join(campi)}.
+Se un dato manca, usa null.
+NON inventare.
 """
     r = client.chat.completions.create(
-        model="chatgpt-image-latest",
-        messages=[{
-            "role":"user",
-            "content":[
-                {"type":"text","text":prompt},
-                {"type":"image_url","image_url":f"data:image/jpeg;base64,{image_b64}"}
-            ]
-        }],
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        input=[{"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_b64}"}],
         temperature=0
     )
-    return json.loads(r.choices[0].message.content)
 
+    resp_text = r.choices[0].message.content.strip()
+    try:
+        data = json.loads(resp_text)
+    except json.JSONDecodeError:
+        st.error("GPT non ha restituito JSON valido per l'immagine. Ecco la risposta grezza:")
+        st.code(resp_text)
+        data = {k: None for k in campi}
+    return data
+
+# ======================================================
+# VALIDATION FORM
+# ======================================================
 def render_validation_form(data, title):
+    """Crea form Streamlit per validare manualmente i dati estratti."""
     st.subheader(title)
     validated = {}
     for k, v in data.items():
         validated[k] = st.text_input(k, "" if v is None else str(v))
     return validated
 
+# ======================================================
+# PASSPORT STORAGE
+# ======================================================
 def save_passport_to_file(passport):
+    """Salva passport JSON su disco."""
     os.makedirs(PASSPORT_DIR, exist_ok=True)
     path = os.path.join(PASSPORT_DIR, f"{passport['id']}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(passport, f, indent=2, ensure_ascii=False)
 
 def load_passport_from_file(passport_id):
+    """Carica passport JSON da disco."""
     path = os.path.join(PASSPORT_DIR, f"{passport_id}.json")
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+# ======================================================
+# QR CODE
+# ======================================================
 def generate_qr_from_url(url):
-    qr = qrcode.make(url)
+    """Genera QR code da un URL e ritorna BytesIO pronto per Streamlit."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=10,
+        border=4
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
     buf = BytesIO()
-    qr.save(buf)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.save(buf)
     buf.seek(0)
     return buf
