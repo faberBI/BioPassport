@@ -1,17 +1,17 @@
-import pdfplumber
+import os
 import json
 import base64
-import qrcode
-import os
 from io import BytesIO
-from openai import OpenAI
+import pdfplumber
+import qrcode
 import streamlit as st
-import re
+from openai import OpenAI
 
 # ======================================================
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
+
 PRODUCT_FIELDS = {
     "mobile": {
         "pdf": [
@@ -20,21 +20,18 @@ PRODUCT_FIELDS = {
             "materiali",
             "dimensioni",
             "anno_produzione",
-            "nome_produttore",             # ex manufacturer_name
-            "indirizzo_produttore",        # ex manufacturer_address
-            "gtin",                        # codice a barre internazionale
-            "numero_serie",                # ex serial_number
-            "composizione_materiali_dettagliata", # ex material_composition_detailed
-            "impronta_carbonio",           # ex carbon_footprint
-            "consumo_energia",             # ex energy_use
-            "documenti_conformita",        # ex compliance_documents
-            "istruzioni_uso",              # ex usage_instructions
-            "istruzioni_fine_vita"         # ex end_of_life_instructions
+            "nome_produttore",
+            "indirizzo_produttore",
+            "gtin",
+            "numero_serie",
+            "composizione_materiali_dettagliata",
+            "impronta_carbonio",
+            "consumo_energia",
+            "documenti_conformita",
+            "istruzioni_uso",
+            "istruzioni_fine_vita"
         ],
-        "image": [
-            "colore",
-            "condizioni"
-        ]
+        "image": ["colore", "condizioni"]
     },
     "lampada": {
         "pdf": [
@@ -53,11 +50,7 @@ PRODUCT_FIELDS = {
             "istruzioni_uso",
             "istruzioni_fine_vita"
         ],
-        "image": [
-            "colore",
-            "stile",
-            "condizioni"
-        ]
+        "image": ["colore", "stile", "condizioni"]
     },
     "bicicletta": {
         "pdf": [
@@ -76,14 +69,9 @@ PRODUCT_FIELDS = {
             "istruzioni_uso",
             "istruzioni_fine_vita"
         ],
-        "image": [
-            "colore_telaio",
-            "condizioni"
-        ]
+        "image": ["colore_telaio", "condizioni"]
     }
 }
-
-
 
 # ======================================================
 # PDF / IMAGE UTILITIES
@@ -97,16 +85,15 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def image_to_base64(image_file):
-    """Converte immagine in base64 per invio a GPT."""
+    """Converte immagine in base64 per invio o salvataggio."""
     return base64.b64encode(image_file.getvalue()).decode()
 
 # ======================================================
 # GPT EXTRACTION
 # ======================================================
-import re
-
-def gpt_extract_from_pdf(text, client, tipo):
-    campi = PRODUCT_FIELDS[tipo]["pdf"]  # ← qui, senza services.
+def gpt_extract_from_pdf(text, client: OpenAI, tipo: str):
+    """Estrae dati dal PDF tramite GPT e ritorna dict con tutti i campi definiti."""
+    campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
 Estrai i dati tecnici del prodotto di tipo '{tipo}' dal seguente testo PDF.
 Se un dato non è presente nel PDF, restituisci null.
@@ -124,18 +111,12 @@ TESTO:
 
     resp_text = r.choices[0].message.content.strip()
 
-    # PULIZIA ROBUSTA DEL JSON
+    # Pulizia JSON robusta
     import re
     match = re.search(r"\{.*\}", resp_text, re.DOTALL)
-    if match:
-        resp_text_clean = match.group(0)
-    else:
-        resp_text_clean = resp_text
-
+    resp_text_clean = match.group(0) if match else resp_text
     resp_text_clean = resp_text_clean.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
 
-    import json
-    import streamlit as st
     try:
         data_gpt = json.loads(resp_text_clean)
     except json.JSONDecodeError:
@@ -143,7 +124,7 @@ TESTO:
         st.code(resp_text)
         data_gpt = {}
 
-    # Popola tutti i campi definiti in PRODUCT_FIELDS
+    # Popola tutti i campi definiti
     data_finale = {}
     for campo in campi:
         val = data_gpt.get(campo, None)
@@ -151,75 +132,90 @@ TESTO:
 
     return data_finale
 
-
-
-
-
-def gpt_analyze_image(image_b64, client: OpenAI, tipo):
-    """
-    Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
-    image_b64: stringa Base64 dell'immagine
-    client: oggetto OpenAI
-    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
-    
-    Restituisce un dizionario Python con:
-        - colore
-        - condizioni
-    """
-    # Campi che vogliamo dall'immagine
-    campi = ["colore", "condizioni"]
-
+def gpt_analyze_image(image_file, client: OpenAI, tipo: str):
+    """Analizza immagine e ritorna dict con campi stimati."""
+    campi = PRODUCT_FIELDS[tipo]["image"]
     prompt = f"""
 Hai a disposizione un prodotto di tipo '{tipo}' rappresentato da un'immagine codificata in Base64.
-Non puoi vedere l'immagine direttamente, considera solo la Base64 come riferimento.
 Restituisci SOLO un JSON con i seguenti campi: {', '.join(campi)}.
-- 'colore': descrivi il colore dominante del prodotto.
-- 'condizioni': descrivi se il prodotto è nuovo, usato, danneggiato, ecc.
 Se un campo non è chiaro, usa null.
-NON inventare nulla, restituisci solo JSON valido.
+NON inventare nulla.
 Esempio di output:
-{{"colore": "bianco", "condizioni": "nuovo"}}
+{{{', '.join([f'"{c}": "valore"' for c in campi])}}}
 """
-
+    image_b64 = image_to_base64(image_file)
     r = client.chat.completions.create(
         model="gpt-4.1",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": prompt + f"\nBase64: {image_b64}"}],
         temperature=0
     )
 
     result_text = r.choices[0].message.content.strip()
-
     try:
         data = json.loads(result_text)
     except json.JSONDecodeError:
-        # se GPT non restituisce JSON valido, ritorna campi a null
-        data = {campo: None for campo in campi}
+        data = {campo: "" for campo in campi}
+    # Convert None -> ""
+    for k in campi:
+        if k not in data or data[k] is None:
+            data[k] = ""
     return data
 
+# ======================================================
+# FIELD MAPPING
+# ======================================================
+def map_gpt_fields(pdf_or_image_data: dict, tipo: str, source: str = "pdf") -> dict:
+    """Mappa i campi GPT a quelli previsti dal form per precompilare."""
+    mapped = {}
+    campi = PRODUCT_FIELDS[tipo][source]
+    for campo in campi:
+        if campo in pdf_or_image_data:
+            mapped[campo] = pdf_or_image_data.get(campo)
+        else:
+            alt_map = {
+                "produttore": pdf_or_image_data.get("nome_produttore"),
+                "nome_produttore": pdf_or_image_data.get("produttore"),
+                "indirizzo_produttore": pdf_or_image_data.get("indirizzo_produttore"),
+                "composizione_materiali_dettagliata": pdf_or_image_data.get("materiale_dettagliato"),
+                "impronta_carbonio": pdf_or_image_data.get("carbon_footprint"),
+                "consumo_energia": pdf_or_image_data.get("energy_use"),
+                "documenti_conformita": pdf_or_image_data.get("compliance_documents"),
+                "istruzioni_uso": pdf_or_image_data.get("usage_instructions"),
+                "istruzioni_fine_vita": pdf_or_image_data.get("end_of_life_instructions"),
+                "numero_serie": pdf_or_image_data.get("serial_number"),
+                "gtin": pdf_or_image_data.get("gtin"),
+            }
+            mapped[campo] = alt_map.get(campo, "")
+    # Converti eventuali None in stringa vuota
+    for k in mapped:
+        if mapped[k] is None:
+            mapped[k] = ""
+    return mapped
 
 # ======================================================
 # VALIDATION FORM
 # ======================================================
-def render_validation_form(data, title):
-    """Crea form Streamlit per validare manualmente i dati estratti."""
+def render_validation_form(data: dict, title: str = "", prefix: str = "") -> dict:
+    """Renderizza form di validazione in Streamlit, popola i campi."""
     st.subheader(title)
     validated = {}
     for k, v in data.items():
-        validated[k] = st.text_input(k, "" if v is None else str(v))
+        field_key = f"{prefix}_{k}" if prefix else k
+        default_value = "" if v is None else str(v)
+        validated_value = st.text_input(f"{k.replace('_',' ').capitalize()}:", value=default_value, key=field_key)
+        validated[k] = validated_value.strip() if validated_value else ""
     return validated
 
 # ======================================================
 # PASSPORT STORAGE
 # ======================================================
-def save_passport_to_file(passport):
-    """Salva passport JSON su disco."""
+def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
     path = os.path.join(PASSPORT_DIR, f"{passport['id']}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(passport, f, indent=2, ensure_ascii=False)
 
-def load_passport_from_file(passport_id):
-    """Carica passport JSON da disco."""
+def load_passport_from_file(passport_id: str):
     path = os.path.join(PASSPORT_DIR, f"{passport_id}.json")
     if not os.path.exists(path):
         return None
@@ -229,8 +225,7 @@ def load_passport_from_file(passport_id):
 # ======================================================
 # QR CODE
 # ======================================================
-def generate_qr_from_url(url):
-    """Genera QR code da un URL e ritorna BytesIO pronto per Streamlit."""
+def generate_qr_from_url(url: str) -> BytesIO:
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
@@ -244,38 +239,3 @@ def generate_qr_from_url(url):
     img.save(buf)
     buf.seek(0)
     return buf
-
-# ======================================================
-# CONVERTER
-# ======================================================
-
-def image_to_base64(image_file):
-    """
-    Converte un file immagine caricato da Streamlit in stringa Base64.
-    image_file: st.file_uploader (UploadedFile)
-    """
-    return base64.b64encode(image_file.getvalue()).decode()
-
-def render_validation_form(data: dict, title: str = "", prefix: str = "") -> dict:
-    """
-    Renderizza un form di validazione in Streamlit.
-    Popola automaticamente tutti i campi presenti in `data`.
-    """
-    st.subheader(title)
-    validated = {}
-
-    for k, v in data.items():
-        # Genera chiave unica per Streamlit
-        field_key = f"{prefix}_{k}" if prefix else k
-        # Default value
-        default_value = "" if v is None else str(v)
-        # Campo testo
-        validated_value = st.text_input(f"{k.replace('_',' ').capitalize()}:", value=default_value, key=field_key)
-        # Salva nel dict senza il prefisso
-        validated[k] = validated_value.strip() if validated_value else ""
-
-    return validated
-
-
-
-
