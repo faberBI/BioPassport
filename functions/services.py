@@ -98,6 +98,7 @@ def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
     import json
     import streamlit as st
 
+    # Chiavi come devono essere nel form / passport
     campi = ["tipologia_prodotto", "colore", "condizioni"]
 
     prompt = f"""
@@ -114,6 +115,21 @@ NON scrivere altro testo.
 Esempio:
 {{"tipologia prodotto": "mobile", "colore": "bianco", "condizioni": "nuovo"}}
 """
+
+    def safe_json_parse(text):
+        """Rimuove blocchi ``` e testo extra da GPT e ritorna dict"""
+        # Rimuove ```json ... ``` se presenti
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(line for line in lines if not line.strip().startswith("```")).strip()
+
+        # Rimuove eventuale testo extra prima/dopo JSON
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            text = text[first_brace:last_brace+1]
+
+        return json.loads(text)
 
     try:
         # 1️⃣ upload immagine su OpenAI
@@ -132,7 +148,7 @@ Esempio:
         )
 
         result_text = response.output_text.strip()
-        data_raw = json.loads(result_text)
+        data_raw = safe_json_parse(result_text)
 
         # 🔹 mapping GPT → chiavi form
         mapping = {
@@ -159,6 +175,7 @@ Esempio:
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         st.stop()
+
 
 
 
