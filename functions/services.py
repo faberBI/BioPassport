@@ -95,56 +95,48 @@ import streamlit as st
 from openai import OpenAI
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    """
-    Analizza un'immagine prodotto usando GPT-4o con vera visione.
-    """
-
     campi = ["colore", "condizioni"]
 
     prompt = f"""
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
 Restituisci SOLO JSON valido con:
-- colore: colore predominante
-- condizioni: stato generale (nuovo, usato, danneggiato, ecc.)
+- colore
+- condizioni
 
 Se non determinabile, usa null.
-NON aggiungere testo fuori dal JSON.
+NON scrivere altro testo.
 
 Esempio:
 {{"colore": "bianco", "condizioni": "nuovo"}}
 """
 
     try:
-        image_bytes = image_file.getvalue()
+        # 1️⃣ upload file
+        file_id = upload_image_to_openai(image_file, client)
 
+        # 2️⃣ analisi visiva
         response = client.responses.create(
             model="gpt-4o",
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {
-                            "type": "input_image",
-                            "image_bytes": image_bytes
-                        }
-                    ]
-                }
-            ]
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "file_id": file_id}
+                ]
+            }]
         )
 
         result_text = response.output_text.strip()
         data = json.loads(result_text)
 
         for k in campi:
-            if k not in data:
-                data[k] = None
+            data.setdefault(k, None)
 
         return data
 
     except json.JSONDecodeError:
-        st.error("GPT non ha restituito JSON valido dall'immagine")
+        st.error("GPT non ha restituito JSON valido")
         st.code(result_text)
         return {k: None for k in campi}
 
