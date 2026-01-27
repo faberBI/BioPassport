@@ -6,6 +6,9 @@ from functions import services
 from PIL import Image
 from io import BytesIO
 import base64
+
+
+
 # ======================================================
 # CONFIG STREAMLIT
 # ======================================================
@@ -15,7 +18,7 @@ st.set_page_config(
 )
 
 # ======================================================
-# STILE GLOBALE + LOGO
+# STILE GLOBALE + LOGO A SINISTRA
 # ======================================================
 # Carica logo
 logo = Image.open("functions/logo_nuvia.jpeg")  # sostituisci con il tuo percorso
@@ -47,16 +50,19 @@ h1, h2, h3, h4, h5, h6 {{
 .icon-dark {{ color: #0b021f; }}
 .icon-purple {{ color: #6320ee; }}
 
-/* Logo centrato in cima */
+/* Logo in alto a sinistra */
 div[data-testid="stAppViewContainer"] > div:first-child {{
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: center;
     margin-bottom: 20px;
+    gap: 20px; /* spazio tra logo e titolo */
 }}
 </style>
 
-<div style="text-align:center; margin-bottom: 20px;">
-    <img src="data:image/jpeg;base64,{logo_base64}" width="200">
+<div style="display:flex; align-items:center; margin-bottom:20px;">
+    <img src="data:image/jpeg;base64,{logo_base64}" width="100">
+    <h1 style="margin:0; font-family:'Nunito Sans', sans-serif; color:#3a2607;">🪑 Nuvia - Digital Product Passport</h1>
 </div>
 """, unsafe_allow_html=True)
 
@@ -131,7 +137,7 @@ for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploade
 st.sidebar.title("🛠 Backoffice")
 st.sidebar.info("EU Digital Product Passport")
 
-st.title("🪑 Digital Product Passport – Backoffice")
+st.title("Nuvia - Digital Product Passport")
 
 tipo_prodotto = st.selectbox(
     "Seleziona tipo prodotto",
