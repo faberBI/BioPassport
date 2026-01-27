@@ -18,7 +18,7 @@ st.set_page_config(
 # STILE GLOBALE + LOGO
 # ======================================================
 # Carica logo
-logo = Image.open("logo.jpeg")  # sostituisci con il tuo percorso
+logo = Image.open("functions/logo_nuvia.jpeg")  # sostituisci con il tuo percorso
 logo_base64 = services.image_to_base64(logo)
 
 st.markdown(f"""
