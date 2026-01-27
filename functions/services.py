@@ -92,7 +92,7 @@ TESTO:
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     """
-    Analizza un'immagine prodotto usando vera visione (Responses API).
+    Analizza un'immagine prodotto usando GPT-4o con vera visione.
     """
 
     campi = ["colore", "condizioni"]
@@ -102,7 +102,7 @@ Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
 Restituisci SOLO JSON valido con:
 - colore: colore predominante
-- condizioni: stato (nuovo, usato, danneggiato, ecc.)
+- condizioni: stato generale (nuovo, usato, danneggiato, ecc.)
 
 Se non determinabile, usa null.
 NON aggiungere testo fuori dal JSON.
@@ -112,6 +112,8 @@ Esempio:
 """
 
     try:
+        image_bytes = image_file.getvalue()
+
         response = client.responses.create(
             model="gpt-4o",
             input=[
@@ -121,7 +123,7 @@ Esempio:
                         {"type": "input_text", "text": prompt},
                         {
                             "type": "input_image",
-                            "image_file": image_file
+                            "image_bytes": image_bytes
                         }
                     ]
                 }
