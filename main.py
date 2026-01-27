@@ -26,7 +26,7 @@ if passport_id:
         st.error("Digital Product Passport not found")
         st.stop()
 
-    # NASCONDI TUTTA LA UI STREAMLIT
+    # NASCONDI UI STREAMLIT
     st.markdown("""
         <style>
         [data-testid="stSidebar"] {display: none;}
@@ -55,7 +55,7 @@ if passport_id:
 
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
-        if k != "immagine_base64":  # non mostrare il campo base64
+        if k != "immagine_base64":
             st.write(f"**{k}**: {v}")
 
     # Mostra immagine se presente
@@ -111,18 +111,20 @@ with tabs[0]:
                 st.warning("Carica PDF e immagine")
             else:
                 with st.spinner("Analisi GPT in corso…"):
+                    # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
                     st.session_state.pdf_data = services.gpt_extract_from_pdf(
                         pdf_text, client, tipo_prodotto
                     )
 
-                    st.session_state.uploaded_image_file = image_file  # salva per pubblicazione
+                    # Salva immagine caricata per pubblicazione
+                    st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e saranno popolati automaticamente nei form di validazione.")
+                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -145,6 +147,15 @@ with tabs[2]:
             st.session_state.image_data,
             title="👁️ Dati stimati da immagine"
         )
+
+        # Mostra immagine caricata
+        if st.session_state.uploaded_image_file:
+            st.image(
+                st.session_state.uploaded_image_file,
+                caption="Foto prodotto",
+                use_column_width=True
+            )
+
     else:
         st.info("Esegui prima l’analisi")
 
@@ -169,7 +180,7 @@ with tabs[3]:
                 "data_source_image": st.session_state.validated_image.copy()
             }
 
-            # Salva anche immagine Base64 per pagina pubblica
+            # Salva anche immagine Base64
             if st.session_state.uploaded_image_file:
                 passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
                     st.session_state.uploaded_image_file
@@ -177,6 +188,7 @@ with tabs[3]:
 
             services.save_passport_to_file(passport_data)
 
+            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
