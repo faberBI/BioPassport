@@ -117,7 +117,7 @@ with tabs[0]:
                         pdf_text, client, tipo_prodotto
                     )
 
-                    # Salva immagine caricata
+                    # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
@@ -133,8 +133,7 @@ with tabs[1]:
     if st.session_state.pdf_data:
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)",
-            prefix=f"pdf_{tipo_prodotto}"
+            title="✔ Dati certificati (PDF)"
         )
     else:
         st.info("Esegui prima l’analisi")
@@ -146,8 +145,7 @@ with tabs[2]:
     if st.session_state.image_data:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
-            title="👁️ Dati stimati da immagine",
-            prefix=f"img_{tipo_prodotto}"
+            title="👁️ Dati stimati da immagine"
         )
 
         # Mostra immagine caricata
@@ -157,6 +155,7 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
+
     else:
         st.info("Esegui prima l’analisi")
 
