@@ -2,7 +2,7 @@ import streamlit as st
 import uuid
 from datetime import datetime
 from openai import OpenAI
-from functions import services  # Assicurati che services.py sia nello stesso folder
+from functions import services
 
 # ======================================================
 # CONFIG
@@ -12,38 +12,41 @@ st.set_page_config(
     layout="centered"
 )
 
+# ======================================================
+# OPENAI CLIENT
+# ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# ROUTING: QR → PAGINA PUBBLICA
+# PAGINA PUBBLICA (QR → passport_id)
 # ======================================================
-passport_id = st.experimental_get_query_params().get("passport_id")
+passport_id = st.experimental_get_query_params().get("passport_id", [None])[0]
+
 if passport_id:
-    passport_id = passport_id[0]
     passport = services.load_passport_from_file(passport_id)
 
     if not passport:
-        st.error("Digital Product Passport not found")
+        st.error("Digital Product Passport non trovato")
         st.stop()
 
-    # NASCONDI UI STREAMLIT
+    # Nascondi UI Streamlit
     st.markdown("""
-    <style>
-    [data-testid="stSidebar"] {display: none;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    </style>
+        <style>
+        [data-testid="stSidebar"] {display: none;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        </style>
     """, unsafe_allow_html=True)
 
     st.title("🇪🇺 Digital Product Passport")
     st.caption("Regulation (EU) – Ecodesign for Sustainable Products (ESPR)")
 
     st.markdown(f"""
-    **Product ID:** `{passport['id']}`  
-    **Product type:** {passport['product_type']}  
-    **Created:** {passport['metadata']['created_at']}  
-    **Version:** {passport['metadata']['version']}
-    """)
+**Product ID:** `{passport['id']}`  
+**Product type:** {passport['product_type']}  
+**Created:** {passport['metadata']['created_at']}  
+**Version:** {passport['metadata']['version']}
+""")
 
     st.divider()
     st.subheader("1️⃣ Product Identity (Certified)")
@@ -64,7 +67,7 @@ if passport_id:
 # ======================================================
 # BACKOFFICE
 # ======================================================
-# SESSION STATE
+# Session state
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -97,7 +100,7 @@ with tabs[0]:
 
         if submitted:
             if not pdf_file or not image_file:
-                st.warning("Carica PDF e immagine")
+                st.warning("Carica PDF e immagine prima di procedere")
             else:
                 with st.spinner("Analisi GPT in corso…"):
                     pdf_text = services.extract_text_from_pdf(pdf_file)
@@ -105,16 +108,10 @@ with tabs[0]:
                         pdf_text, client, tipo_prodotto
                     )
 
-                    image_b64 = services.image_to_base64(image_file)
                     st.session_state.image_data = services.gpt_analyze_image(
-                        image_b64, client, tipo_prodotto
+                        image_file, client, tipo_prodotto
                     )
-
                 st.success("Analisi completata")
-                st.json({
-                    "pdf_data": st.session_state.pdf_data,
-                    "image_data": st.session_state.image_data
-                })
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -126,7 +123,7 @@ with tabs[1]:
             title="✔ Dati certificati (PDF)"
         )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi PDF")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -138,17 +135,19 @@ with tabs[2]:
             title="👁️ Dati stimati da immagine"
         )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi immagine")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
 # ======================================================
 with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("🚀 Pubblica Digital Product Passport"):
+
+            # Genera ID unico prodotto
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
+            # Costruisci JSON Passport
             passport_data = {
                 "id": product_id,
                 "product_type": tipo_prodotto,
@@ -160,8 +159,10 @@ with tabs[3]:
                 "data_source_image": st.session_state.validated_image
             }
 
+            # Salva su disco
             services.save_passport_to_file(passport_data)
 
+            # Genera QR
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
@@ -169,6 +170,5 @@ with tabs[3]:
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
-
     else:
-        st.info("Completa validazione PDF e immagine")
+        st.info("Completa validazione PDF e immagine prima di pubblicare")
