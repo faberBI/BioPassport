@@ -12,7 +12,7 @@ st.set_page_config(
     layout="centered"
 )
 
-client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
+client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
 # ROUTING: QR → PAGINA PUBBLICA
