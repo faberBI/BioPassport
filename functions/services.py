@@ -91,30 +91,20 @@ TESTO:
 
 
 def gpt_analyze_image(image_file_or_b64, client: OpenAI, tipo):
-    """
-    Analizza un'immagine prodotto e restituisce JSON con i campi stimati (solo colore e condizioni).
-
-    image_file_or_b64: UploadedFile di Streamlit o stringa Base64
-    client: oggetto OpenAI
-    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
-    """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
-    # Se riceve UploadedFile, ridimensiona e converte in Base64
     if hasattr(image_file_or_b64, "getvalue"):
-        # Apri immagine con Pillow
         img = Image.open(image_file_or_b64)
-        # Riduci a thumbnail 100x100 px
         img.thumbnail((100, 100))
-        # Salva in buffer BytesIO in JPEG
+        if img.mode != "RGB":
+            img = img.convert("RGB")
         buf = BytesIO()
         img.save(buf, format="JPEG")
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode()
     else:
-        image_b64 = image_file_or_b64  # assume già Base64
+        image_b64 = image_file_or_b64
 
-    # Prompt chiaro e limitato ai campi richiesti, includendo la Base64 ridotta
     prompt = f"""
 Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine ridotta.
 Ecco la Base64 dell'immagine: {image_b64}
@@ -134,28 +124,20 @@ Esempio di output JSON:
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-
         result_text = r.choices[0].message.content.strip()
-
-        # Prova a parsare JSON
         data = json.loads(result_text)
-
-        # Assicura che tutti i campi siano presenti
         for c in campi:
             if c not in data:
                 data[c] = None
-
         return data
 
     except json.JSONDecodeError:
         st.error("Errore: GPT non ha restituito JSON valido dall'immagine")
         st.code(result_text)
         return {k: None for k in campi}
-
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
-
 
 
 
