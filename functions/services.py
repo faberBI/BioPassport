@@ -95,7 +95,7 @@ import streamlit as st
 from openai import OpenAI
 
 def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
-    campi = ["colore", "condizioni"]
+    campi = ["tipologia_prodotto", "colore", "condizioni"]
 
     prompt = f"""
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
