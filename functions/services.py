@@ -46,7 +46,7 @@ def image_to_base64(image_file):
 # GPT EXTRACTION
 # ======================================================
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
-    """Estrae dati tecnici dal PDF tramite GPT."""
+    """Estrae dati tecnici dal PDF tramite GPT, in modo robusto."""
     campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
 Estrai dati tecnici di un {tipo}.
@@ -57,27 +57,41 @@ Restituisci SOLO JSON con: {', '.join(campi)}
 TESTO:
 {text}
 """
-    r = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    resp_text = r.choices[0].message.content.strip()
     try:
+        r = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+
+        resp_text = r.choices[0].message.content.strip()
+
+        # Rimuove eventuali blocchi ```json ... ```
+        if resp_text.startswith("```"):
+            resp_text = "\n".join(resp_text.split("\n")[1:-1]).strip()
+
         data = json.loads(resp_text)
+        # Assicura che tutti i campi siano presenti
+        for c in campi:
+            if c not in data:
+                data[c] = None
+
+        return data
+
     except json.JSONDecodeError:
         st.error("GPT non ha restituito JSON valido. Ecco la risposta grezza:")
         st.code(resp_text)
-        data = {k: None for k in campi}
-    return data
+        # Ritorna comunque un dizionario con tutti i campi a None
+        return {c: None for c in campi}
+    except Exception as e:
+        st.error(f"Errore GPT: {e}")
+        st.stop()
+
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     """
     Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
     image_file: file caricato da Streamlit (UploadedFile) O già Base64
-    client: oggetto OpenAI
-    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
     """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
@@ -85,7 +99,6 @@ def gpt_analyze_image(image_file, client: OpenAI, tipo):
     if hasattr(image_file, "getvalue"):
         image_b64 = base64.b64encode(image_file.getvalue()).decode()
     else:
-        # altrimenti assumiamo sia già Base64
         image_b64 = image_file
 
     prompt = f"""
@@ -102,16 +115,28 @@ NON inventare nulla.
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
+
         result_text = r.choices[0].message.content.strip()
+        # Rimuove eventuali blocchi ```json ... ```
+        if result_text.startswith("```"):
+            result_text = "\n".join(result_text.split("\n")[1:-1]).strip()
+
         data = json.loads(result_text)
+        # Assicura che tutti i campi siano presenti
+        for c in campi:
+            if c not in data:
+                data[c] = None
+
         return data
 
     except json.JSONDecodeError:
-        st.error("Errore: GPT non ha restituito un JSON valido")
-        st.stop()
+        st.error("GPT non ha restituito un JSON valido dall'immagine")
+        st.code(result_text)
+        return {c: None for c in campi}
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
+
 
 
 # ======================================================
