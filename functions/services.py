@@ -246,17 +246,25 @@ def image_to_base64(image_file):
     """
     return base64.b64encode(image_file.getvalue()).decode()
 
-def render_validation_form(data, title="Validazione", prefix=""):
-    """Crea form Streamlit per validare manualmente i dati estratti."""
+def render_validation_form(data: dict, title: str = "", prefix: str = "") -> dict:
+    """
+    Renderizza un form di validazione in Streamlit.
+    Popola automaticamente tutti i campi presenti in `data`.
+    Se un campo è None, l'utente può inserirlo manualmente.
+    """
     st.subheader(title)
     validated = {}
 
     for k, v in data.items():
-        form_key = f"{prefix}_{k}" if prefix else k
-        # Popola il form con il valore estratto, oppure vuoto se None
-        validated[k] = st.text_input(k, "" if v is None else str(v), key=form_key)
+        field_key = f"{prefix}_{k}" if prefix else k
+
+        # Usa il valore estratto come default, lascia vuoto se None
+        default_value = "" if v is None else v
+
+        # Campo di testo per qualsiasi valore
+        validated_value = st.text_input(f"{k.replace('_',' ').capitalize()}:", value=default_value, key=field_key)
+        validated[k] = validated_value.strip() if validated_value else None
 
     return validated
-
 
 
