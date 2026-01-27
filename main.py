@@ -120,7 +120,7 @@ with tabs[0]:
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
-                        image_file, client, tipo_prodotto
+                        services.image_to_base64(image_file), client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
