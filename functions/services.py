@@ -6,6 +6,7 @@ import os
 from io import BytesIO
 from openai import OpenAI
 import streamlit as st
+import re
 
 # ======================================================
 # CONFIG
@@ -102,6 +103,8 @@ def image_to_base64(image_file):
 # ======================================================
 # GPT EXTRACTION
 # ======================================================
+import re
+
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
     campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
@@ -121,8 +124,15 @@ TESTO:
 
     resp_text = r.choices[0].message.content.strip()
 
+    # Rimuove eventuali caratteri prima/dopo il JSON
+    match = re.search(r"\{.*\}", resp_text, re.DOTALL)
+    if match:
+        resp_text_clean = match.group(0)
+    else:
+        resp_text_clean = resp_text
+
     try:
-        data_gpt = json.loads(resp_text)
+        data_gpt = json.loads(resp_text_clean)
     except json.JSONDecodeError:
         st.error("GPT non ha restituito JSON valido. Mostro la risposta grezza:")
         st.code(resp_text)
@@ -132,6 +142,7 @@ TESTO:
     data_finale = {campo: data_gpt.get(campo, None) for campo in campi}
 
     return data_finale
+
 
 
 def gpt_analyze_image(image_b64, client: OpenAI, tipo):
