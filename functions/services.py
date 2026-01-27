@@ -46,7 +46,7 @@ TESTO:
 {text}
 """
     r = client.chat.completions.create(
-        model="gpt-5-mini",
+        model="gpt-4.1",
         messages=[{"role":"user","content":prompt}],
         temperature=0
     )
@@ -59,7 +59,7 @@ Analizza l'immagine.
 Restituisci SOLO JSON con: {', '.join(campi)}
 """
     r = client.chat.completions.create(
-        model="gpt-5-mini",
+        model="chatgpt-image-latest",
         messages=[{
             "role":"user",
             "content":[
