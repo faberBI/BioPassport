@@ -101,6 +101,7 @@ def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
 Restituisci SOLO JSON valido con i campi:
+- tipologia prodotto
 - colore
 - condizioni
 
