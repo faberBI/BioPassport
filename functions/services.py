@@ -260,22 +260,22 @@ def render_validation_form(data: dict, title: str = "", prefix: str = "") -> dic
     """
     Renderizza un form di validazione in Streamlit.
     Popola automaticamente tutti i campi presenti in `data`.
-    Se un campo è None, l'utente può inserirlo manualmente.
     """
     st.subheader(title)
     validated = {}
 
     for k, v in data.items():
+        # Genera chiave unica per Streamlit
         field_key = f"{prefix}_{k}" if prefix else k
-
-        # CONVERSIONE None -> stringa vuota
+        # Default value
         default_value = "" if v is None else str(v)
-
-        # Campo di testo per qualsiasi valore
+        # Campo testo
         validated_value = st.text_input(f"{k.replace('_',' ').capitalize()}:", value=default_value, key=field_key)
-        validated[k] = validated_value.strip() if validated_value else None
+        # Salva nel dict senza il prefisso
+        validated[k] = validated_value.strip() if validated_value else ""
 
     return validated
+
 
 
 
