@@ -75,6 +75,7 @@ if passport_id:
 # ======================================================
 # BACKOFFICE
 # ======================================================
+# Inizializza session state
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploaded_image_file"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -97,38 +98,6 @@ tabs = st.tabs([
 ])
 
 # ======================================================
-# Funzione di mappatura automatica dei campi
-# ======================================================
-def map_gpt_fields(pdf_or_image_data, tipo, source="pdf"):
-    """Mappa i campi GPT a quelli previsti dal form, per precompilare i form."""
-    mapped = {}
-    campi = services.PRODUCT_FIELDS[tipo][source]
-    for campo in campi:
-        if campo in pdf_or_image_data:
-            mapped[campo] = pdf_or_image_data.get(campo)
-        else:
-            # mappature alternative
-            alt_map = {
-                "produttore": pdf_or_image_data.get("nome_produttore"),
-                "nome_produttore": pdf_or_image_data.get("produttore"),
-                "indirizzo_produttore": pdf_or_image_data.get("indirizzo_produttore"),
-                "composizione_materiali_dettagliata": pdf_or_image_data.get("materiale_dettagliato"),
-                "impronta_carbonio": pdf_or_image_data.get("carbon_footprint"),
-                "consumo_energia": pdf_or_image_data.get("energy_use"),
-                "documenti_conformita": pdf_or_image_data.get("compliance_documents"),
-                "istruzioni_uso": pdf_or_image_data.get("usage_instructions"),
-                "istruzioni_fine_vita": pdf_or_image_data.get("end_of_life_instructions"),
-                "numero_serie": pdf_or_image_data.get("serial_number"),
-                "gtin": pdf_or_image_data.get("gtin"),
-            }
-            mapped[campo] = alt_map.get(campo, None)
-    # Converti None -> stringa vuota per Streamlit
-    for k in mapped:
-        if mapped[k] is None:
-            mapped[k] = ""
-    return mapped
-
-# ======================================================
 # TAB 1 — UPLOAD & GPT
 # ======================================================
 with tabs[0]:
@@ -145,12 +114,12 @@ with tabs[0]:
                     # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
                     raw_pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
-                    st.session_state.pdf_data = map_gpt_fields(raw_pdf_data, tipo_prodotto, "pdf")
+                    st.session_state.pdf_data = services.map_gpt_fields(raw_pdf_data, tipo_prodotto, "pdf")
 
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     raw_image_data = services.gpt_analyze_image(image_file, client, tipo_prodotto)
-                    st.session_state.image_data = map_gpt_fields(raw_image_data, tipo_prodotto, "image")
+                    st.session_state.image_data = services.map_gpt_fields(raw_image_data, tipo_prodotto, "image")
 
                 st.success("Analisi completata")
                 st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
@@ -166,7 +135,7 @@ with tabs[1]:
             prefix="pdf"
         )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi del PDF")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -187,18 +156,15 @@ with tabs[2]:
                 use_column_width=True
             )
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima l’analisi dell’immagine")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
 # ======================================================
 with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("🚀 Pubblica Digital Product Passport"):
-
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
-
             passport_data = {
                 "id": product_id,
                 "product_type": tipo_prodotto,
@@ -226,6 +192,5 @@ with tabs[3]:
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
-
     else:
-        st.info("Completa validazione PDF e immagine")
+        st.info("Completa validazione PDF e immagine prima della pubblicazione")
