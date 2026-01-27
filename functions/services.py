@@ -90,52 +90,49 @@ TESTO:
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     """
-    Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
-    image_file: file caricato da Streamlit (UploadedFile) O già Base64
+    Analizza un'immagine prodotto e restituisce JSON con i campi stimati (solo colore e condizioni).
+    image_file: file caricato da Streamlit (UploadedFile)
+    client: oggetto OpenAI
+    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
     """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
-    # Se image_file è UploadedFile (BytesIO), converti in Base64
-    if hasattr(image_file, "getvalue"):
-        image_b64 = base64.b64encode(image_file.getvalue()).decode()
-    else:
-        image_b64 = image_file
+    # Converti in base64 per includere nel prompt come riferimento
+    image_b64 = base64.b64encode(image_file.getvalue()).decode()
 
+    # Prompt chiaro e limitato ai campi richiesti
     prompt = f"""
-Hai a disposizione un prodotto di tipo '{tipo}' rappresentato da un'immagine in Base64.
-Non puoi vedere l'immagine direttamente, considera solo la stringa Base64 come riferimento.
-Restituisci SOLO un JSON con i seguenti campi: {', '.join(campi)}.
-Se un campo non è chiaro o non visibile, usa null.
-NON inventare nulla.
+Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine.
+Non puoi vedere direttamente l'immagine, ma considera la stringa Base64 come riferimento.
+Estrai SOLO queste informazioni in JSON: {', '.join(campi)}.
+- colore: descrivi il colore predominante.
+- condizioni: descrivi lo stato generale (nuovo, usato, danneggiato, ecc.)
+Se non puoi determinare un campo, usa null.
+NON inventare altre informazioni.
 """
 
     try:
         r = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
 
         result_text = r.choices[0].message.content.strip()
-        # Rimuove eventuali blocchi ```json ... ```
-        if result_text.startswith("```"):
-            result_text = "\n".join(result_text.split("\n")[1:-1]).strip()
-
+        # Prova a parsare JSON
         data = json.loads(result_text)
-        # Assicura che tutti i campi siano presenti
-        for c in campi:
-            if c not in data:
-                data[c] = None
-
         return data
 
     except json.JSONDecodeError:
-        st.error("GPT non ha restituito un JSON valido dall'immagine")
+        st.error("Errore: GPT non ha restituito JSON valido dall'immagine")
         st.code(result_text)
-        return {c: None for c in campi}
+        # ritorna campi vuoti se JSON non valido
+        return {k: None for k in campi}
+
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
+
 
 
 
