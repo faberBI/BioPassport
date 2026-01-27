@@ -94,13 +94,17 @@ import json
 import streamlit as st
 from openai import OpenAI
 
-def gpt_analyze_image(image_file, client: OpenAI, tipo):
+def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
+    """
+    Analizza l'immagine del prodotto usando GPT-4o.
+    Restituisce dizionario pronto per la validazione Streamlit.
+    """
     campi = ["colore", "condizioni"]
 
     prompt = f"""
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
-Restituisci SOLO JSON valido con:
+Restituisci SOLO JSON valido con i campi:
 - colore
 - condizioni
 
@@ -112,10 +116,10 @@ Esempio:
 """
 
     try:
-        # 1️⃣ upload file
+        # 1️⃣ upload immagine su OpenAI
         file_id = upload_image_to_openai(image_file, client)
 
-        # 2️⃣ analisi visiva
+        # 2️⃣ chiedi a GPT di analizzare l'immagine
         response = client.responses.create(
             model="gpt-4o",
             input=[{
@@ -127,18 +131,23 @@ Esempio:
             }]
         )
 
+        # 3️⃣ estrai testo e convertilo in dict
         result_text = response.output_text.strip()
         data = json.loads(result_text)
 
+        # 4️⃣ assicurati che tutti i campi siano stringhe
         for k in campi:
-            data.setdefault(k, None)
+            if k not in data or data[k] is None:
+                data[k] = ""  # così Streamlit popola il form
+            else:
+                data[k] = str(data[k]).strip()
 
         return data
 
     except json.JSONDecodeError:
         st.error("GPT non ha restituito JSON valido")
         st.code(result_text)
-        return {k: None for k in campi}
+        return {k: "" for k in campi}
 
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
