@@ -13,18 +13,75 @@ import streamlit as st
 PASSPORT_DIR = "passports"
 PRODUCT_FIELDS = {
     "mobile": {
-        "pdf": ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione"],
-        "image": ["colore","condizioni"]
+        "pdf": [
+            "nome_prodotto",
+            "produttore",
+            "materiali",
+            "dimensioni",
+            "anno_produzione",
+            "manufacturer_name",        # nuovo
+            "manufacturer_address",     # nuovo
+            "gtin",                     # nuovo
+            "serial_number",            # nuovo
+            "material_composition_detailed", # nuovo
+            "carbon_footprint",         # nuovo
+            "energy_use",               # nuovo
+            "compliance_documents",     # nuovo
+            "usage_instructions",       # nuovo
+            "end_of_life_instructions"  # nuovo
+        ],
+        "image": [
+            "colore",
+            "condizioni"
+        ]
     },
     "lampada": {
-        "pdf": ["nome_prodotto","produttore","materiale","wattaggio"],
-        "image": ["colore","stile"]
+        "pdf": [
+            "nome_prodotto",
+            "produttore",
+            "materiale",
+            "wattaggio",
+            "manufacturer_name",
+            "manufacturer_address",
+            "gtin",
+            "serial_number",
+            "material_composition_detailed",
+            "carbon_footprint",
+            "energy_use",
+            "compliance_documents",
+            "usage_instructions",
+            "end_of_life_instructions"
+        ],
+        "image": [
+            "colore",
+            "stile",
+            "condizioni"
+        ]
     },
     "bicicletta": {
-        "pdf": ["nome_prodotto","produttore","modello","anno_produzione"],
-        "image": ["colore_telaio","condizioni"]
+        "pdf": [
+            "nome_prodotto",
+            "produttore",
+            "modello",
+            "anno_produzione",
+            "manufacturer_name",
+            "manufacturer_address",
+            "gtin",
+            "serial_number",
+            "material_composition_detailed",
+            "carbon_footprint",
+            "energy_use",
+            "compliance_documents",
+            "usage_instructions",
+            "end_of_life_instructions"
+        ],
+        "image": [
+            "colore_telaio",
+            "condizioni"
+        ]
     }
 }
+
 
 # ======================================================
 # PDF / IMAGE UTILITIES
@@ -45,46 +102,28 @@ def image_to_base64(image_file):
 # GPT EXTRACTION
 # ======================================================
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
-    """Estrae dati tecnici dal PDF tramite GPT, in modo robusto."""
+    """Estrae dati tecnici obbligatori dal PDF tramite GPT."""
     campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
-Estrai dati tecnici di un {tipo}.
-Se un dato manca usa null.
-NON inventare.
-Restituisci SOLO JSON con: {', '.join(campi)}
+Estrai tutti i dati tecnici obbligatori di un {tipo} secondo la normativa UE per Digital Product Passport.
+Se un dato non è presente, usa null.
+NON inventare valori.
+Restituisci SOLO un JSON con le chiavi: {', '.join(campi)}.
 
-TESTO:
+TESTO PDF:
 {text}
 """
+    r = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role":"user","content":prompt}],
+        temperature=0
+    )
+    resp_text = r.choices[0].message.content.strip()
     try:
-        r = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-
-        resp_text = r.choices[0].message.content.strip()
-
-        # Rimuove eventuali blocchi ```json ... ```
-        if resp_text.startswith("```"):
-            resp_text = "\n".join(resp_text.split("\n")[1:-1]).strip()
-
         data = json.loads(resp_text)
-        # Assicura che tutti i campi siano presenti
-        for c in campi:
-            if c not in data:
-                data[c] = None
-
-        return data
-
     except json.JSONDecodeError:
-        st.error("GPT non ha restituito JSON valido. Ecco la risposta grezza:")
-        st.code(resp_text)
-        # Ritorna comunque un dizionario con tutti i campi a None
-        return {c: None for c in campi}
-    except Exception as e:
-        st.error(f"Errore GPT: {e}")
-        st.stop()
+        data = {k: None for k in campi}  # default se JSON non valido
+    return data
 
 
 def gpt_analyze_image(image_b64, client: OpenAI, tipo):
@@ -187,4 +226,14 @@ def image_to_base64(image_file):
     image_file: st.file_uploader (UploadedFile)
     """
     return base64.b64encode(image_file.getvalue()).decode()
+
+def render_validation_form(data, title):
+    st.subheader(title)
+    validated = {}
+    for k, v in data.items():
+        label = k
+        if k in ["manufacturer_name","gtin","serial_number"]:  # esempio campi obbligatori
+            label += " *"  # aggiungi asterisco
+        validated[k] = st.text_input(label, "" if v is None else str(v))
+    return validated
 
