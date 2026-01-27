@@ -95,10 +95,6 @@ import streamlit as st
 from openai import OpenAI
 
 def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
-    """
-    Analizza l'immagine del prodotto usando GPT-4o.
-    Restituisce dizionario pronto per la validazione Streamlit.
-    """
     campi = ["colore", "condizioni"]
 
     prompt = f"""
@@ -131,14 +127,13 @@ Esempio:
             }]
         )
 
-        # 3️⃣ estrai testo e convertilo in dict
         result_text = response.output_text.strip()
         data = json.loads(result_text)
 
-        # 4️⃣ assicurati che tutti i campi siano stringhe
+        # ✅ assicurati che tutti i campi siano stringhe valide per Streamlit
         for k in campi:
             if k not in data or data[k] is None:
-                data[k] = ""  # così Streamlit popola il form
+                data[k] = "non rilevato"  # o ""
             else:
                 data[k] = str(data[k]).strip()
 
@@ -147,7 +142,7 @@ Esempio:
     except json.JSONDecodeError:
         st.error("GPT non ha restituito JSON valido")
         st.code(result_text)
-        return {k: "" for k in campi}
+        return {k: "non rilevato" for k in campi}
 
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
