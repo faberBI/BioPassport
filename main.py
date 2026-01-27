@@ -120,17 +120,18 @@ with tabs[0]:
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
-                        image_file, client, tipo_prodotto
+                        services.image_to_base64(image_file), client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
+                st.info("I dati estratti dal PDF e dall'immagine sono stati popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
 # ======================================================
 with tabs[1]:
     if st.session_state.pdf_data:
+        # Popola automaticamente la validazione con i dati estratti
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
             title="✔ Dati certificati (PDF)"
@@ -143,6 +144,7 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.image_data:
+        # Popola automaticamente la validazione con i dati stimati
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
             title="👁️ Dati stimati da immagine"
@@ -155,7 +157,6 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
-
     else:
         st.info("Esegui prima l’analisi")
 
