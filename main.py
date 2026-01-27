@@ -120,9 +120,8 @@ with tabs[0]:
                     # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     # CONVERTI IN BASE64 PRIMA DI PASSARE A GPT
-                    image_b64 = services.image_to_base64(image_file)
                     st.session_state.image_data = services.gpt_analyze_image(
-                    image_b64, client, tipo_prodotto
+                    image_file, client, tipo_prodotto
                     )
                 st.success("Analisi completata")
                 st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
