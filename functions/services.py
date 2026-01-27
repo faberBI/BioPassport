@@ -72,29 +72,46 @@ TESTO:
         data = {k: None for k in campi}
     return data
 
-def gpt_analyze_image(image_b64, client: OpenAI, tipo):
-    """Analizza immagine tramite GPT (gpt-4o-mini)."""
+def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    """
+    Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
+    image_file: file caricato da Streamlit (io.BytesIO)
+    client: oggetto OpenAI
+    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
+    """
     campi = PRODUCT_FIELDS[tipo]["image"]
-    prompt = f"""
-Analizza l'immagine e restituisci SOLO JSON con: {', '.join(campi)}.
-Se un dato manca, usa null.
-NON inventare.
-"""
-    r = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        input=[{"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_b64}"}],
-        temperature=0
-    )
 
-    resp_text = r.choices[0].message.content.strip()
+    # Convertiamo immagine in Base64 (per eventuale descrizione)
+    image_b64 = base64.b64encode(image_file.getvalue()).decode()
+
+    # Prompt: chiediamo a GPT di analizzare l'immagine tramite descrizione
+    prompt = f"""
+Hai a disposizione un prodotto di tipo '{tipo}' rappresentato da un'immagine in Base64.
+Non puoi vedere l'immagine direttamente, quindi considera solo questa stringa Base64 come riferimento.
+Restituisci SOLO un JSON con i seguenti campi: {', '.join(campi)}.
+Se un campo non è chiaro o non è visibile, usa null.
+NON inventare nulla.
+"""
+
     try:
-        data = json.loads(resp_text)
+        # Chiamata GPT
+        r = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        # Convertiamo output in JSON
+        result_text = r.choices[0].message.content.strip()
+        data = json.loads(result_text)
+        return data
+
     except json.JSONDecodeError:
-        st.error("GPT non ha restituito JSON valido per l'immagine. Ecco la risposta grezza:")
-        st.code(resp_text)
-        data = {k: None for k in campi}
-    return data
+        st.error("Errore: GPT non ha restituito un JSON valido")
+        st.stop()
+    except Exception as e:
+        st.error(f"Errore GPT: {e}")
+        st.stop()
+
 
 # ======================================================
 # VALIDATION FORM
