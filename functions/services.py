@@ -173,6 +173,7 @@ def render_validation_form(data, title: str):
     - valori singoli
     - liste
     - dizionari annidati
+    Con expander per ogni livello annidato.
     """
     st.subheader(title)
     validated = {}
@@ -181,19 +182,23 @@ def render_validation_form(data, title: str):
         full_key = f"{parent} > {key}" if parent else key
 
         if isinstance(value, dict):
-            for k, v in value.items():
-                render_item(k, v, full_key)
+            # Crea un expander per ogni dizionario annidato
+            with st.expander(full_key, expanded=False):
+                for k, v in value.items():
+                    render_item(k, v, full_key)
         elif isinstance(value, list):
-            # converte lista in stringa separata da virgola
+            # Mostra lista come testo modificabile
             val_str = ", ".join(map(str, value)) if value else "non rilevato"
-            validated[full_key] = st.text_input(full_key, val_str)
+            validated[full_key] = st.text_area(full_key, val_str, height=50)
         else:
+            # Valore singolo
             validated[full_key] = st.text_input(full_key, "" if value is None else str(value))
 
     for k, v in data.items():
         render_item(k, v)
 
     return validated
+
 
 
 # ======================================================
