@@ -104,15 +104,18 @@ def gpt_analyze_image(image_file_or_b64, client: OpenAI, tipo):
     else:
         image_b64 = image_file_or_b64
 
-    # Prompt chiaro e limitato ai campi richiesti
+    # Prompt chiaro e limitato ai campi richiesti, includendo la Base64 reale
     prompt = f"""
 Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine.
-Non puoi vedere direttamente l'immagine, ma considera la stringa Base64 come riferimento.
+Ecco la Base64 dell'immagine: {image_b64}
+
 Estrai SOLO queste informazioni in JSON: {', '.join(campi)}.
 - colore: descrivi il colore predominante.
 - condizioni: descrivi lo stato generale (nuovo, usato, danneggiato, ecc.)
 Se non puoi determinare un campo, usa null.
 NON inventare altre informazioni.
+Esempio di output JSON:
+{{"colore": "bianco", "condizioni": "nuovo"}}
 """
 
     try:
@@ -142,6 +145,7 @@ NON inventare altre informazioni.
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
+
 
 
 
