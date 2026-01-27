@@ -70,7 +70,6 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
-
     st.stop()
 
 # ======================================================
@@ -105,11 +104,10 @@ def map_gpt_fields(pdf_or_image_data, tipo, source="pdf"):
     mapped = {}
     campi = services.PRODUCT_FIELDS[tipo][source]
     for campo in campi:
-        # Se il JSON GPT ha lo stesso campo, lo usa
         if campo in pdf_or_image_data:
             mapped[campo] = pdf_or_image_data.get(campo)
         else:
-            # Controlla versioni alternative (per esempio nome_produttore -> produttore)
+            # mappature alternative
             alt_map = {
                 "produttore": pdf_or_image_data.get("nome_produttore"),
                 "nome_produttore": pdf_or_image_data.get("produttore"),
@@ -124,6 +122,10 @@ def map_gpt_fields(pdf_or_image_data, tipo, source="pdf"):
                 "gtin": pdf_or_image_data.get("gtin"),
             }
             mapped[campo] = alt_map.get(campo, None)
+    # Converti None -> stringa vuota per Streamlit
+    for k in mapped:
+        if mapped[k] is None:
+            mapped[k] = ""
     return mapped
 
 # ======================================================
@@ -160,7 +162,8 @@ with tabs[1]:
     if st.session_state.pdf_data:
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)"
+            title="✔ Dati certificati (PDF)",
+            prefix="pdf"
         )
     else:
         st.info("Esegui prima l’analisi")
@@ -172,7 +175,8 @@ with tabs[2]:
     if st.session_state.image_data:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
-            title="👁️ Dati stimati da immagine"
+            title="👁️ Dati stimati da immagine",
+            prefix="image"
         )
 
         # Mostra immagine caricata
@@ -214,7 +218,7 @@ with tabs[3]:
 
             services.save_passport_to_file(passport_data)
 
-            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
+            # URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
