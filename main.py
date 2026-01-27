@@ -49,14 +49,14 @@ if passport_id:
 
     st.subheader("1️⃣ Product Identity (Certified)")
     for k, v in passport["data_source_pdf"].items():
-        st.write(f"**{k}**: {v}")
+        st.write(f"**{k.replace('_',' ').capitalize()}**: {v}")
 
     st.divider()
 
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
         if k != "immagine_base64":
-            st.write(f"**{k}**: {v}")
+            st.write(f"**{k.replace('_',' ').capitalize()}**: {v}")
 
     # Mostra immagine se presente
     if "immagine_base64" in passport["data_source_image"]:
@@ -70,7 +70,6 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
-
     st.stop()
 
 # ======================================================
@@ -117,14 +116,14 @@ with tabs[0]:
                         pdf_text, client, tipo_prodotto
                     )
 
-                    # Salva immagine caricata
+                    # Salva immagine caricata per pubblicazione
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
+                st.info("I dati sono stati estratti e saranno precompilati nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -147,7 +146,7 @@ with tabs[2]:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
             title="👁️ Dati stimati da immagine",
-            prefix=f"img_{tipo_prodotto}"
+            prefix=f"image_{tipo_prodotto}"
         )
 
         # Mostra immagine caricata
@@ -157,6 +156,7 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
+
     else:
         st.info("Esegui prima l’analisi")
 
