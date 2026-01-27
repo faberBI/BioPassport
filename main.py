@@ -3,216 +3,174 @@ import uuid
 from datetime import datetime
 from openai import OpenAI
 from functions import services
-from auth.user_login import check_login, create_user
 
 # ======================================================
 # CONFIG
 # ======================================================
 st.set_page_config(
-    page_title="Digital Product Passport (EU)",
-    layout="wide"
+    page_title="EU Digital Product Passport",
+    layout="centered"
 )
 
-# ======================================================
-# SESSION STATE
-# ======================================================
-for key in [
-    "logged_in",
-    "username",
-    "pdf_data",
-    "image_data",
-    "validated_pdf",
-    "validated_image",
-    "tipo_prodotto",
-    "error_log"
-]:
-    if key not in st.session_state:
-        st.session_state[key] = False if key == "logged_in" else None
-
-# ======================================================
-# OPENAI CLIENT
-# ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# LOGIN / REGISTRAZIONE
+# ROUTING (QR → PAGINA PUBBLICA)
 # ======================================================
-if not st.session_state.logged_in:
-    st.title("🔒 Accesso al sistema")
+passport_id = st.query_params.get("passport_id")
 
-    tab_login, tab_signup = st.tabs(["Accedi", "Crea account"])
+if passport_id:
+    passport = services.load_passport_from_file(passport_id)
 
-    with tab_login:
-        username_login = st.text_input("Username", key="login_user")
-        password_login = st.text_input("Password", type="password", key="login_pass")
+    if not passport:
+        st.error("Digital Product Passport not found")
+        st.stop()
 
-        if st.button("Accedi"):
-            if check_login(username_login, password_login):
-                st.session_state.logged_in = True
-                st.session_state.username = username_login
-                st.rerun()
-            else:
-                st.error("Username o password errati")
+    # NASCONDI TUTTA LA UI STREAMLIT
+    st.markdown("""
+        <style>
+        [data-testid="stSidebar"] {display: none;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        </style>
+    """, unsafe_allow_html=True)
 
-    with tab_signup:
-        username_signup = st.text_input("Nuovo Username", key="signup_user")
-        password_signup = st.text_input("Nuova Password", type="password", key="signup_pass")
+    st.title("🇪🇺 Digital Product Passport")
+    st.caption("Regulation (EU) – Ecodesign for Sustainable Products (ESPR)")
 
-        if st.button("Crea account"):
-            if create_user(username_signup, password_signup):
-                st.success("Account creato. Ora puoi accedere.")
-            else:
-                st.error("Username già esistente")
+    st.markdown(f"""
+    **Product ID:** `{passport['id']}`  
+    **Product type:** {passport['product_type']}  
+    **Created:** {passport['metadata']['created_at']}  
+    **Version:** {passport['metadata']['version']}
+    """)
 
-# ======================================================
-# MAIN APP
-# ======================================================
-else:
-    # ---------------- Sidebar ----------------
-    st.sidebar.success(f"Connesso come: {st.session_state.username}")
+    st.divider()
 
-    if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.rerun()
+    st.subheader("1️⃣ Product Identity (Certified)")
+    for k, v in passport["data_source_pdf"].items():
+        st.write(f"**{k}**: {v}")
 
-    st.sidebar.info(
-        "📞 +39 0123 456789\n\n"
-        "✉️ info@azienda.it"
+    st.divider()
+
+    st.subheader("2️⃣ Visual / Estimated Information")
+    for k, v in passport["data_source_image"].items():
+        st.write(f"**{k}**: {v}")
+
+    st.caption(
+        "Public read-only Digital Product Passport. "
+        "Generated via AI extraction and human validation."
     )
 
-    # ---------------- Header ----------------
-    st.title("🪑 Digital Product Passport (EU)")
+    st.stop()
 
-    tipo_prodotto = st.selectbox(
-        "Seleziona il tipo di prodotto",
-        ["mobile", "lampada", "bicicletta"]
-    )
-    st.session_state.tipo_prodotto = tipo_prodotto
+# ======================================================
+# BACKOFFICE
+# ======================================================
 
-    tabs = st.tabs([
-        "📤 Upload & Analisi",
-        "📝 Validazione Dati (PDF)",
-        "👁️ Validazione Dati (Immagine)",
-        "🔗 Digital Product Passport"
-    ])
+# SESSION STATE
+for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
+    if k not in st.session_state:
+        st.session_state[k] = None
 
-    # ======================================================
-    # TAB 1 — Upload & Analisi
-    # ======================================================
-    with tabs[0]:
-        with st.form("upload_form"):
-            pdf_file = st.file_uploader(
-                "Carica PDF del prodotto",
-                type=["pdf"]
-            )
-            image_file = st.file_uploader(
-                "Carica immagine del prodotto",
-                type=["jpg", "jpeg", "png"]
-            )
+st.sidebar.title("🛠 Backoffice")
+st.sidebar.info("EU Digital Product Passport")
 
-            submitted = st.form_submit_button("🔍 Analizza")
+st.title("🪑 Digital Product Passport – Backoffice")
 
-            if submitted:
-                st.session_state.error_log = []
+tipo_prodotto = st.selectbox(
+    "Seleziona tipo prodotto",
+    ["mobile", "lampada", "bicicletta"]
+)
 
-                if not pdf_file or not image_file:
-                    st.warning("Carica sia il PDF che l'immagine.")
-                else:
-                    with st.spinner("Analisi in corso…"):
-                        try:
-                            pdf_text = services.extract_text_from_pdf(pdf_file)
-                            st.session_state.pdf_data = services.gpt_extract_from_pdf(
-                                pdf_text, client, tipo_prodotto
-                            )
-                        except Exception as e:
-                            st.session_state.pdf_data = {}
-                            st.session_state.error_log.append(str(e))
+tabs = st.tabs([
+    "📤 Upload & Analisi",
+    "📝 Validazione PDF",
+    "👁️ Validazione Immagine",
+    "🔗 Pubblica DPP"
+])
 
-                        try:
-                            image_b64 = services.image_to_base64(image_file)
-                            st.session_state.image_data = services.gpt_analyze_image(
-                                image_b64, client, tipo_prodotto
-                            )
-                        except Exception as e:
-                            st.session_state.image_data = {}
-                            st.session_state.error_log.append(str(e))
+# ======================================================
+# TAB 1 — UPLOAD & GPT
+# ======================================================
+with tabs[0]:
+    with st.form("upload_form"):
+        pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
+        image_file = st.file_uploader("Immagine prodotto", type=["jpg","png","jpeg"])
+        submitted = st.form_submit_button("🔍 Analizza")
 
-                    st.success("Analisi completata")
+        if submitted:
+            if not pdf_file or not image_file:
+                st.warning("Carica PDF e immagine")
+            else:
+                with st.spinner("Analisi GPT in corso…"):
+                    pdf_text = services.extract_text_from_pdf(pdf_file)
+                    st.session_state.pdf_data = services.gpt_extract_from_pdf(
+                        pdf_text, client, tipo_prodotto
+                    )
 
-    # ======================================================
-    # TAB 2 — Validazione PDF
-    # ======================================================
-    with tabs[1]:
-        if st.session_state.pdf_data:
-            st.session_state.validated_pdf = services.render_validation_form(
-                st.session_state.pdf_data,
-                title="✔ Dati certificati (PDF)"
-            )
-        else:
-            st.info("Completa prima l’analisi del PDF")
+                    image_b64 = services.image_to_base64(image_file)
+                    st.session_state.image_data = services.gpt_analyze_image(
+                        image_b64, client, tipo_prodotto
+                    )
 
-    # ======================================================
-    # TAB 3 — Validazione Immagine
-    # ======================================================
-    with tabs[2]:
-        if st.session_state.image_data:
-            st.session_state.validated_image = services.render_validation_form(
-                st.session_state.image_data,
-                title="👁️ Dati stimati da immagine"
-            )
-        else:
-            st.info("Completa prima l’analisi dell’immagine")
+                st.success("Analisi completata")
 
-    # ======================================================
-    # TAB 4 — DIGITAL PRODUCT PASSPORT (EU)
-    # ======================================================
-    with tabs[3]:
-        if st.session_state.validated_pdf and st.session_state.validated_image:
-            with st.form("create_passport_form"):
-                submitted_pass = st.form_submit_button("🚀 Pubblica Digital Product Passport")
+# ======================================================
+# TAB 2 — VALIDAZIONE PDF
+# ======================================================
+with tabs[1]:
+    if st.session_state.pdf_data:
+        st.session_state.validated_pdf = services.render_validation_form(
+            st.session_state.pdf_data,
+            title="✔ Dati certificati (PDF)"
+        )
+    else:
+        st.info("Esegui prima l’analisi")
 
-                if submitted_pass:
-                    required = services.get_required_fields(tipo_prodotto)
-                    missing = [
-                        f for f in required
-                        if not st.session_state.validated_pdf.get(f)
-                    ]
+# ======================================================
+# TAB 3 — VALIDAZIONE IMMAGINE
+# ======================================================
+with tabs[2]:
+    if st.session_state.image_data:
+        st.session_state.validated_image = services.render_validation_form(
+            st.session_state.image_data,
+            title="👁️ Dati stimati da immagine"
+        )
+    else:
+        st.info("Esegui prima l’analisi")
 
-                    if missing:
-                        st.warning(
-                            f"Campi obbligatori mancanti: {', '.join(missing)}"
-                        )
-                    else:
-                        product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+# ======================================================
+# TAB 4 — PUBBLICAZIONE DPP
+# ======================================================
+with tabs[3]:
+    if st.session_state.validated_pdf and st.session_state.validated_image:
 
-                        passport_data = {
-                            "id": product_id,
-                            "product_type": tipo_prodotto,
-                            "created_at": datetime.utcnow().isoformat(),
-                            "data_source_pdf": st.session_state.validated_pdf,
-                            "data_source_image": st.session_state.validated_image,
-                            "dpp_version": "EU-DPP-1.0"
-                        }
+        if st.button("🚀 Pubblica Digital Product Passport"):
 
-                        services.save_passport_to_file(passport_data)
+            product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-                        public_url = services.build_passport_url(product_id)
-                        qr_buf = services.generate_qr_from_url(public_url)
+            passport_data = {
+                "id": product_id,
+                "product_type": tipo_prodotto,
+                "metadata": {
+                    "created_at": datetime.utcnow().isoformat(),
+                    "version": "EU-DPP-1.0"
+                },
+                "data_source_pdf": st.session_state.validated_pdf,
+                "data_source_image": st.session_state.validated_image
+            }
 
-                        st.success("Digital Product Passport pubblicato")
+            services.save_passport_to_file(passport_data)
 
-                        st.subheader("🔗 Accesso pubblico")
-                        st.image(qr_buf)
-                        st.code(public_url)
+            public_url = f"https://TUOAPP.streamlit.app/?passport_id={product_id}"
+            qr_buf = services.generate_qr_from_url(public_url)
 
-        else:
-            st.info("Completa prima la validazione dei dati")
+            st.success("Digital Product Passport pubblicato")
 
-    # ======================================================
-    # ERROR LOG
-    # ======================================================
-    if st.session_state.error_log:
-        st.subheader("🛑 Errori")
-        for err in st.session_state.error_log:
-            st.text(err)
+            st.subheader("🔗 Accesso pubblico")
+            st.image(qr_buf)
+            st.code(public_url)
+
+    else:
+        st.info("Completa validazione PDF e immagine")
