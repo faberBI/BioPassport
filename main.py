@@ -2,7 +2,7 @@ import streamlit as st
 import uuid
 from datetime import datetime
 from openai import OpenAI
-from functions import services
+from functions import services  # Assicurati che services.py sia nello stesso folder
 
 # ======================================================
 # CONFIG
@@ -12,27 +12,27 @@ st.set_page_config(
     layout="centered"
 )
 
-client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
+client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
 # ======================================================
-# ROUTING (QR → PAGINA PUBBLICA)
+# ROUTING: QR → PAGINA PUBBLICA
 # ======================================================
-passport_id = st.query_params.get("passport_id")
-
+passport_id = st.experimental_get_query_params().get("passport_id")
 if passport_id:
+    passport_id = passport_id[0]
     passport = services.load_passport_from_file(passport_id)
 
     if not passport:
         st.error("Digital Product Passport not found")
         st.stop()
 
-    # NASCONDI TUTTA LA UI STREAMLIT
+    # NASCONDI UI STREAMLIT
     st.markdown("""
-        <style>
-        [data-testid="stSidebar"] {display: none;}
-        header {visibility: hidden;}
-        footer {visibility: hidden;}
-        </style>
+    <style>
+    [data-testid="stSidebar"] {display: none;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
     """, unsafe_allow_html=True)
 
     st.title("🇪🇺 Digital Product Passport")
@@ -46,13 +46,11 @@ if passport_id:
     """)
 
     st.divider()
-
     st.subheader("1️⃣ Product Identity (Certified)")
     for k, v in passport["data_source_pdf"].items():
         st.write(f"**{k}**: {v}")
 
     st.divider()
-
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
         st.write(f"**{k}**: {v}")
@@ -61,13 +59,11 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
-
     st.stop()
 
 # ======================================================
 # BACKOFFICE
 # ======================================================
-
 # SESSION STATE
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
     if k not in st.session_state:
@@ -115,6 +111,10 @@ with tabs[0]:
                     )
 
                 st.success("Analisi completata")
+                st.json({
+                    "pdf_data": st.session_state.pdf_data,
+                    "image_data": st.session_state.image_data
+                })
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
@@ -147,7 +147,6 @@ with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
 
         if st.button("🚀 Pubblica Digital Product Passport"):
-
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
             passport_data = {
@@ -163,11 +162,10 @@ with tabs[3]:
 
             services.save_passport_to_file(passport_data)
 
-            public_url = f"https://TUOAPP.streamlit.app/?passport_id={product_id}"
+            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
             st.success("Digital Product Passport pubblicato")
-
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
