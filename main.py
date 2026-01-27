@@ -4,6 +4,7 @@ from datetime import datetime
 from openai import OpenAI
 from functions import services
 from PIL import Image
+from io import BytesIO
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -16,6 +17,10 @@ st.set_page_config(
 # Carica il logo
 logo = Image.open("functions/logo_nuvia.jpeg")
 
+buffered = BytesIO()
+logo.save(buffered, format="PNG")
+img_str = base64.b64encode(buffered.getvalue()).decode()
+
 # Mostra logo in alto
 st.image(logo, width=350)
 
@@ -23,6 +28,7 @@ st.image(logo, width=350)
 # CSS PERSONALIZZATO
 # ======================================================
 st.markdown("""
+<img src="data:image/png;base64,{img_str}" width="260">
 <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700&display=swap" rel="stylesheet">
 
 <style>
