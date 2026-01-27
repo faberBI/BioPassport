@@ -1,5 +1,3 @@
----
-
 **Nuvia Digital Product Passport**
 Web app interattiva per creare e visualizzare passaporti digitali dei prodotti secondo il regolamento EU Ecodesign (ESPR).
 Carica PDF e immagini del prodotto, estrai automaticamente i dati certificati e le informazioni visive tramite AI, valida manualmente e pubblica un passaporto digitale accessibile via QR code.
@@ -12,4 +10,3 @@ Carica PDF e immagini del prodotto, estrai automaticamente i dati certificati e 
 * UI moderna con font Nunito Sans e palette personalizzata
 * Logo Nuvia integrato
 
----
