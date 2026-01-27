@@ -12,24 +12,21 @@ st.set_page_config(
     layout="centered"
 )
 
-# ======================================================
-# OPENAI CLIENT
-# ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# PAGINA PUBBLICA (QR → passport_id)
+# ROUTING (QR → PAGINA PUBBLICA)
 # ======================================================
-passport_id = st.experimental_get_query_params().get("passport_id", [None])[0]
+passport_id = st.query_params.get("passport_id")
 
 if passport_id:
     passport = services.load_passport_from_file(passport_id)
 
     if not passport:
-        st.error("Digital Product Passport non trovato")
+        st.error("Digital Product Passport not found")
         st.stop()
 
-    # Nascondi UI Streamlit
+    # NASCONDI UI STREAMLIT
     st.markdown("""
         <style>
         [data-testid="stSidebar"] {display: none;}
@@ -42,18 +39,20 @@ if passport_id:
     st.caption("Regulation (EU) – Ecodesign for Sustainable Products (ESPR)")
 
     st.markdown(f"""
-**Product ID:** `{passport['id']}`  
-**Product type:** {passport['product_type']}  
-**Created:** {passport['metadata']['created_at']}  
-**Version:** {passport['metadata']['version']}
-""")
+    **Product ID:** `{passport['id']}`  
+    **Product type:** {passport['product_type']}  
+    **Created:** {passport['metadata']['created_at']}  
+    **Version:** {passport['metadata']['version']}
+    """)
 
     st.divider()
+
     st.subheader("1️⃣ Product Identity (Certified)")
     for k, v in passport["data_source_pdf"].items():
         st.write(f"**{k}**: {v}")
 
     st.divider()
+
     st.subheader("2️⃣ Visual / Estimated Information")
     for k, v in passport["data_source_image"].items():
         st.write(f"**{k}**: {v}")
@@ -62,12 +61,14 @@ if passport_id:
         "Public read-only Digital Product Passport. "
         "Generated via AI extraction and human validation."
     )
+
     st.stop()
 
 # ======================================================
 # BACKOFFICE
 # ======================================================
-# Session state
+
+# SESSION STATE
 for k in ["pdf_data", "image_data", "validated_pdf", "validated_image"]:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -100,7 +101,7 @@ with tabs[0]:
 
         if submitted:
             if not pdf_file or not image_file:
-                st.warning("Carica PDF e immagine prima di procedere")
+                st.warning("Carica PDF e immagine")
             else:
                 with st.spinner("Analisi GPT in corso…"):
                     pdf_text = services.extract_text_from_pdf(pdf_file)
@@ -111,6 +112,7 @@ with tabs[0]:
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
                     )
+
                 st.success("Analisi completata")
 
 # ======================================================
@@ -123,7 +125,7 @@ with tabs[1]:
             title="✔ Dati certificati (PDF)"
         )
     else:
-        st.info("Esegui prima l’analisi PDF")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -135,19 +137,18 @@ with tabs[2]:
             title="👁️ Dati stimati da immagine"
         )
     else:
-        st.info("Esegui prima l’analisi immagine")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
 # TAB 4 — PUBBLICAZIONE DPP
 # ======================================================
 with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
         if st.button("🚀 Pubblica Digital Product Passport"):
 
-            # Genera ID unico prodotto
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-            # Costruisci JSON Passport
             passport_data = {
                 "id": product_id,
                 "product_type": tipo_prodotto,
@@ -159,16 +160,23 @@ with tabs[3]:
                 "data_source_image": st.session_state.validated_image
             }
 
-            # Salva su disco
+            # Salva su file
             services.save_passport_to_file(passport_data)
 
-            # Genera QR
-            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
+            # URL pubblico
+            try:
+                app_url = st.secrets["APP_URL"]
+            except KeyError:
+                st.error("Devi aggiungere APP_URL in st.secrets, ad esempio https://nome-tuo-app.streamlit.app")
+                st.stop()
+
+            public_url = f"{app_url}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
             st.success("Digital Product Passport pubblicato")
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
+
     else:
-        st.info("Completa validazione PDF e immagine prima di pubblicare")
+        st.info("Completa validazione PDF e immagine")
