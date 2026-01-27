@@ -14,8 +14,10 @@ import base64
 # ======================================================
 st.set_page_config(
     page_title="Nuvia Digital Product Passport",
+    page_icon="functions/logo_nuvia.jpeg",  # piccolo logo per tab browser
     layout="centered"
 )
+
 
 # ======================================================
 # STILE GLOBALE + LOGO A SINISTRA
