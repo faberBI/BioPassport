@@ -246,13 +246,29 @@ def image_to_base64(image_file):
     """
     return base64.b64encode(image_file.getvalue()).decode()
 
-def render_validation_form(data, title):
+def render_validation_form(data, title, prefix="form"):
+    """
+    Crea form Streamlit per validare manualmente i dati estratti.
+    - data: dizionario dei dati (da GPT)
+    - title: titolo form
+    - prefix: stringa per chiavi uniche in session_state
+    """
     st.subheader(title)
     validated = {}
+
     for k, v in data.items():
-        label = k
-        if k in ["manufacturer_name","gtin","serial_number"]:  # esempio campi obbligatori
-            label += " *"  # aggiungi asterisco
-        validated[k] = st.text_input(label, "" if v is None else str(v))
+        session_key = f"{prefix}_{k}"
+
+        # Se la chiave non esiste nello session_state, inizializzala
+        if session_key not in st.session_state:
+            st.session_state[session_key] = "" if v is None else str(v)
+
+        # Usa il valore corrente in session_state come default
+        validated[k] = st.text_input(k, value=st.session_state[session_key], key=session_key)
+
+        # Aggiorna session_state con il nuovo valore
+        st.session_state[session_key] = validated[k]
+
     return validated
+
 
