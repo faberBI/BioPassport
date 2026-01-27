@@ -90,51 +90,56 @@ TESTO:
         st.stop()
 
 
-def gpt_analyze_image(image_file_or_b64, client: OpenAI, tipo):
-    campi = PRODUCT_FIELDS[tipo]["image"]
+def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    """
+    Analizza un'immagine prodotto e restituisce JSON con i campi stimati:
+        - colore
+        - condizioni
+    Usa un modello multimodale (chatgpt-image-latest o gpt-4o)
+    
+    image_file: st.file_uploader (UploadedFile)
+    client: oggetto OpenAI
+    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
+    """
+    campi = ["colore", "condizioni"]
 
-    if hasattr(image_file_or_b64, "getvalue"):
-        img = Image.open(image_file_or_b64)
-        img.thumbnail((100, 100))
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        buf = BytesIO()
-        img.save(buf, format="JPEG")
-        buf.seek(0)
-        image_b64 = base64.b64encode(buf.read()).decode()
-    else:
-        image_b64 = image_file_or_b64
-
+    # Prompt per ottenere solo JSON strutturato
     prompt = f"""
-Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine ridotta.
-Ecco la Base64 dell'immagine: {image_b64}
+Hai un prodotto di tipo '{tipo}' mostrato nell'immagine allegata.
+Estrai SOLO queste informazioni in formato JSON:
+- colore: descrivi il colore predominante
+- condizioni: descrivi se il prodotto è nuovo, usato, danneggiato, ecc.
 
-Estrai SOLO queste informazioni in JSON: {', '.join(campi)}.
-- colore: descrivi il colore predominante.
-- condizioni: descrivi lo stato generale (nuovo, usato, danneggiato, ecc.)
 Se non puoi determinare un campo, usa null.
-NON inventare altre informazioni.
-Esempio di output JSON:
-{{"colore": "bianco", "condizioni": "nuovo"}}
+Esempio output: {{"colore": "bianco", "condizioni": "nuovo"}}
 """
 
     try:
-        r = client.chat.completions.create(
-            model="gpt-4o-mini",
+        # Chiamata all'endpoint chat multimodale
+        response = client.chat.completions.create(
+            model="chatgpt-image-latest",   # o "gpt-4o" se vuoi GPT multimodale
             messages=[{"role": "user", "content": prompt}],
-            temperature=0
+            temperature=0,
+            files=[("image", image_file)]   # Passaggio diretto dell'immagine
         )
-        result_text = r.choices[0].message.content.strip()
+
+        result_text = response.choices[0].message.content.strip()
+
+        # Prova a parsare JSON
         data = json.loads(result_text)
+
+        # Assicura che tutti i campi siano presenti
         for c in campi:
             if c not in data:
                 data[c] = None
+
         return data
 
     except json.JSONDecodeError:
         st.error("Errore: GPT non ha restituito JSON valido dall'immagine")
         st.code(result_text)
         return {k: None for k in campi}
+
     except Exception as e:
         st.error(f"Errore GPT: {e}")
         st.stop()
