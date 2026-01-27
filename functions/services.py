@@ -92,22 +92,19 @@ TESTO:
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     """
-    Analizza un'immagine prodotto usando gpt-image-1 (vera visione).
-    image_file: UploadedFile Streamlit
-    client: OpenAI client
-    tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
+    Analizza un'immagine prodotto usando vera visione (Responses API).
     """
 
     campi = ["colore", "condizioni"]
 
     prompt = f"""
-Hai davanti l'immagine di un prodotto di tipo '{tipo}'.
+Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
-Analizza VISIVAMENTE l'immagine e restituisci SOLO un JSON valido con:
-- colore: colore predominante del prodotto
-- condizioni: stato generale (nuovo, usato, danneggiato, ecc.)
+Restituisci SOLO JSON valido con:
+- colore: colore predominante
+- condizioni: stato (nuovo, usato, danneggiato, ecc.)
 
-Se un campo non è determinabile, usa null.
+Se non determinabile, usa null.
 NON aggiungere testo fuori dal JSON.
 
 Esempio:
@@ -115,16 +112,25 @@ Esempio:
 """
 
     try:
-        response = client.images.analyze(
-            model="gpt-image-1",
-            image=image_file,
-            instructions=prompt
+        response = client.responses.create(
+            model="gpt-4o",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {
+                            "type": "input_image",
+                            "image_file": image_file
+                        }
+                    ]
+                }
+            ]
         )
 
         result_text = response.output_text.strip()
         data = json.loads(result_text)
 
-        # sicurezza: assicurati che i campi esistano
         for k in campi:
             if k not in data:
                 data[k] = None
@@ -139,8 +145,6 @@ Esempio:
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         st.stop()
-
-
 
 
 # ======================================================
