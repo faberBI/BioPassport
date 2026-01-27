@@ -16,12 +16,12 @@ PASSPORT_DIR = "passports"
 
 PRODUCT_FIELDS = {
     "mobile": {
-        "pdf": ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione"],
-        "image": ["colore","condizioni"]
+        "pdf": ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione", "certificazione_di_sicurezza", "certificazione_di_sostenibilita", "descrizione_prodotto"],
+        "image": ["tipologia_prodotto", "colore","condizioni"]
     },
     "lampada": {
         "pdf": ["nome_prodotto","produttore","materiale","wattaggio"],
-        "image": ["colore","stile"]
+        "image": ["tipologia_prodotto","colore","stile"]
     },
     "bicicletta": {
         "pdf": ["nome_prodotto","produttore","modello","anno_produzione"],
