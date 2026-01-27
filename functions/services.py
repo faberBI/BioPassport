@@ -87,52 +87,46 @@ TESTO:
         st.stop()
 
 
-def gpt_analyze_image(image_file, client: OpenAI, tipo):
+def gpt_analyze_image(image_b64, client: OpenAI, tipo):
     """
-    Analizza un'immagine prodotto e restituisce JSON con i campi stimati (solo colore e condizioni).
-    image_file: file caricato da Streamlit (UploadedFile)
+    Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
+    image_b64: stringa Base64 dell'immagine
     client: oggetto OpenAI
     tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
+    
+    Restituisce un dizionario Python con:
+        - colore
+        - condizioni
     """
-    campi = PRODUCT_FIELDS[tipo]["image"]
+    # Campi che vogliamo dall'immagine
+    campi = ["colore", "condizioni"]
 
-    # Converti in base64 per includere nel prompt come riferimento
-    image_b64 = base64.b64encode(image_file.getvalue()).decode()
-
-    # Prompt chiaro e limitato ai campi richiesti
     prompt = f"""
-Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine.
-Non puoi vedere direttamente l'immagine, ma considera la stringa Base64 come riferimento.
-Estrai SOLO queste informazioni in JSON: {', '.join(campi)}.
-- colore: descrivi il colore predominante.
-- condizioni: descrivi lo stato generale (nuovo, usato, danneggiato, ecc.)
-Se non puoi determinare un campo, usa null.
-NON inventare altre informazioni.
+Hai a disposizione un prodotto di tipo '{tipo}' rappresentato da un'immagine codificata in Base64.
+Non puoi vedere l'immagine direttamente, considera solo la Base64 come riferimento.
+Restituisci SOLO un JSON con i seguenti campi: {', '.join(campi)}.
+- 'colore': descrivi il colore dominante del prodotto.
+- 'condizioni': descrivi se il prodotto è nuovo, usato, danneggiato, ecc.
+Se un campo non è chiaro, usa null.
+NON inventare nulla, restituisci solo JSON valido.
+Esempio di output:
+{{"colore": "bianco", "condizioni": "nuovo"}}
 """
 
+    r = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+
+    result_text = r.choices[0].message.content.strip()
+
     try:
-        r = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-
-        result_text = r.choices[0].message.content.strip()
-        # Prova a parsare JSON
         data = json.loads(result_text)
-        return data
-
     except json.JSONDecodeError:
-        st.error("Errore: GPT non ha restituito JSON valido dall'immagine")
-        st.code(result_text)
-        # ritorna campi vuoti se JSON non valido
-        return {k: None for k in campi}
-
-    except Exception as e:
-        st.error(f"Errore GPT: {e}")
-        st.stop()
-
-
+        # se GPT non restituisce JSON valido, ritorna campi a null
+        data = {campo: None for campo in campi}
+    return data
 
 
 # ======================================================
