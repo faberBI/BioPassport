@@ -117,7 +117,7 @@ with tabs[0]:
                         pdf_text, client, tipo_prodotto
                     )
 
-                    # Salva immagine caricata per pubblicazione
+                    # Salva immagine caricata
                     st.session_state.uploaded_image_file = image_file
                     st.session_state.image_data = services.gpt_analyze_image(
                         image_file, client, tipo_prodotto
