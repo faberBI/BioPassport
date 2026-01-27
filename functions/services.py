@@ -115,7 +115,7 @@ Esempio:
         image_bytes = image_file.getvalue()
 
         response = client.responses.create(
-            model="gpt-4o",
+            model="gpt-4.1-mini",
             input=[
                 {
                     "role": "user",
