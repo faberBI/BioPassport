@@ -6,6 +6,8 @@ import os
 from io import BytesIO
 from openai import OpenAI
 import streamlit as st
+from PIL import Image
+
 
 # ======================================================
 # CONFIG
@@ -98,15 +100,23 @@ def gpt_analyze_image(image_file_or_b64, client: OpenAI, tipo):
     """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
-    # Se riceve un UploadedFile, converte in Base64; altrimenti assume già Base64
+    # Se riceve UploadedFile, ridimensiona e converte in Base64
     if hasattr(image_file_or_b64, "getvalue"):
-        image_b64 = base64.b64encode(image_file_or_b64.getvalue()).decode()
+        # Apri immagine con Pillow
+        img = Image.open(image_file_or_b64)
+        # Riduci a thumbnail 100x100
+        img.thumbnail((100, 100))
+        # Salva in buffer BytesIO in JPEG
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode()
     else:
-        image_b64 = image_file_or_b64
+        image_b64 = image_file_or_b64  # assume già Base64
 
-    # Prompt chiaro e limitato ai campi richiesti, includendo la Base64 reale
+    # Prompt chiaro e limitato ai campi richiesti, includendo la Base64 ridotta
     prompt = f"""
-Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine.
+Hai un prodotto di tipo '{tipo}' rappresentato da un'immagine ridotta.
 Ecco la Base64 dell'immagine: {image_b64}
 
 Estrai SOLO queste informazioni in JSON: {', '.join(campi)}.
