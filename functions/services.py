@@ -192,3 +192,10 @@ def generate_qr_from_url(url):
     img.save(buf)
     buf.seek(0)
     return buf
+
+def upload_image_to_openai(image_file, client: OpenAI):
+    uploaded = client.files.create(
+        file=image_file,
+        purpose="vision"
+    )
+    return uploaded.id
