@@ -15,12 +15,6 @@ st.set_page_config(
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# CAMPi OBBLIGATORI PER VALIDAZIONE
-# ======================================================
-OBBLIGATORI_PDF = ["nome_prodotto","produttore","materiali","dimensioni","anno_produzione"]
-OBBLIGATORI_IMAGE = ["colore","condizioni"]
-
-# ======================================================
 # ROUTING (QR → PAGINA PUBBLICA)
 # ======================================================
 passport_id = st.query_params.get("passport_id")
@@ -130,23 +124,19 @@ with tabs[0]:
                     )
 
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e saranno precompilati nei form di validazione.")
+                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE PDF
 # ======================================================
 with tabs[1]:
     if st.session_state.pdf_data:
-        validated_pdf = {}
-        st.subheader("✔ Dati certificati (PDF)")
-        for k, v in st.session_state.pdf_data.items():
-            # Prendi valore già inserito dall'utente se presente
-            default_value = st.session_state.validated_pdf[k] if st.session_state.validated_pdf and k in st.session_state.validated_pdf else v
-            label = k
-            if k in OBBLIGATORI_PDF:
-                label += " *"
-            validated_pdf[k] = st.text_input(label, "" if default_value is None else str(default_value))
-        st.session_state.validated_pdf = validated_pdf
+        st.session_state.validated_pdf = services.render_validation_form(
+            st.session_state.pdf_data,
+            title="✔ Dati certificati (PDF)",
+            prefix=f"pdf_{tipo_prodotto}"
+        )
+        st.info("Compila eventuali campi obbligatori mancanti evidenziati dalla normativa.")
     else:
         st.info("Esegui prima l’analisi")
 
@@ -155,12 +145,11 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.image_data:
-        validated_image = {}
-        st.subheader("👁️ Dati stimati da immagine")
-        for k, v in st.session_state.image_data.items():
-            default_value = st.session_state.validated_image[k] if st.session_state.validated_image and k in st.session_state.validated_image else v
-            validated_image[k] = st.text_input(k, "" if default_value is None else str(default_value))
-        st.session_state.validated_image = validated_image
+        st.session_state.validated_image = services.render_validation_form(
+            st.session_state.image_data,
+            title="👁️ Dati stimati da immagine",
+            prefix=f"img_{tipo_prodotto}"
+        )
 
         # Mostra immagine caricata
         if st.session_state.uploaded_image_file:
@@ -169,7 +158,6 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
-
     else:
         st.info("Esegui prima l’analisi")
 
@@ -202,7 +190,7 @@ with tabs[3]:
 
             services.save_passport_to_file(passport_data)
 
-            # URL pubblico
+            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
