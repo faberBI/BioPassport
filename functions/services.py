@@ -75,32 +75,33 @@ TESTO:
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     """
     Analizza un'immagine prodotto e restituisce JSON con i campi stimati.
-    image_file: file caricato da Streamlit (io.BytesIO)
+    image_file: file caricato da Streamlit (UploadedFile) O già Base64
     client: oggetto OpenAI
     tipo: tipo prodotto ('mobile', 'lampada', 'bicicletta')
     """
     campi = PRODUCT_FIELDS[tipo]["image"]
 
-    # Convertiamo immagine in Base64 (per eventuale descrizione)
-    image_b64 = base64.b64encode(image_file.getvalue()).decode()
+    # Se image_file è UploadedFile (BytesIO), converti in Base64
+    if hasattr(image_file, "getvalue"):
+        image_b64 = base64.b64encode(image_file.getvalue()).decode()
+    else:
+        # altrimenti assumiamo sia già Base64
+        image_b64 = image_file
 
-    # Prompt: chiediamo a GPT di analizzare l'immagine tramite descrizione
     prompt = f"""
 Hai a disposizione un prodotto di tipo '{tipo}' rappresentato da un'immagine in Base64.
-Non puoi vedere l'immagine direttamente, quindi considera solo questa stringa Base64 come riferimento.
+Non puoi vedere l'immagine direttamente, considera solo la stringa Base64 come riferimento.
 Restituisci SOLO un JSON con i seguenti campi: {', '.join(campi)}.
-Se un campo non è chiaro o non è visibile, usa null.
+Se un campo non è chiaro o non visibile, usa null.
 NON inventare nulla.
 """
 
     try:
-        # Chiamata GPT
         r = client.chat.completions.create(
             model="gpt-4.1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        # Convertiamo output in JSON
         result_text = r.choices[0].message.content.strip()
         data = json.loads(result_text)
         return data
