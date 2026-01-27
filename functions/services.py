@@ -19,16 +19,16 @@ PRODUCT_FIELDS = {
             "materiali",
             "dimensioni",
             "anno_produzione",
-            "manufacturer_name",        # nuovo
-            "manufacturer_address",     # nuovo
-            "gtin",                     # nuovo
-            "serial_number",            # nuovo
-            "material_composition_detailed", # nuovo
-            "carbon_footprint",         # nuovo
-            "energy_use",               # nuovo
-            "compliance_documents",     # nuovo
-            "usage_instructions",       # nuovo
-            "end_of_life_instructions"  # nuovo
+            "nome_produttore",             # ex manufacturer_name
+            "indirizzo_produttore",        # ex manufacturer_address
+            "gtin",                        # codice a barre internazionale
+            "numero_serie",                # ex serial_number
+            "composizione_materiali_dettagliata", # ex material_composition_detailed
+            "impronta_carbonio",           # ex carbon_footprint
+            "consumo_energia",             # ex energy_use
+            "documenti_conformita",        # ex compliance_documents
+            "istruzioni_uso",              # ex usage_instructions
+            "istruzioni_fine_vita"         # ex end_of_life_instructions
         ],
         "image": [
             "colore",
@@ -41,16 +41,16 @@ PRODUCT_FIELDS = {
             "produttore",
             "materiale",
             "wattaggio",
-            "manufacturer_name",
-            "manufacturer_address",
+            "nome_produttore",
+            "indirizzo_produttore",
             "gtin",
-            "serial_number",
-            "material_composition_detailed",
-            "carbon_footprint",
-            "energy_use",
-            "compliance_documents",
-            "usage_instructions",
-            "end_of_life_instructions"
+            "numero_serie",
+            "composizione_materiali_dettagliata",
+            "impronta_carbonio",
+            "consumo_energia",
+            "documenti_conformita",
+            "istruzioni_uso",
+            "istruzioni_fine_vita"
         ],
         "image": [
             "colore",
@@ -64,16 +64,16 @@ PRODUCT_FIELDS = {
             "produttore",
             "modello",
             "anno_produzione",
-            "manufacturer_name",
-            "manufacturer_address",
+            "nome_produttore",
+            "indirizzo_produttore",
             "gtin",
-            "serial_number",
-            "material_composition_detailed",
-            "carbon_footprint",
-            "energy_use",
-            "compliance_documents",
-            "usage_instructions",
-            "end_of_life_instructions"
+            "numero_serie",
+            "composizione_materiali_dettagliata",
+            "impronta_carbonio",
+            "consumo_energia",
+            "documenti_conformita",
+            "istruzioni_uso",
+            "istruzioni_fine_vita"
         ],
         "image": [
             "colore_telaio",
@@ -81,6 +81,7 @@ PRODUCT_FIELDS = {
         ]
     }
 }
+
 
 
 # ======================================================
@@ -102,28 +103,35 @@ def image_to_base64(image_file):
 # GPT EXTRACTION
 # ======================================================
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
-    """Estrae dati tecnici obbligatori dal PDF tramite GPT."""
     campi = PRODUCT_FIELDS[tipo]["pdf"]
     prompt = f"""
-Estrai tutti i dati tecnici obbligatori di un {tipo} secondo la normativa UE per Digital Product Passport.
-Se un dato non è presente, usa null.
-NON inventare valori.
-Restituisci SOLO un JSON con le chiavi: {', '.join(campi)}.
+Estrai i dati tecnici del prodotto di tipo '{tipo}' dal seguente testo PDF.
+Se un dato non è presente nel PDF, restituisci null.
+NON inventare.
+Restituisci SOLO un JSON con i campi: {', '.join(campi)}.
 
-TESTO PDF:
+TESTO:
 {text}
 """
     r = client.chat.completions.create(
         model="gpt-4.1",
-        messages=[{"role":"user","content":prompt}],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
+
     resp_text = r.choices[0].message.content.strip()
+
     try:
-        data = json.loads(resp_text)
+        data_gpt = json.loads(resp_text)
     except json.JSONDecodeError:
-        data = {k: None for k in campi}  # default se JSON non valido
-    return data
+        st.error("GPT non ha restituito JSON valido. Mostro la risposta grezza:")
+        st.code(resp_text)
+        data_gpt = {}
+
+    # Assicura che tutti i campi obbligatori siano presenti
+    data_finale = {campo: data_gpt.get(campo, None) for campo in campi}
+
+    return data_finale
 
 
 def gpt_analyze_image(image_b64, client: OpenAI, tipo):
