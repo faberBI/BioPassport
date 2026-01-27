@@ -7,7 +7,7 @@ from io import BytesIO
 from openai import OpenAI
 import streamlit as st
 from PIL import Image
-
+import io
 
 # ======================================================
 # CONFIG
