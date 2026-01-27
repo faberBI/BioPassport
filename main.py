@@ -134,10 +134,10 @@ for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploade
     if k not in st.session_state:
         st.session_state[k] = None
 
-st.sidebar.title("🛠 Backoffice")
-st.sidebar.info("EU Digital Product Passport")
+#st.sidebar.title("🛠 Backoffice")
+#st.sidebar.info("EU Digital Product Passport")
 
-st.title("Nuvia - Digital Product Passport")
+#st.title("Nuvia - Digital Product Passport")
 
 tipo_prodotto = st.selectbox(
     "Seleziona tipo prodotto",
