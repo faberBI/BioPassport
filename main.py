@@ -14,16 +14,15 @@ import base64
 # ======================================================
 st.set_page_config(
     page_title="Nuvia Digital Product Passport",
-    page_icon="functions/logo_nuvia.jpeg",  # piccolo logo per tab browser
+    page_icon="functions/logo_nuvia.jpeg",  # favicon tab browser
     layout="centered"
 )
 
-
 # ======================================================
-# STILE GLOBALE + LOGO A SINISTRA
+# STILE GLOBALE + LOGO IN ALTO
 # ======================================================
 # Carica logo
-logo = Image.open("functions/logo_nuvia.jpeg")  # sostituisci con il tuo percorso
+logo = Image.open("functions/logo_nuvia.jpeg")  # percorso logo
 logo_base64 = services.image_to_base64(logo)
 
 st.markdown(f"""
@@ -52,19 +51,18 @@ h1, h2, h3, h4, h5, h6 {{
 .icon-dark {{ color: #0b021f; }}
 .icon-purple {{ color: #6320ee; }}
 
-/* Logo in alto a sinistra */
+/* Logo centrato in cima */
 div[data-testid="stAppViewContainer"] > div:first-child {{
     display: flex;
-    justify-content: flex-start;
+    justify-content: flex-start;  /* sinistra */
     align-items: center;
     margin-bottom: 20px;
-    gap: 20px; /* spazio tra logo e titolo */
 }}
 </style>
 
-<div style="display:flex; align-items:center; margin-bottom:20px;">
-    <img src="data:image/jpeg;base64,{logo_base64}" width="400">
-    <h1 style="margin:0; font-family:'Nunito Sans', sans-serif; color:#3a2607;"></h1>
+<div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
+    <img src="data:image/jpeg;base64,{logo_base64}" width="80">
+    <h1 style="margin:0;"></h1>
 </div>
 """, unsafe_allow_html=True)
 
