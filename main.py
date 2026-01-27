@@ -131,12 +131,14 @@ with tabs[0]:
 # ======================================================
 with tabs[1]:
     if st.session_state.pdf_data:
+        # Chiama la nuova funzione
         st.session_state.validated_pdf = services.render_validation_form(
             st.session_state.pdf_data,
             title="✔ Dati certificati (PDF)"
         )
     else:
         st.info("Esegui prima l’analisi")
+
 
 # ======================================================
 # TAB 3 — VALIDAZIONE IMMAGINE
@@ -155,7 +157,6 @@ with tabs[2]:
                 caption="Foto prodotto",
                 use_column_width=True
             )
-
     else:
         st.info("Esegui prima l’analisi")
 
