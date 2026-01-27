@@ -136,7 +136,6 @@ with tabs[1]:
             title="✔ Dati certificati (PDF)",
             prefix=f"pdf_{tipo_prodotto}"
         )
-        st.info("Compila eventuali campi obbligatori mancanti evidenziati dalla normativa.")
     else:
         st.info("Esegui prima l’analisi")
 
