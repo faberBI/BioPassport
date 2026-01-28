@@ -16,7 +16,7 @@ PASSPORT_DIR = "passports"
 
 PRODUCT_FIELDS = {
     "mobile": {
-        "pdf": ["nome_prodotto","produttore","materiali","dimensioni","anno_di_produzione", "certificazione_di_sicurezza", "certificazione_di_sostenibilita", "descrizione_prodotto", "luogo_di_produzione", "manutenzione e cura", "materiali/componenti utilizzati", "tipologia_di_legno", "marchio", "garanzia", "prezzo"],
+        "pdf": ["nome_prodotto","numero_di_modello","produttore","materiali","dimensioni","anno_di_produzione", "certificazione_di_sicurezza", "certificazione_di_sostenibilita", "descrizione_prodotto", "luogo_di_produzione", "manutenzione e cura", "materiali/componenti utilizzati", "tipologia_di_legno", "marchio", "garanzia", "prezzo"],
         "image": ["tipologia_prodotto", "colore","condizioni"]
     },
     "lampada": {
