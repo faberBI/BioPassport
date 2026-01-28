@@ -164,7 +164,7 @@ with tabs[0]:
             if not pdf_file or not image_file:
                 st.warning("Carica PDF e immagine")
             else:
-                with st.spinner("Analisi GPT in corso…"):
+                with st.spinner("Analisi in corso ⏳…"):
                     # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
                     st.session_state.pdf_data = services.gpt_extract_from_pdf(
@@ -201,7 +201,7 @@ with tabs[2]:
     if st.session_state.image_data:
         st.session_state.validated_image = services.render_validation_form(
             st.session_state.image_data,
-            title="👁️ Dati stimati da immagine"
+            title="👁️ Dati estratti da immagine"
         )
 
         # Mostra immagine caricata
