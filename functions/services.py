@@ -292,34 +292,36 @@ def initialize_passport(product_id: str, product_type: str) -> dict:
 
     # PDF fields
     for f in pdf_fields:
-        if not f or not isinstance(f, str):
-            continue  # salta chiavi non valide
-        passport["sections"][f] = {
+        fname = f["name"]
+        required = f.get("required", False)
+        passport["sections"][fname] = {
             "fields": {
-                f: {
+                fname: {
                     "value": None,
                     "confidence": 0.0,
                     "field_type": "technical",
                     "eu_weight": 1.0,
                     "rating": 0.0,
-                    "color": "🔴"
+                    "color": "🔴",
+                    "required": required
                 }
             }
         }
 
     # Image fields
     for f in image_fields:
-        if not f or not isinstance(f, str):
-            continue
-        passport["sections"][f] = {
+        fname = f["name"]
+        required = f.get("required", False)
+        passport["sections"][fname] = {
             "fields": {
-                f: {
+                fname: {
                     "value": None,
                     "confidence": 0.0,
                     "field_type": "visual",
                     "eu_weight": 1.0,
                     "rating": 0.0,
-                    "color": "🔴"
+                    "color": "🔴",
+                    "required": required
                 }
             }
         }
