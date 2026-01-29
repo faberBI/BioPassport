@@ -7,7 +7,7 @@ from io import BytesIO
 from openai import OpenAI
 import streamlit as st
 from PIL import Image
-import io
+from datetime import datetime
 
 # ======================================================
 # CONFIG
@@ -16,17 +16,62 @@ PASSPORT_DIR = "passports"
 
 PRODUCT_FIELDS = {
     "mobile": {
-        "pdf": ["Nome prodotto","Numero di modello","Produttore","Materiali","Dimensioni","Lotto di produzione ","Anno di produzione", "Certificazione di sicurezza", "Certificazione di sostenibilita", "Descrizione prodotto", "Luogo di produzione", "Manutenzione e cura", "Materiali/componenti utilizzati", "Specie legnosa","% di contenuto riciclato", "Sostanze preoccupanti", "Finitura superficiale", "Marchio", "Garanzia", "Certificazioni materiale", " Impronta carbonio gwp" ,  "Prezzo",
-               "Identificativo operatore", "Conformità tecnica", "Gestione fine vita (codice CER)"],
-        "image": ["Colore","Condizioni"]
+        "pdf": [
+            {"name": "Nome prodotto", "required": True},
+            {"name": "Numero di modello", "required": True},
+            {"name": "Produttore", "required": True},
+            {"name": "Materiali", "required": True},
+            {"name": "% di contenuto riciclato", "required": True},
+            {"name": "Sostanze preoccupanti", "required": True},
+            {"name": "Dimensioni", "required": False},
+            {"name": "Lotto di produzione", "required": False},
+            {"name": "Anno di produzione", "required": False},
+            {"name": "Certificazione di sicurezza", "required": False},
+            {"name": "Certificazione di sostenibilità", "required": False},
+            {"name": "Descrizione prodotto", "required": False},
+            {"name": "Luogo di produzione", "required": False},
+            {"name": "Manutenzione e cura", "required": False},
+            {"name": "Materiali/componenti utilizzati", "required": False},
+            {"name": "Specie legnosa", "required": False},
+            {"name": "Finitura superficiale", "required": False},
+            {"name": "Marchio", "required": False},
+            {"name": "Garanzia", "required": False},
+            {"name": "Certificazioni materiale", "required": False},
+            {"name": "Impronta carbonio gwp", "required": False},
+            {"name": "Prezzo", "required": False},
+            {"name": "Identificativo operatore", "required": False},
+            {"name": "Conformità tecnica", "required": False},
+            {"name": "Gestione fine vita (codice CER)", "required": True}
+        ],
+        "image": [
+            {"name": "Colore", "required": False},
+            {"name": "Condizioni", "required": False}
+        ]
     },
     "lampada": {
-        "pdf": ["nome_prodotto","produttore","materiale","wattaggio"],
-        "image": ["tipologia_prodotto","colore","stile"]
+        "pdf": [
+            {"name": "nome_prodotto", "required": True},
+            {"name": "produttore", "required": True},
+            {"name": "materiale", "required": True},
+            {"name": "wattaggio", "required": False}
+        ],
+        "image": [
+            {"name": "tipologia_prodotto", "required": False},
+            {"name": "colore", "required": False},
+            {"name": "stile", "required": False}
+        ]
     },
     "bicicletta": {
-        "pdf": ["nome_prodotto","produttore","modello","anno_produzione"],
-        "image": ["colore_telaio","condizioni"]
+        "pdf": [
+            {"name": "nome_prodotto", "required": True},
+            {"name": "produttore", "required": True},
+            {"name": "modello", "required": True},
+            {"name": "anno_produzione", "required": False}
+        ],
+        "image": [
+            {"name": "colore_telaio", "required": False},
+            {"name": "condizioni", "required": False}
+        ]
     }
 }
 
@@ -34,7 +79,6 @@ PRODUCT_FIELDS = {
 # PDF / IMAGE UTILITIES
 # ======================================================
 def extract_text_from_pdf(pdf_file):
-    """Estrae tutto il testo da un PDF."""
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
@@ -42,25 +86,28 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def image_to_base64(image_file):
-    """Converte un file o un PIL Image in base64 per invio a GPT o salvataggio."""
-    import io
-    import base64
-
-    if hasattr(image_file, "getvalue"):  # file-like object
+    if hasattr(image_file, "getvalue"):
         return base64.b64encode(image_file.getvalue()).decode()
-    else:  # probabilmente un PIL.Image
-        buf = io.BytesIO()
+    else:
+        buf = BytesIO()
         image_file.save(buf, format="JPEG")
         buf.seek(0)
         return base64.b64encode(buf.read()).decode()
 
+def resize_image_for_vision(image_file, max_size=512):
+    img = Image.open(image_file).convert("RGB")
+    img.thumbnail((max_size, max_size))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    buf.name = "image.jpg"
+    return buf
 
 # ======================================================
 # GPT EXTRACTION
 # ======================================================
 def gpt_extract_from_pdf(text, client: OpenAI, tipo):
-    """Estrae dati tecnici dal PDF tramite GPT, in modo robusto."""
-    campi = PRODUCT_FIELDS[tipo]["pdf"]
+    campi = [c["name"] for c in PRODUCT_FIELDS[tipo]["pdf"]]
     prompt = f"""
 Estrai dati tecnici di un {tipo}.
 Se un dato manca usa null.
@@ -76,500 +123,93 @@ TESTO:
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-
         resp_text = r.choices[0].message.content.strip()
-
-        # Rimuove eventuali blocchi ```json ... ```
         if resp_text.startswith("```"):
             resp_text = "\n".join(resp_text.split("\n")[1:-1]).strip()
-
         data = json.loads(resp_text)
-        # Assicura che tutti i campi siano presenti
         for c in campi:
             if c not in data:
                 data[c] = None
-
         return data
-
-    except json.JSONDecodeError:
-        st.error("GPT non ha restituito JSON valido. Ecco la risposta grezza:")
-        st.code(resp_text)
-        # Ritorna comunque un dizionario con tutti i campi a None
-        return {c: None for c in campi}
     except Exception as e:
-        st.error(f"Errore GPT: {e}")
-        st.stop()
+        st.error(f"Errore GPT PDF: {e}")
+        return {c: None for c in campi}
 
-
-import json
-import streamlit as st
-from openai import OpenAI
-
-def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
-    import json
-    import streamlit as st
-
-    # Chiavi come devono essere nel form / passport
-    campi = ["Tipologia di prodotto", "Colore", "Condizioni"]
-
+def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    campi = ["colore", "condizioni"]
     prompt = f"""
-Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
-
-Restituisci SOLO JSON valido con i campi:
-- colore
-- condizioni
-
-Se non determinabile, usa null.
-NON scrivere altro testo.
-
-Esempio:
-{{"tipologia prodotto": "mobile", "colore": "bianco", "condizioni": "nuovo"}}
+Analizza immagine del prodotto {tipo}.
+Restituisci JSON con campi colore e condizioni.
+Se non determinabile usa null.
 """
-
     def safe_json_parse(text):
-        """Rimuove blocchi ``` e testo extra da GPT e ritorna dict"""
-        # Rimuove ```json ... ``` se presenti
         if text.startswith("```"):
-            lines = text.splitlines()
-            text = "\n".join(line for line in lines if not line.strip().startswith("```")).strip()
-
-        # Rimuove eventuale testo extra prima/dopo JSON
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1:
-            text = text[first_brace:last_brace+1]
-
-        return json.loads(text)
-
+            text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
+        first, last = text.find("{"), text.rfind("}")
+        return json.loads(text[first:last+1])
     try:
-        # 1️⃣ upload immagine su OpenAI
         file_id = upload_image_to_openai(image_file, client)
-
-        # 2️⃣ chiedi a GPT di analizzare l'immagine
-        response = client.responses.create(
+        resp = client.responses.create(
             model="gpt-4o",
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "file_id": file_id}
-                ]
-            }]
+            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
         )
-
-        result_text = response.output_text.strip()
-        data_raw = safe_json_parse(result_text)
-
-        # 🔹 mapping GPT → chiavi form
-        mapping = {
-            "colore": "Colore",
-            "condizioni": "Condizioni"
-        }
-
+        data_raw = safe_json_parse(resp.output_text.strip())
         data = {}
-        for gpt_key, form_key in mapping.items():
-            val = data_raw.get(gpt_key, None)
-            if val is None or str(val).strip().lower() in ["null", ""]:
-                data[form_key] = "non rilevato"
-            else:
-                data[form_key] = str(val).strip()
-
+        mapping = {"colore":"Colore","condizioni":"Condizioni"}
+        for k,v in mapping.items():
+            val = data_raw.get(k,None)
+            data[v] = val if val not in [None,"null",""] else "non rilevato"
         return data
-
-    except json.JSONDecodeError:
-        st.error("GPT non ha restituito JSON valido")
-        st.code(result_text)
-        return {k: "non rilevato" for k in campi}
-
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
-        st.stop()
+        return {v:"non rilevato" for v in mapping.values()}
 
-
-
+def upload_image_to_openai(image_file, client):
+    resized = resize_image_for_vision(image_file)
+    uploaded = client.files.create(file=resized, purpose="vision")
+    return uploaded.id
 
 # ======================================================
 # VALIDATION FORM
 # ======================================================
-
 def render_validation_form(data, title: str):
-    """
-    Crea un form Streamlit per validare manualmente i dati estratti.
-    Supporta:
-    - valori singoli
-    - liste
-    - dizionari annidati
-    Con expander per ogni livello annidato.
-    """
     st.subheader(title)
     validated = {}
-
     def render_item(key, value, parent=""):
         full_key = f"{parent} > {key}" if parent else key
-
         if isinstance(value, dict):
-            # Crea un expander per ogni dizionario annidato
             with st.expander(full_key, expanded=False):
-                for k, v in value.items():
-                    render_item(k, v, full_key)
-        elif isinstance(value, list):
-            # Mostra lista come testo modificabile
-            val_str = ", ".join(map(str, value)) if value else "non rilevato"
-            validated[full_key] = st.text_area(full_key, val_str, height=50)
+                for k,v in value.items():
+                    render_item(k,v,full_key)
+        elif isinstance(value,list):
+            validated[full_key] = st.text_area(full_key,", ".join(map(str,value)) if value else "non rilevato",height=50)
         else:
-            # Valore singolo
-            validated[full_key] = st.text_input(full_key, "" if value is None else str(value))
-
-    for k, v in data.items():
-        render_item(k, v)
-
+            validated[full_key] = st.text_input(full_key,"" if value is None else str(value))
+    for k,v in data.items():
+        render_item(k,v)
     return validated
-
-
 
 # ======================================================
 # PASSPORT STORAGE
 # ======================================================
 def save_passport_to_file(passport):
-    """Salva passport JSON su disco."""
     os.makedirs(PASSPORT_DIR, exist_ok=True)
     path = os.path.join(PASSPORT_DIR, f"{passport['id']}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(passport, f, indent=2, ensure_ascii=False)
+    with open(path,"w",encoding="utf-8") as f:
+        json.dump(passport,f,indent=2,ensure_ascii=False)
 
 def load_passport_from_file(passport_id):
-    """Carica passport JSON da disco."""
     path = os.path.join(PASSPORT_DIR, f"{passport_id}.json")
     if not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path,"r",encoding="utf-8") as f:
         return json.load(f)
 
 # ======================================================
 # QR CODE
 # ======================================================
-
-
-def upload_image_to_openai(image_file, client):
-    resized = resize_image_for_vision(image_file)
-
-    uploaded = client.files.create(
-        file=resized,
-        purpose="vision"
-    )
-    return uploaded.id
-
-
-from PIL import Image
-from io import BytesIO
-
-def resize_image_for_vision(image_file, max_size=512):
-    img = Image.open(image_file).convert("RGB")
-    img.thumbnail((max_size, max_size))
-
-    buf = BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    buf.seek(0)
-
-    # risalva in formato jpg
-    buf.name = "image.jpg"
-
-    return buf
-
-def safe_json_parse(text):
-    text = text.strip()
-
-    if text.startswith("```"):
-        lines = text.splitlines()
-        text = "\n".join(
-            line for line in lines
-            if not line.strip().startswith("```")
-        ).strip()
-
-    return json.loads(text)
-
-# ======================================================
-# RATING / COMPLIANCE
-# ======================================================
-def compute_field_rating(field, type_weight_map=None):
-    """
-    Calcola il rating di un campo (0-1) basato su:
-    - presenza/valore reale
-    - confidence
-    - tipo campo
-    - peso EU
-    """
-    if type_weight_map is None:
-        type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
-
-    # Se il campo è vuoto o None → rating 0
-    value = field.get("value")
-    if value is None or (isinstance(value, str) and value.strip() == ""):
-        return 0.0
-
-    confidence = field.get("confidence", 0.0) or 0.0
-    field_type = field.get("field_type", "declaration")
-    eu_weight = field.get("eu_weight", 1.0)
-
-    type_weight = type_weight_map.get(field_type, 0.5)
-    rating = round(confidence * type_weight * eu_weight, 2)
-    return rating
-
-
-
-def score_to_color(score):
-    """
-    Converte il rating numerico in colore:
-    🟢 >= 0.7
-    🟡 >= 0.4
-    🔴 < 0.4
-    """
-    if score >= 0.7:
-        return "🟢"
-    elif score >= 0.4:
-        return "🟡"
-    else:
-        return "🔴"
-
-
-def compute_espr_compliance(section_fields, section_schema):
-    """
-    Calcola lo stato di compliance di una sezione:
-    - OK: tutti i campi obbligatori >= 0.5
-    - PARTIAL: almeno 50% dei campi obbligatori >=0.5
-    - MISSING: meno del 50% dei campi obbligatori
-    """
-    if not isinstance(section_fields, dict):
-        return "MISSING"
-
-    required_fields = [k for k, v in section_schema.items() if isinstance(v, dict) and v.get("required", False)]
-    if not required_fields:
-        return "OK"
-
-    ratings = []
-    for f in required_fields:
-        field = section_fields.get(f)
-        if field is None:
-            ratings.append(0.0)
-        else:
-            ratings.append(compute_field_rating(field))
-
-    if not ratings:
-        return "MISSING"
-
-    n_ok = sum(1 for r in ratings if r >= 0.5)
-    pct_ok = n_ok / len(required_fields)
-
-    if pct_ok == 1.0:
-        return "OK"
-    elif pct_ok >= 0.5:
-        return "PARTIAL"
-    else:
-        return "MISSING"
-
-
-def score_to_judgment(score):
-    """
-    Converte punteggio complessivo (0-1) in giudizio qualitativo globale
-    """
-    if score >= 0.9:
-        return "🌟 Eccellente"
-    elif score >= 0.7:
-        return "👍 Buono"
-    elif score >= 0.5:
-        return "🟡 Sufficiente"
-    elif score >= 0.3:
-        return "⚠️ Scarso"
-    else:
-        return "❌ Critico"
-
-
-def compute_overall_judgment(sections):
-    """
-    Calcola il giudizio globale del prodotto sulla base dei rating dei campi obbligatori ESPR.
-    Ritorna:
-    - giudizio qualitativo (emoji + testo)
-    - punteggio numerico (0-1)
-    """
-    section_scores = []
-    for section_name, section in sections.items():
-        fields = section.get("fields", {})
-        if not isinstance(fields, dict):
-            continue
-
-        mandatory_scores = [compute_field_rating(f) for f in fields.values() if isinstance(f, dict) and f.get("eu_weight", 1.0) >= 1.0]
-        if mandatory_scores:
-            section_scores.append(sum(mandatory_scores)/len(mandatory_scores))
-
-    overall = sum(section_scores)/len(section_scores) if section_scores else 0.0
-    return score_to_judgment(overall), overall
-
-# ======================================================
-# NUOVE FUNZIONI DPP COMPLETO
-# ======================================================
-
-from PIL import Image
-from io import BytesIO
-import base64
-
-
-
-
-def compute_section_rating(section):
-    """Calcola rating medio dei campi di una sezione"""
-    fields = section.get("fields", {})
-    ratings = []
-    for f in fields.values():
-        if isinstance(f, dict):
-            ratings.append(compute_field_rating(f))
-    return round(sum(ratings)/len(ratings), 2) if ratings else 0.0
-
-
-
-
-def add_product_image(passport, image_file, caption="Frontale", annotation=None):
-    """Aggiunge immagine con annotazione e salva in base64"""
-    if not image_file:
-        return
-
-    if hasattr(image_file, "getvalue"):  # UploadedFile
-        img = Image.open(image_file).convert("RGB")
-    else:  # PIL Image
-        img = image_file.convert("RGB")
-
-    buf = BytesIO()
-    img.save(buf, format="JPEG")
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode()
-
-    passport["images"].append({
-        "file_base64": img_base64,
-        "caption": caption,
-        "annotation": annotation
-    })
-
-
-def reset_session_state(keys=None):
-    """Reset chiavi dello session_state per nuovo prodotto"""
-    if keys is None:
-        keys = ["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]
-    for k in keys:
-        st.session_state[k] = None
-
-
-from datetime import datetime
-from io import BytesIO
-from PIL import Image
-import base64
-import os
-import json
-import qrcode
-
-# ======================================================
-# Funzione per inizializzare un passport vuoto
-# ======================================================
-def initialize_passport(product_id: str, product_type: str) -> dict:
-    """
-    Crea un nuovo Digital Product Passport con struttura vuota,
-    pronto per ricevere dati da PDF/immagini.
-    """
-    passport = {
-        "id": product_id,
-        "product_type": product_type,
-        "metadata": {
-            "created_at": datetime.utcnow().isoformat(),
-            "version": "EU-DPP-1.0"
-        },
-        "sections": {},
-        "overall_rating": 0.0,
-        "images": []  # supporto multi immagini
-    }
-
-    # Aggiunge sezioni per ciascun campo
-    pdf_fields = PRODUCT_FIELDS.get(product_type, {}).get("pdf", [])
-    image_fields = PRODUCT_FIELDS.get(product_type, {}).get("image", [])
-
-    # PDF fields
-    for f in pdf_fields:
-        passport["sections"][f] = {
-            "fields": {
-                f: {
-                    "value": None,
-                    "confidence": 0.0,
-                    "field_type": "technical",
-                    "eu_weight": 1.0,
-                    "rating": 0.0,
-                    "color": "🔴"
-                }
-            }
-        }
-
-    # Image fields
-    for f in image_fields:
-        passport["sections"][f] = {
-            "fields": {
-                f: {
-                    "value": None,
-                    "confidence": 0.0,
-                    "field_type": "visual",
-                    "eu_weight": 1.0,
-                    "rating": 0.0,
-                    "color": "🔴"
-                }
-            }
-        }
-
-    return passport
-
-
-# ======================================================
-# Funzione per aggiungere un'immagine al passport
-# ======================================================
-def add_product_image(passport: dict, image_file, caption: str = "", annotation: str = ""):
-    """
-    Salva immagine in base64 dentro il passport e aggiunge caption/annotazioni.
-    """
-    img_base64 = image_to_base64(image_file)
-    passport["images"].append({
-        "file_base64": img_base64,
-        "caption": caption,
-        "annotation": annotation
-    })
-
-
-# ======================================================
-# Calcolo rating complessivo del passport
-# ======================================================
-def compute_overall_rating(passport: dict):
-    """
-    Aggiorna il campo overall_rating basandosi sui rating dei singoli campi.
-    Aggiorna anche il colore di ciascun campo.
-    """
-    total_scores = []
-    for section_name, section in passport.get("sections", {}).items():
-        for field_name, field in section.get("fields", {}).items():
-            rating = compute_field_rating(field)
-            color = score_to_color(rating)
-            field["rating"] = rating
-            field["color"] = color
-            total_scores.append(rating)
-
-    passport["overall_rating"] = sum(total_scores)/len(total_scores) if total_scores else 0.0
-
-
-# ======================================================
-# Funzione helper per generare QR
-# ======================================================
 def generate_qr_from_url(url: str):
-    """
-    Genera QR code da URL e ritorna BytesIO pronto per Streamlit.
-    """
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=10,
-        border=4
-    )
+    qr = qrcode.QRCode(version=1,error_correction=qrcode.constants.ERROR_CORRECT_H,box_size=10,border=4)
     qr.add_data(url)
     qr.make(fit=True)
     buf = BytesIO()
@@ -578,4 +218,109 @@ def generate_qr_from_url(url: str):
     buf.seek(0)
     return buf
 
+# ======================================================
+# RATING / COMPLIANCE
+# ======================================================
+def compute_field_rating(field, type_weight_map=None):
+    if type_weight_map is None:
+        type_weight_map = {"technical":1.0,"declaration":0.6,"lca":0.5,"visual":0.4}
+    val = field.get("value")
+    if val is None or (isinstance(val,str) and val.strip()==""):
+        return 0.0
+    conf = field.get("confidence",0.0) or 0.0
+    ftype = field.get("field_type","declaration")
+    eu = field.get("eu_weight",1.0)
+    w = type_weight_map.get(ftype,0.5)
+    return round(conf*w*eu,2)
 
+def score_to_color(score):
+    if score>=0.7: return "🟢"
+    elif score>=0.4: return "🟡"
+    else: return "🔴"
+
+def compute_section_rating(section):
+    fields = section.get("fields",{})
+    ratings = [compute_field_rating(f) for f in fields.values() if isinstance(f,dict)]
+    return round(sum(ratings)/len(ratings),2) if ratings else 0.0
+
+def compute_overall_rating(passport: dict):
+    total_scores=[]
+    for sec_name,section in passport.get("sections",{}).items():
+        for f_name, field in section.get("fields",{}).items():
+            r = compute_field_rating(field)
+            field["rating"]=r
+            field["color"]=score_to_color(r)
+            total_scores.append(r)
+    passport["overall_rating"]=sum(total_scores)/len(total_scores) if total_scores else 0.0
+
+def compute_espr_compliance(section_fields):
+    required = [f for f,v in section_fields.items() if isinstance(v,dict) and v.get("required",False)]
+    ratings = [section_fields[f]["rating"] if f in section_fields else 0.0 for f in required]
+    if not ratings: return "MISSING"
+    n_ok=sum(1 for r in ratings if r>=0.5)
+    pct_ok=n_ok/len(ratings)
+    if pct_ok==1.0: return "OK"
+    elif pct_ok>=0.5: return "PARTIAL"
+    else: return "MISSING"
+
+def score_to_judgment(score):
+    if score>=0.9: return "🌟 Eccellente"
+    elif score>=0.7: return "👍 Buono"
+    elif score>=0.5: return "🟡 Sufficiente"
+    elif score>=0.3: return "⚠️ Scarso"
+    else: return "❌ Critico"
+
+# ======================================================
+# PASSPORT MANAGEMENT
+# ======================================================
+def initialize_passport(product_id: str, product_type: str) -> dict:
+    passport = {
+        "id": product_id,
+        "product_type": product_type,
+        "metadata": {"created_at":datetime.utcnow().isoformat(),"version":"EU-DPP-1.0"},
+        "sections": {},
+        "overall_rating":0.0,
+        "images":[]
+    }
+    pdf_fields = PRODUCT_FIELDS.get(product_type,{}).get("pdf",[])
+    image_fields = PRODUCT_FIELDS.get(product_type,{}).get("image",[])
+
+    for f in pdf_fields:
+        passport["sections"][f["name"]] = {
+            "fields": {
+                f["name"]: {
+                    "value": None,
+                    "confidence": 0.0,
+                    "field_type": "technical",
+                    "eu_weight": 1.0,
+                    "rating": 0.0,
+                    "color": "🔴",
+                    "required": f.get("required",False)
+                }
+            }
+        }
+    for f in image_fields:
+        passport["sections"][f["name"]] = {
+            "fields": {
+                f["name"]: {
+                    "value": None,
+                    "confidence":0.0,
+                    "field_type":"visual",
+                    "eu_weight":1.0,
+                    "rating":0.0,
+                    "color":"🔴",
+                    "required":f.get("required",False)
+                }
+            }
+        }
+    return passport
+
+def add_product_image(passport: dict, image_file, caption: str = "", annotation: str = ""):
+    img_base64 = image_to_base64(image_file)
+    passport["images"].append({"file_base64":img_base64,"caption":caption,"annotation":annotation})
+
+def reset_session_state(keys=None):
+    if keys is None:
+        keys=["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]
+    for k in keys:
+        st.session_state[k]=None
