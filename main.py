@@ -135,7 +135,7 @@ for k in ["pdf_data","image_data","validated_pdf","validated_image","uploaded_im
     if k not in st.session_state:
         st.session_state[k] = None
 st.markdown('<div class="white-box">', unsafe_allow_html=True)
-    tipo_prodotto = st.selectbox(
+tipo_prodotto = st.selectbox(
         "Seleziona tipo prodotto",
         ["mobile","lampada","bicicletta"]
     )
