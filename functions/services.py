@@ -337,3 +337,34 @@ def reset_session_state(keys=None):
         keys=["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]
     for k in keys:
         st.session_state[k]=None
+
+
+def merge_validated_data(passport, validated_pdf, validated_image):
+    """Aggiorna i campi del passport con i dati validati, preservando i required."""
+    merged_data = {**validated_pdf, **validated_image}
+
+    for section_name, section in passport["sections"].items():
+        for field_name, field in section["fields"].items():
+            # Proviamo a trovare la chiave corretta nel validation form
+            val = None
+            # cerchiamo chiave esatta o con case-insensitive
+            for k, v in merged_data.items():
+                if k.strip().lower() == field_name.strip().lower():
+                    val = v
+                    break
+
+            if val is not None:
+                # trasformiamo in dict se necessario
+                if not isinstance(val, dict):
+                    val = {
+                        "value": val,
+                        "confidence": 1.0,
+                        "field_type": field.get("field_type", "technical"),
+                        "eu_weight": 1.0
+                    }
+                field.update(val)
+                # aggiorna rating e colore
+                rating = services.compute_field_rating(field)
+                field["rating"] = rating
+                field["color"] = services.score_to_color(rating)
+
