@@ -44,6 +44,15 @@ h1, h2, h3, h4, h5, h6 {{ color: #3a2607; }}
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
+# INIZIALIZZA SESSION STATE
+# ======================================================
+for key in ["uploaded_pdf_file", "uploaded_image_files",
+            "pdf_data", "image_data",
+            "validated_pdf", "validated_image"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+# ======================================================
 # ROUTING QR → PAGINA PUBBLICA
 # ======================================================
 passport_id = st.query_params.get("passport_id")
@@ -96,10 +105,8 @@ if passport_id:
     st.stop()
 
 # ======================================================
-# BACKOFFICE
+# SELEZIONE TIPO PRODOTTO
 # ======================================================
-services.reset_session_state()
-
 tipo_prodotto = st.selectbox(
     "Seleziona tipo prodotto",
     ["mobile","lampada","bicicletta"]
@@ -123,12 +130,17 @@ with tabs[0]:
             type=["jpg","png","jpeg"], 
             accept_multiple_files=True
         )
+
         submitted = st.form_submit_button("🔍 Analizza")
 
         if submitted:
             if not pdf_file or not image_files:
                 st.warning("Carica PDF e almeno un'immagine")
             else:
+                # Salva file in session_state
+                st.session_state.uploaded_pdf_file = pdf_file
+                st.session_state.uploaded_image_files = image_files
+
                 with st.spinner("Analisi in corso ⏳…"):
                     # PDF
                     try:
@@ -138,9 +150,8 @@ with tabs[0]:
                         st.warning("GPT PDF fallito, userà dati vuoti")
                         st.session_state.pdf_data = {c: None for c in services.PRODUCT_FIELDS[tipo_prodotto]["pdf"]}
 
-                    # Immagini
+                    # Immagini multiple
                     st.session_state.image_data = {}
-                    st.session_state.uploaded_image_file = image_files
                     for idx, img_file in enumerate(image_files):
                         try:
                             image_data = services.gpt_analyze_image(img_file, client, tipo_prodotto)
@@ -183,9 +194,10 @@ with tabs[2]:
             if submitted_img:
                 st.session_state.validated_image = validated_image
                 st.success("Validazione immagine salvata ✅")
-        if st.session_state.uploaded_image_file:
-            for img in st.session_state.uploaded_image_file:
-                st.image(img, caption="Foto prodotto", use_column_width=True)
+        # Mostra tutte le immagini caricate
+        if st.session_state.uploaded_image_files:
+            for idx, img in enumerate(st.session_state.uploaded_image_files):
+                st.image(img, caption=f"Foto prodotto {idx+1}", use_column_width=True)
     else:
         st.info("Esegui prima l’analisi")
 
@@ -199,7 +211,7 @@ with tabs[3]:
 
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-            # Inizializza passport
+            # Inizializza passport con sezione vuota
             passport_data = services.initialize_passport(product_id, tipo_prodotto)
 
             # Merge dati PDF + Image
@@ -212,11 +224,11 @@ with tabs[3]:
                             val = {"value": val, "confidence": 1.0, "field_type": field.get("field_type","technical")}
                         field.update(val)
 
-            # Aggiungi immagini multiple
-            for idx, img_file in enumerate(st.session_state.uploaded_image_file):
+            # Aggiungi tutte le immagini caricate
+            for idx, img_file in enumerate(st.session_state.uploaded_image_files):
                 services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
 
-            # Calcola rating sezione + overall
+            # Calcola rating complessivo
             services.compute_overall_rating(passport_data)
 
             # Salva passport
@@ -235,7 +247,6 @@ with tabs[3]:
             st.image(qr_buf)
             st.code(public_url)
 
-            # Reset stato sessione per nuovo prodotto
-            services.reset_session_state()
+            # NON resettare session_state qui, così puoi caricare nuovo prodotto manualmente
     else:
         st.info("Completa validazione PDF e immagine")
