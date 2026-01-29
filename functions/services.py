@@ -445,28 +445,23 @@ def merge_validated_data(passport, validated_pdf, validated_image):
 
 
 
-def compute_espr_status(section):
-    required_fields = [
-        f for f in section["fields"].values()
-        if f.get("required")
-    ]
+def compute_espr_status(section, threshold_ok=0.5):
+    """Calcola lo stato ESPR di una sezione basandosi sul rating dei campi obbligatori"""
+    required_fields = [f for f in section["fields"].values() if f.get("required")]
 
     if not required_fields:
         return "OK"
 
-    filled = [
-        f for f in required_fields
-        if f.get("rating", 0) > 0
-    ]
+    n_ok = sum(1 for f in required_fields if f.get("rating", 0) >= threshold_ok)
+    ratio = n_ok / len(required_fields)
 
-    ratio = len(filled) / len(required_fields)
-
-    if ratio == 1:
+    if ratio == 1.0:
         return "OK"
     elif ratio >= 0.5:
         return "PARTIAL"
     else:
         return "MISSING"
+
 
 def compute_overall_espr(passport):
     statuses = [
