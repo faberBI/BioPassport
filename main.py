@@ -1,72 +1,78 @@
+# ===============================
+# NUVIA – EU DIGITAL PRODUCT PASSPORT (MOBILE)
+# STREAMLIT TEMPLATE ADAPTATION – EU‑READY, AUDIT‑FRIENDLY
+# ===============================
+
+# ======================================================
+# IMPORTS
+# ======================================================
 import streamlit as st
 import uuid
+import json
+import os
 from datetime import datetime
 from openai import OpenAI
 from functions import services
 from PIL import Image
 from io import BytesIO
-import base64
-
-
 
 # ======================================================
 # CONFIG STREAMLIT
 # ======================================================
 st.set_page_config(
     page_title="Nuvia Digital Product Passport",
-    page_icon="functions/favicon.jpeg",  # favicon tab browser
+    page_icon="functions/favicon.jpeg",
     layout="centered"
 )
 
-# ======================================================
-# STILE GLOBALE + LOGO IN ALTO
-# ======================================================
-# Carica logo
-logo = Image.open("functions/logo_nuvia.jpeg")  # percorso logo
-logo_base64 = services.image_to_base64(logo)
-
-st.markdown(f"""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans&display=swap');
-
-body, div, span, input, button {{
-    font-family: 'Nunito Sans', sans-serif;
-    background-color: #f5f1ed;
-    color: #3a2607;
-}}
-
-h1, h2, h3, h4, h5, h6 {{
-    color: #3a2607;
-}}
-
-.stButton>button {{
-    background-color: #25ce6c;
-    color: white;
-    border-radius: 8px;
-    border: none;
-}}
-
-.icon-red {{ color: #f06449; }}
-.icon-blue {{ color: #2b3a67; }}
-.icon-dark {{ color: #0b021f; }}
-.icon-purple {{ color: #6320ee; }}
-
-/* Logo centrato in cima */
-div[data-testid="stAppViewContainer"] > div:first-child {{
-    display: flex;
-    justify-content: flex-start;  /* sinistra */
-    align-items: center;
-    margin-bottom: 20px;
-}}
-</style>
-
-<div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
-    <img src="data:image/jpeg;base64,{logo_base64}" width="450">
-    <h1 style="margin:0;"></h1>
-</div>
-""", unsafe_allow_html=True)
-
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
+
+# ======================================================
+# EU‑READY MOBILE SCHEMA
+# ======================================================
+MOBILE_SCHEMA = {
+    "identity": {
+        "Nome prodotto": {"type": "technical", "required": True},
+        "Produttore": {"type": "technical", "required": True},
+        "Numero di modello": {"type": "technical", "required": True},
+        "Anno di produzione": {"type": "technical", "required": False}
+    },
+    "materials": {
+        "Materiali": {"type": "technical", "required": True},
+        "% contenuto riciclato": {"type": "declaration", "required": False},
+        "Sostanze preoccupanti": {"type": "declaration", "required": False}
+    },
+    "sustainability": {
+        "Certificazione di sostenibilità": {"type": "declaration", "required": False},
+        "Impronta carbonio GWP": {"type": "lca", "required": False}
+    },
+    "end_of_life": {
+        "Gestione fine vita (CER)": {"type": "declaration", "required": False}
+    }
+}
+
+# ======================================================
+# RATING LOGIC
+# ======================================================
+
+def rate_field(field):
+    if not field.get("value"):
+        return 0.0
+    weight = {
+        "technical": 1.0,
+        "declaration": 0.6,
+        "lca": 0.5,
+        "visual": 0.4
+    }.get(field.get("field_type"), 0.5)
+    return round(field.get("confidence", 0.0) * weight, 2)
+
+
+def compute_overall_rating(sections):
+    scores = []
+    for section in sections.values():
+        for field in section.values():
+            scores.append(rate_field(field))
+    return round(sum(scores) / len(scores), 2) if scores else 0.0
 
 # ======================================================
 # ROUTING (QR → PAGINA PUBBLICA)
@@ -80,7 +86,6 @@ if passport_id:
         st.error("Digital Product Passport not found")
         st.stop()
 
-    # NASCONDI UI STREAMLIT
     st.markdown("""
         <style>
         [data-testid="stSidebar"] {display: none;}
@@ -96,58 +101,34 @@ if passport_id:
     **Product ID:** `{passport['id']}`  
     **Product type:** {passport['product_type']}  
     **Created:** {passport['metadata']['created_at']}  
-    **Version:** {passport['metadata']['version']}
+    **Version:** {passport['metadata']['schema_version']}
     """)
 
-    st.divider()
+    st.subheader("📊 DPP Reliability Score")
+    st.progress(passport["overall_rating"])
+    st.metric("Affidabilità complessiva", f"{int(passport['overall_rating']*100)}%")
 
-    st.subheader("1️⃣ Product Identity (Certified)")
-    for k, v in passport["data_source_pdf"].items():
-        st.write(f"**{k}**: {v}")
-
-    st.divider()
-
-    st.subheader("2️⃣ Visual / Estimated Information")
-    for k, v in passport["data_source_image"].items():
-        if k != "immagine_base64":
-            st.write(f"**{k}**: {v}")
-
-    # Mostra immagine se presente
-    if "immagine_base64" in passport["data_source_image"]:
-        st.image(
-            f"data:image/jpeg;base64,{passport['data_source_image']['immagine_base64']}",
-            caption="Foto prodotto",
-            use_column_width=True
-        )
-
-    st.caption(
-        "Public read-only Digital Product Passport. "
-        "Generated via AI extraction and human validation."
-    )
+    for section, fields in passport["sections"].items():
+        st.divider()
+        st.subheader(section.replace("_", " ").title())
+        for name, data in fields.items():
+            score = rate_field(data)
+            st.write(f"**{name}**: {data['value']}")
+            st.progress(score)
+            st.caption(f"Affidabilità campo: {int(score*100)}%")
 
     st.stop()
 
 # ======================================================
 # BACKOFFICE
 # ======================================================
-for k in ["pdf_data", "image_data", "validated_pdf", "validated_image", "uploaded_image_file"]:
+for k in ["pdf_structured", "validated_sections"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
-#st.sidebar.title("🛠 Backoffice")
-#st.sidebar.info("EU Digital Product Passport")
-
-#st.title("Nuvia - Digital Product Passport")
-
-tipo_prodotto = st.selectbox(
-    "Seleziona tipo prodotto",
-    ["mobile", "lampada", "bicicletta"]
-)
-
 tabs = st.tabs([
     "📤 Upload & Analisi",
-    "📝 Validazione PDF",
-    "👁️ Validazione Immagine",
+    "📝 Validazione",
     "🔗 Pubblica DPP"
 ])
 
@@ -157,100 +138,64 @@ tabs = st.tabs([
 with tabs[0]:
     with st.form("upload_form"):
         pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
-        image_file = st.file_uploader("Immagine prodotto", type=["jpg","png","jpeg"])
         submitted = st.form_submit_button("🔍 Analizza")
 
         if submitted:
-            if not pdf_file or not image_file:
-                st.warning("Carica PDF e immagine")
+            if not pdf_file:
+                st.warning("Carica un PDF")
             else:
                 with st.spinner("Analisi in corso ⏳…"):
-                    # Estrai testo PDF
                     pdf_text = services.extract_text_from_pdf(pdf_file)
-                    st.session_state.pdf_data = services.gpt_extract_from_pdf(
-                        pdf_text, client, tipo_prodotto
-                    )
-
-                    # Salva immagine caricata per pubblicazione
-                    st.session_state.uploaded_image_file = image_file
-                    # CONVERTI IN BASE64 PRIMA DI PASSARE A GPT
-                    st.session_state.image_data = services.gpt_analyze_image(
-                    image_file, client, tipo_prodotto
-                    )
+                    raw = services.gpt_extract_mobile_structured(pdf_text, client)
+                    st.session_state.pdf_structured = services.normalize_mobile_schema(raw)
                 st.success("Analisi completata")
-                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
 # ======================================================
-# TAB 2 — VALIDAZIONE PDF
+# TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
-    if st.session_state.pdf_data:
-        # Chiama la nuova funzione
-        st.session_state.validated_pdf = services.render_validation_form(
-            st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)"
-        )
+    if st.session_state.pdf_structured:
+        validated = {}
+        for section, fields in st.session_state.pdf_structured.items():
+            st.subheader(section.upper())
+            validated[section] = {}
+            for name, data in fields.items():
+                val = st.text_input(name, data.get("value") or "")
+                validated[section][name] = {
+                    **data,
+                    "value": val,
+                    "human_validated": True
+                }
+        st.session_state.validated_sections = validated
     else:
         st.info("Esegui prima l’analisi")
 
-
 # ======================================================
-# TAB 3 — VALIDAZIONE IMMAGINE
+# TAB 3 — PUBBLICAZIONE DPP + QR
 # ======================================================
 with tabs[2]:
-    if st.session_state.image_data:
-        st.session_state.validated_image = services.render_validation_form(
-            st.session_state.image_data,
-            title="👁️ Dati estratti da immagine"
-        )
-
-        # Mostra immagine caricata
-        if st.session_state.uploaded_image_file:
-            st.image(
-                st.session_state.uploaded_image_file,
-                caption="Foto prodotto",
-                use_column_width=True
-            )
-    else:
-        st.info("Esegui prima l’analisi")
-
-# ======================================================
-# TAB 4 — PUBBLICAZIONE DPP
-# ======================================================
-with tabs[3]:
-    if st.session_state.validated_pdf and st.session_state.validated_image:
-
+    if st.session_state.validated_sections:
         if st.button("🚀 Pubblica Digital Product Passport"):
+            overall = compute_overall_rating(st.session_state.validated_sections)
 
-            product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
-
-            passport_data = {
-                "id": product_id,
-                "product_type": tipo_prodotto,
+            passport = {
+                "id": f"MOBILE-{uuid.uuid4().hex[:8]}",
+                "product_type": "mobile",
                 "metadata": {
                     "created_at": datetime.utcnow().isoformat(),
-                    "version": "EU-DPP-1.0"
+                    "schema_version": "EU-DPP-2026-01"
                 },
-                "data_source_pdf": st.session_state.validated_pdf,
-                "data_source_image": st.session_state.validated_image.copy()
+                "sections": st.session_state.validated_sections,
+                "overall_rating": overall
             }
 
-            # Salva anche immagine Base64
-            if st.session_state.uploaded_image_file:
-                passport_data["data_source_image"]["immagine_base64"] = services.image_to_base64(
-                    st.session_state.uploaded_image_file
-                )
+            services.save_passport_to_file(passport)
 
-            services.save_passport_to_file(passport_data)
-
-            # URL pubblico (metti l’URL della tua app in st.secrets['APP_URL'])
-            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
+            public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
             qr_buf = services.generate_qr_from_url(public_url)
 
             st.success("Digital Product Passport pubblicato ✅")
-            st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
-
     else:
-        st.info("Completa validazione PDF e immagine")
+        st.info("Completa la validazione")
