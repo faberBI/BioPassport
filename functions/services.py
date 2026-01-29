@@ -248,20 +248,37 @@ def compute_section_rating(section):
     return avg
 
 def compute_overall_rating(passport: dict):
-    """Aggiorna rating di ogni campo, di ogni sezione e overall"""
+
     total_scores = []
-    for sec_name, section in passport.get("sections", {}).items():
-        section_scores = []
-        for f_name, field in section.get("fields", {}).items():
+    section_scores = []
+
+    for section in passport.get("sections", {}).values():
+
+        field_scores = []
+
+        for field in section.get("fields", {}).values():
+
             r = compute_field_rating(field)
+
             field["rating"] = r
             field["color"] = score_to_color(r)
-            section_scores.append(r)
-        # rating medio sezione
-        sec_avg = round(sum(section_scores)/len(section_scores), 2) if section_scores else 0.0
-        section["section_rating"] = sec_avg
-        total_scores.extend(section_scores)
-    passport["overall_rating"] = round(sum(total_scores)/len(total_scores), 2) if total_scores else 0.0
+
+            field_scores.append(r)
+            total_scores.append(r)
+
+        # ⭐ CALCOLO RATING SEZIONE
+        if field_scores:
+            section_rating = sum(field_scores) / len(field_scores)
+        else:
+            section_rating = 0.0
+
+        section["section_rating"] = round(section_rating, 2)
+        section_scores.append(section_rating)
+
+    passport["overall_rating"] = (
+        round(sum(section_scores) / len(section_scores), 2)
+        if section_scores else 0.0
+    )
 
 
 def compute_espr_compliance(section_fields):
@@ -285,6 +302,7 @@ def score_to_judgment(score):
 # PASSPORT MANAGEMENT
 # ======================================================
 def initialize_passport(product_id: str, product_type: str) -> dict:
+
     passport = {
         "id": product_id,
         "product_type": product_type,
@@ -300,40 +318,71 @@ def initialize_passport(product_id: str, product_type: str) -> dict:
     pdf_fields = PRODUCT_FIELDS.get(product_type, {}).get("pdf", [])
     image_fields = PRODUCT_FIELDS.get(product_type, {}).get("image", [])
 
-    # PDF fields
-    for f in pdf_fields:
-        fname = f["name"]
-        required = f.get("required", False)
-        passport["sections"][fname] = {
-            "fields": {
-                fname: {
-                    "value": None,
-                    "confidence": 0.0,
-                    "field_type": "technical",
-                    "eu_weight": 1.0,
-                    "rating": 0.0,
-                    "color": "🔴",
-                    "required": required
-                }
-            }
+    # ✅ CREA SEZIONI LOGICHE (NON un campo = una sezione)
+    passport["sections"] = {
+        "Technical Data": {
+            "fields": {},
+            "section_rating": 0.0
+        },
+        "Sustainability": {
+            "fields": {},
+            "section_rating": 0.0
+        },
+        "Visual Inspection": {
+            "fields": {},
+            "section_rating": 0.0
+        }
+    }
+
+    # -------------------------
+    # PDF → Technical + Sustainability
+    # -------------------------
+    sustainability_keywords = [
+        "riciclato",
+        "sostanze",
+        "carbon",
+        "fine vita",
+        "cer",
+        "sostenibil",
+        "materiale"
+    ]
+
+    for field in pdf_fields:
+
+        name = field["name"]
+        required = field.get("required", False)
+
+        # decide se sostenibilità
+        is_sustainability = any(k.lower() in name.lower() for k in sustainability_keywords)
+
+        section_name = "Sustainability" if is_sustainability else "Technical Data"
+
+        passport["sections"][section_name]["fields"][name] = {
+            "value": None,
+            "confidence": 0.0,
+            "required": required,
+            "field_type": "lca" if is_sustainability else "technical",
+            "eu_weight": 2.0 if required else 1.0,
+            "rating": 0.0,
+            "color": "🔴"
         }
 
-    # Image fields
-    for f in image_fields:
-        fname = f["name"]
-        required = f.get("required", False)
-        passport["sections"][fname] = {
-            "fields": {
-                fname: {
-                    "value": None,
-                    "confidence": 0.0,
-                    "field_type": "visual",
-                    "eu_weight": 1.0,
-                    "rating": 0.0,
-                    "color": "🔴",
-                    "required": required
-                }
-            }
+    # -------------------------
+    # IMAGE → Visual
+    # -------------------------
+    for field in image_fields:
+
+        name = field["name"]
+        required = field.get("required", False)
+
+        passport["sections"]["Visual Inspection"]["fields"][name] = {
+            "value": None,
+            "confidence": 0.0,
+            "required": required,
+            "field_type": "visual",
+            "eu_weight": 2.0 if required else 1.0,
+            "rating": 0.0,
+            "color": "🔴"
         }
 
     return passport
