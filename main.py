@@ -215,11 +215,7 @@ with tabs[3]:
             # Unisci PDF + IMAGE (PDF prioritario)
             merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
 
-            # Definisci schema semplificato con obbligatorietà per esempio
-            section_schema = {k: {"required": True, "type":"technical"} for k in merged_data.keys()}
-
-            for field_name in merged_data.keys():
-                field = merged_data[field_name]
+            for field_name, field in merged_data.items():
                 rating = services.compute_field_rating(field)
                 color = services.score_to_color(rating)
 
@@ -233,17 +229,16 @@ with tabs[3]:
                             "rating": rating,
                             "color": color
                         }
-                    },
-                    "espr_compliance": services.compute_espr_compliance(
-                        {field_name: {"rating": rating, "eu_weight": field.get("eu_weight", 1.0)}},
-                        {field_name: {"required": True}}
-                    )
+                    }
                 }
 
                 overall_scores.append(rating)
 
             # Giudizio globale
-            global_judgment, overall_rating = services.compute_overall_judgment(sections)
+            global_judgment, overall_rating = services.compute_overall_judgment({
+                field_name: {"fields": {field_name: sections[field_name]["fields"][field_name]}}
+                for field_name in sections
+            })
 
             # --------------------------------------------------
             # Costruzione passport
@@ -285,4 +280,5 @@ with tabs[3]:
 
     else:
         st.info("Completa validazione PDF e immagine")
+
 
