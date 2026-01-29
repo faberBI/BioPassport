@@ -84,7 +84,7 @@ if passport_id:
     **Version:** {passport['metadata']['version']}
     """)
 
-    # Mostra le sezioni e campi con colore + rating sezione
+    # Mostra le sezioni e campi con colore + rating sezione + ESPR
     for section_name, section in passport["sections"].items():
         st.subheader(f"{section_name} — Rating sezione: {section.get('section_rating',0.0)*100:.0f}%")
         for field_name, field in section["fields"].items():
@@ -92,6 +92,19 @@ if passport_id:
             label = f"{field_name} {'(obbligatorio)' if required else '(opzionale)'}"
             color = field.get("color","")
             st.write(f"**{label}**: {field['value']} {color}")
+        
+    # 🧩 ESPR Compliance
+    st.subheader("🧩 ESPR COMPLIANCE")
+    st.markdown("---")
+
+    for section_name, section in passport["sections"].items():
+        status = section.get("espr_status","MISSING")
+        emoji = "✅" if status=="OK" else "⚠️" if status=="PARTIAL" else "❌"
+        st.write(f"{section_name:<20} {emoji} {status}")
+
+    overall_status = passport.get("overall_espr_status","MISSING")
+    emoji_overall = "✅" if overall_status=="OK" else "⚠️" if overall_status=="PARTIAL" else "❌"
+    st.markdown(f"**Overall ESPR Status:** {emoji_overall} {overall_status}")
 
     # Mostra immagini multiple
     if "images" in passport and passport["images"]:
