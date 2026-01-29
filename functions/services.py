@@ -306,18 +306,26 @@ def safe_json_parse(text):
 # RATING / COMPLIANCE
 # ======================================================
 def compute_field_rating(field, type_weight_map=None):
-    # Calcola il rating di un campo (0-1) basato su confidence, tipo di campo e peso EU
+    """
+    Calcola il rating di un campo (0-1) basato su:
+    - confidence (0-1)
+    - tipo campo (technical, declaration, lca, visual)
+    - peso EU (eu_weight)
+    """
     if type_weight_map is None:
         type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
 
-    confidence = field.get("confidence", 0.0)
+    # fallback sicuro se field non è dict
+    if not isinstance(field, dict):
+        field = {"confidence": 0.0, "field_type": "declaration", "eu_weight": 1.0}
+
+    confidence = float(field.get("confidence", 0.0) or 0.0)
     field_type = field.get("field_type", "declaration")
-    eu_weight = field.get("eu_weight", 1.0)
+    eu_weight = float(field.get("eu_weight", 1.0) or 1.0)
 
     type_weight = type_weight_map.get(field_type, 0.5)
     rating = round(confidence * type_weight * eu_weight, 2)
     return rating
-
 
 
 def score_to_color(score):
@@ -342,11 +350,21 @@ def compute_espr_compliance(section_fields, section_schema):
     - PARTIAL: almeno 50% dei campi obbligatori >=0.5
     - MISSING: meno del 50% dei campi obbligatori
     """
-    required_fields = [k for k, v in section_schema.items() if v.get("required", False)]
+    if not isinstance(section_fields, dict):
+        return "MISSING"
+
+    required_fields = [k for k, v in section_schema.items() if isinstance(v, dict) and v.get("required", False)]
     if not required_fields:
         return "OK"
 
-    ratings = [section_fields[f]["rating"] for f in required_fields if f in section_fields]
+    ratings = []
+    for f in required_fields:
+        field = section_fields.get(f)
+        if field is None:
+            ratings.append(0.0)
+        else:
+            ratings.append(compute_field_rating(field))
+
     if not ratings:
         return "MISSING"
 
@@ -386,11 +404,16 @@ def compute_overall_judgment(sections):
     """
     section_scores = []
     for section_name, section in sections.items():
-        fields = section["fields"]
-        mandatory_scores = [f["rating"] for f in fields.values() if f.get("eu_weight", 1.0) >= 1.0]
+        fields = section.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+
+        mandatory_scores = [compute_field_rating(f) for f in fields.values() if isinstance(f, dict) and f.get("eu_weight", 1.0) >= 1.0]
         if mandatory_scores:
             section_scores.append(sum(mandatory_scores)/len(mandatory_scores))
+
     overall = sum(section_scores)/len(section_scores) if section_scores else 0.0
     return score_to_judgment(overall), overall
+
 
 
