@@ -502,3 +502,24 @@ def compute_overall_espr_from_sections(passport):
     else:
         return "OK"
 
+
+def render_espr_compliance(passport: dict):
+    """
+    Mostra la compliance ESPR basata sul rating delle sezioni.
+    ✅ >0.7, ⚠️ 0.4–0.7, ❌ <0.4
+    """
+    emoji_map = lambda r: "✅" if r > 0.7 else "⚠️" if r >= 0.4 else "❌"
+
+    st.subheader("🧩 ESPR COMPLIANCE")
+    for section_name, section in passport["sections"].items():
+        rating = section.get("section_rating", 0.0)
+        emoji = emoji_map(rating)
+        status_text = { "✅":"OK", "⚠️":"PARTIAL", "❌":"MISSING" }[emoji]
+        st.write(f"{section_name:20} {emoji} {status_text}")
+
+    # Overall ESPR basato sul peggior rating delle sezioni
+    overall_rating = min([s.get("section_rating",0.0) for s in passport["sections"].values()])
+    overall_emoji = emoji_map(overall_rating)
+    overall_status = { "✅":"OK", "⚠️":"PARTIAL", "❌":"MISSING" }[overall_emoji]
+    st.write(f"\nOverall ESPR Status: {overall_emoji} {overall_status}")
+
