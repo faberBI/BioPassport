@@ -162,9 +162,9 @@ Esempio:
 
         # 🔹 mapping GPT → chiavi form
         mapping = {
-            "tipologia prodotto": "tipologia_prodotto",
-            "colore": "colore",
-            "condizioni": "condizioni"
+            "Tipologia di prodotto": "Tipologia di prodotto",
+            "Colore": "Colore",
+            "Condizioni": "Condizioni"
         }
 
         data = {}
