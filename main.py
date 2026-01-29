@@ -44,40 +44,6 @@ h1, h2, h3, h4, h5, h6 {{ color: #3a2607; }}
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# FUNZIONI UTILI
-# ======================================================
-def compute_field_rating(field):
-    """Calcola rating basato su confidence e tipo campo"""
-    field_type_weight = {
-        "technical": 1.0,
-        "declaration": 0.6,
-        "lca": 0.5,
-        "visual": 0.8  # aumento peso visual per non farle MISSING
-    }
-    weight = field_type_weight.get(field.get("field_type","technical"),0.5)
-    confidence = field.get("confidence",0.0) or 0.0
-    return round(confidence * weight,2)
-
-def score_to_color(score):
-    """Converte rating in colore 🟢🟡🔴"""
-    if score >= 0.8: return "🟢"
-    elif score >= 0.5: return "🟡"
-    else: return "🔴"
-
-def compute_espr_compliance(fields, required_fields):
-    """Calcola ESPR compliance OK/PARTIAL/MISSING basato su rating dei campi richiesti"""
-    ratings = []
-    for f in required_fields:
-        r = fields.get(f,{}).get("rating",0.0)
-        ratings.append(r)
-    if all(r >= 0.8 for r in ratings):
-        return "OK"
-    elif any(r >= 0.5 for r in ratings):
-        return "PARTIAL"
-    else:
-        return "MISSING"
-
-# ======================================================
 # ROUTING QR → PAGINA PUBBLICA
 # ======================================================
 passport_id = st.query_params.get("passport_id")
@@ -111,19 +77,20 @@ if passport_id:
         for field_name, field in section["fields"].items():
             color = field.get("color","")
             st.write(f"**{field_name}**: {field['value']} {color}")
+    
+    # Mostra immagini multiple
+    if "images" in passport and passport["images"]:
+        for img in passport["images"]:
+            st.image(
+                f"data:image/jpeg;base64,{img['file_base64']}",
+                caption=f"{img.get('caption','Immagine')} - {img.get('annotation','')}",
+                use_column_width=True
+            )
 
     # Overall reliability
     st.subheader("📊 Overall Reliability")
     st.progress(passport.get("overall_rating",0.0))
     st.metric("Overall Reliability Score", f"{int(passport.get('overall_rating',0.0)*100)}%")
-
-    # Mostra immagine se presente
-    if "product_image_base64" in passport:
-        st.image(
-            f"data:image/jpeg;base64,{passport['product_image_base64']}",
-            caption="Foto prodotto",
-            use_column_width=True
-        )
 
     st.caption("Public read-only Digital Product Passport. Generated via AI extraction and human validation.")
     st.stop()
@@ -131,15 +98,12 @@ if passport_id:
 # ======================================================
 # BACKOFFICE
 # ======================================================
-for k in ["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]:
-    if k not in st.session_state:
-        st.session_state[k] = None
+services.reset_session_state()
 
 tipo_prodotto = st.selectbox(
     "Seleziona tipo prodotto",
     ["mobile","lampada","bicicletta"]
 )
-
 
 tabs = st.tabs([
     "📤 Upload & Analisi",
@@ -154,18 +118,40 @@ tabs = st.tabs([
 with tabs[0]:
     with st.form("upload_form"):
         pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
-        image_file = st.file_uploader("Immagine prodotto", type=["jpg","png","jpeg"])
+        # Supporto multi-upload immagini
+        image_files = st.file_uploader(
+            "Immagini prodotto (puoi caricare più immagini)", 
+            type=["jpg","png","jpeg"], 
+            accept_multiple_files=True
+        )
         submitted = st.form_submit_button("🔍 Analizza")
 
         if submitted:
-            if not pdf_file or not image_file:
-                st.warning("Carica PDF e immagine")
+            if not pdf_file or not image_files:
+                st.warning("Carica PDF e almeno un'immagine")
             else:
                 with st.spinner("Analisi in corso ⏳…"):
-                    pdf_text = services.extract_text_from_pdf(pdf_file)
-                    st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
-                    st.session_state.uploaded_image_file = image_file
-                    st.session_state.image_data = services.gpt_analyze_image(image_file, client, tipo_prodotto)
+                    # PDF
+                    try:
+                        pdf_text = services.extract_text_from_pdf(pdf_file)
+                        st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
+                    except Exception:
+                        st.warning("GPT PDF fallito, userà dati vuoti")
+                        st.session_state.pdf_data = {c: None for c in services.PRODUCT_FIELDS[tipo_prodotto]["pdf"]}
+
+                    # Immagini
+                    st.session_state.image_data = {}
+                    st.session_state.uploaded_image_file = image_files  # salva lista
+                    for idx, img_file in enumerate(image_files):
+                        try:
+                            image_data = services.gpt_analyze_image(img_file, client, tipo_prodotto)
+                            # Se più immagini, unisci i risultati
+                            st.session_state.image_data.update(image_data)
+                        except Exception:
+                            st.warning(f"GPT Image fallita per immagine {img_file.name}")
+                            # Usa default
+                            st.session_state.image_data.update({c: "non rilevato" for c in services.PRODUCT_FIELDS[tipo_prodotto]["image"]})
+
                 st.success("Analisi completata")
                 st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
 
@@ -191,7 +177,8 @@ with tabs[2]:
             title="👁️ Dati estratti da immagine"
         )
         if st.session_state.uploaded_image_file:
-            st.image(st.session_state.uploaded_image_file, caption="Foto prodotto", use_column_width=True)
+            for img in st.session_state.uploaded_image_file:
+                st.image(img, caption="Foto prodotto", use_column_width=True)
     else:
         st.info("Esegui prima l’analisi")
 
@@ -206,109 +193,44 @@ with tabs[3]:
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
             # --------------------------------------------------
-            # Unisci PDF + IMAGE (PDF prioritario)
+            # Inizializza passport completo con sezioni obbligatorie/opzionali
             # --------------------------------------------------
-            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
+            passport_data = services.initialize_passport(product_id, tipo_prodotto)
 
-            # Tutti i campi obbligatori per il tipo prodotto
-            required_fields = services.PRODUCT_FIELDS[tipo_prodotto]["pdf"] + services.PRODUCT_FIELDS[tipo_prodotto]["image"]
+            # Merge dati PDF + Image
+            merged_data = {**st.session_state.validated_pdf, **st.session_state.validated_image}
+            for section_name, section in passport_data["sections"].items():
+                for field_name, field in section["fields"].items():
+                    if field_name in merged_data:
+                        val = merged_data[field_name]
+                        if not isinstance(val, dict):
+                            val = {"value": val, "confidence": 1.0, "field_type": field.get("field_type","technical")}
+                        field.update(val)
 
-            sections = {}
-            overall_scores = []
+            # Aggiungi immagini multiple
+            for idx, img_file in enumerate(st.session_state.uploaded_image_file):
+                services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
 
-            for field_name in required_fields:
-                if field_name in merged_data:
-                    field_value = merged_data[field_name]
+            # Calcola rating sezione + overall
+            services.compute_overall_rating(passport_data)
 
-                    # Normalizza il campo se non è già un dict
-                    if not isinstance(field_value, dict):
-                        field = {
-                            "value": field_value,
-                            "confidence": 1.0,         # default se presente
-                            "field_type": "technical", # default
-                            "eu_weight": 1.0
-                        }
-                    else:
-                        field = field_value
-
-                    rating = services.compute_field_rating(field)
-                    color = services.score_to_color(rating)
-
-                    sections[field_name] = {
-                        "fields": {
-                            field_name: {
-                                "value": field.get("value"),
-                                "confidence": field.get("confidence", 0.0),
-                                "field_type": field.get("field_type", "declaration"),
-                                "eu_weight": field.get("eu_weight", 1.0),
-                                "rating": rating,
-                                "color": color
-                            }
-                        }
-                    }
-
-                else:
-                    # Campo mancante → rating 0
-                    rating = 0.0
-                    color = services.score_to_color(rating)
-                    sections[field_name] = {
-                        "fields": {
-                            field_name: {
-                                "value": None,
-                                "confidence": 0.0,
-                                "field_type": "technical",
-                                "eu_weight": 1.0,
-                                "rating": rating,
-                                "color": color
-                            }
-                        }
-                    }
-
-                overall_scores.append(rating)
-
-            # --------------------------------------------------
-            # Overall Reliability
-            # --------------------------------------------------
-            overall_rating = sum(overall_scores) / len(overall_scores) if overall_scores else 0.0
-
-            # --------------------------------------------------
-            # Costruzione passport
-            # --------------------------------------------------
-            passport_data = {
-                "id": product_id,
-                "product_type": tipo_prodotto,
-                "metadata": {
-                    "created_at": datetime.utcnow().isoformat(),
-                    "version": "EU-DPP-1.0"
-                },
-                "sections": sections,
-                "overall_rating": overall_rating
-            }
-
-            # Salva immagine Base64 se presente
-            if st.session_state.uploaded_image_file:
-                passport_data["product_image_base64"] = services.image_to_base64(st.session_state.uploaded_image_file)
-
+            # Salva passport
             services.save_passport_to_file(passport_data)
 
-            # --------------------------------------------------
             # QR + URL pubblico
-            # --------------------------------------------------
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
-            # --------------------------------------------------
             # UI Feedback
-            # --------------------------------------------------
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
             st.subheader("📊 Overall Reliability")
-            st.progress(overall_rating)
-            st.metric("Overall Reliability Score", f"{int(overall_rating*100)}%")
+            st.progress(passport_data["overall_rating"])
+            st.metric("Overall Reliability Score", f"{int(passport_data['overall_rating']*100)}%")
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
 
+            # Reset stato sessione per nuovo prodotto
+            services.reset_session_state()
     else:
         st.info("Completa validazione PDF e immagine")
-
-
