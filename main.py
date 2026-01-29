@@ -207,68 +207,70 @@ with tabs[3]:
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
             # --------------------------------------------------
-            # Normalizza + rating
+            # Unisci PDF + IMAGE (PDF prioritario)
             # --------------------------------------------------
-            sections = []
+            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
 
+            # Tutti i campi obbligatori per il tipo prodotto
+            required_fields = services.PRODUCT_FIELDS[tipo_prodotto]["pdf"] + services.PRODUCT_FIELDS[tipo_prodotto]["image"]
+
+            sections = {}
             overall_scores = []
 
-            # --- Sezione PDF ---
-            pdf_fields = {}
-            for field_name, field in st.session_state.validated_pdf.items():
-                rating = services.compute_field_rating(field)
-                color = services.score_to_color(rating)
-                pdf_fields[field_name] = {
-                    "value": field.get("value"),
-                    "confidence": field.get("confidence", 0.0),
-                    "field_type": field.get("field_type", "declaration"),
-                    "eu_weight": field.get("eu_weight", 1.0),
-                    "rating": rating,
-                    "color": color
-                }
+            for field_name in required_fields:
+                if field_name in merged_data:
+                    field_value = merged_data[field_name]
+
+                    # Normalizza il campo se non è già un dict
+                    if not isinstance(field_value, dict):
+                        field = {
+                            "value": field_value,
+                            "confidence": 1.0,         # default se presente
+                            "field_type": "technical", # default
+                            "eu_weight": 1.0
+                        }
+                    else:
+                        field = field_value
+
+                    rating = services.compute_field_rating(field)
+                    color = services.score_to_color(rating)
+
+                    sections[field_name] = {
+                        "fields": {
+                            field_name: {
+                                "value": field.get("value"),
+                                "confidence": field.get("confidence", 0.0),
+                                "field_type": field.get("field_type", "declaration"),
+                                "eu_weight": field.get("eu_weight", 1.0),
+                                "rating": rating,
+                                "color": color
+                            }
+                        }
+                    }
+
+                else:
+                    # Campo mancante → rating 0
+                    rating = 0.0
+                    color = services.score_to_color(rating)
+                    sections[field_name] = {
+                        "fields": {
+                            field_name: {
+                                "value": None,
+                                "confidence": 0.0,
+                                "field_type": "technical",
+                                "eu_weight": 1.0,
+                                "rating": rating,
+                                "color": color
+                            }
+                        }
+                    }
+
                 overall_scores.append(rating)
-
-            pdf_compliance = services.compute_espr_compliance(
-                pdf_fields,
-                {k: {"required": True} for k in pdf_fields.keys()}
-            )
-
-            sections.append({
-                "name": "PDF",
-                "fields": pdf_fields,
-                "espr_compliance": pdf_compliance
-            })
-
-            # --- Sezione IMAGE ---
-            image_fields = {}
-            for field_name, field in st.session_state.validated_image.items():
-                rating = services.compute_field_rating(field)
-                color = services.score_to_color(rating)
-                image_fields[field_name] = {
-                    "value": field.get("value"),
-                    "confidence": field.get("confidence", 0.0),
-                    "field_type": field.get("field_type", "visual"),
-                    "eu_weight": field.get("eu_weight", 1.0),
-                    "rating": rating,
-                    "color": color
-                }
-                overall_scores.append(rating)
-
-            image_compliance = services.compute_espr_compliance(
-                image_fields,
-                {k: {"required": True} for k in image_fields.keys()}
-            )
-
-            sections.append({
-                "name": "IMAGE",
-                "fields": image_fields,
-                "espr_compliance": image_compliance
-            })
 
             # --------------------------------------------------
             # Overall Reliability
             # --------------------------------------------------
-            overall_rating = sum(overall_scores)/len(overall_scores) if overall_scores else 0.0
+            overall_rating = sum(overall_scores) / len(overall_scores) if overall_scores else 0.0
 
             # --------------------------------------------------
             # Costruzione passport
@@ -280,7 +282,7 @@ with tabs[3]:
                     "created_at": datetime.utcnow().isoformat(),
                     "version": "EU-DPP-1.0"
                 },
-                "sections": {s["name"]: s for s in sections},
+                "sections": sections,
                 "overall_rating": overall_rating
             }
 
@@ -300,11 +302,9 @@ with tabs[3]:
             # UI Feedback
             # --------------------------------------------------
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
-
             st.subheader("📊 Overall Reliability")
-            st.metric("Overall Reliability Score", f"{int(overall_rating*100)}%")
             st.progress(overall_rating)
-
+            st.metric("Overall Reliability Score", f"{int(overall_rating*100)}%")
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
