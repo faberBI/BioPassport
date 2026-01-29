@@ -475,3 +475,28 @@ def compute_overall_espr(passport):
         return "PARTIAL"
     return "OK"
 
+def compute_espr_status_from_section_rating(section):
+    """Restituisce lo stato ESPR di una sezione basandosi sul suo rating già calcolato"""
+    r = section.get("section_rating", 0.0)
+    if r >= 0.7:
+        return "OK"
+    elif r >= 0.4:
+        return "PARTIAL"
+    else:
+        return "MISSING"
+
+def compute_overall_espr_from_sections(passport):
+    """Calcola lo stato ESPR complessivo basandosi sui rating delle sezioni"""
+    statuses = []
+    for section in passport.get("sections", {}).values():
+        status = compute_espr_status_from_section_rating(section)
+        section["espr_status"] = status
+        statuses.append(status)
+
+    if "MISSING" in statuses:
+        return "MISSING"
+    elif "PARTIAL" in statuses:
+        return "PARTIAL"
+    else:
+        return "OK"
+
