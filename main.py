@@ -216,39 +216,45 @@ with tabs[3]:
 
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-            # Inizializza passport con sezione vuota
+            # 1️⃣ Inizializza passport con sezione vuota e campi required
             passport_data = services.initialize_passport(product_id, tipo_prodotto)
 
-            # Merge dati PDF + Image
+            # 2️⃣ Merge dati PDF + Image
             merged_data = {**st.session_state.validated_pdf, **st.session_state.validated_image}
+
             for section_name, section in passport_data["sections"].items():
                 for field_name, field in section["fields"].items():
                     if field_name in merged_data:
                         val = merged_data[field_name]
+                        # Se non è dict, trasformalo in dict con valore e default
                         if not isinstance(val, dict):
                             val = {
                                 "value": val,
                                 "confidence": 1.0,
-                                "field_type": field.get("field_type","technical"),
-                                "required": True if field_name in services.PRODUCT_FIELDS[tipo_prodotto]["pdf"] else False
+                                "field_type": field.get("field_type", "technical"),
+                                "eu_weight": 1.0
                             }
                         field.update(val)
+                        # Aggiorna rating e colore
+                        rating = services.compute_field_rating(field)
+                        field["rating"] = rating
+                        field["color"] = services.score_to_color(rating)
 
-            # Aggiungi tutte le immagini caricate
+            # 3️⃣ Aggiungi tutte le immagini caricate
             for idx, img_file in enumerate(st.session_state.uploaded_image_files):
                 services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
 
-            # Calcola rating complessivo considerando obbligatori/opzionali
+            # 4️⃣ Calcola rating complessivo considerando campi obbligatori
             services.compute_overall_rating(passport_data)
 
-            # Salva passport
+            # 5️⃣ Salva passport
             services.save_passport_to_file(passport_data)
 
-            # QR + URL pubblico
+            # 6️⃣ Genera QR code + URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
-            # UI Feedback
+            # 7️⃣ UI Feedback
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
             st.subheader("📊 Overall Reliability")
             st.progress(passport_data["overall_rating"])
