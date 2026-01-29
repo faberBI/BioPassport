@@ -94,17 +94,7 @@ if passport_id:
             st.write(f"**{label}**: {field['value']} {color}")
         
     # 🧩 ESPR Compliance
-    st.subheader("🧩 ESPR COMPLIANCE")
-    st.markdown("---")
-
-    for section_name, section in passport["sections"].items():
-        status = section.get("espr_status","MISSING")
-        emoji = "✅" if status=="OK" else "⚠️" if status=="PARTIAL" else "❌"
-        st.write(f"{section_name:<20} {emoji} {status}")
-
-    overall_status = passport.get("overall_espr_status","MISSING")
-    emoji_overall = "✅" if overall_status=="OK" else "⚠️" if overall_status=="PARTIAL" else "❌"
-    st.markdown(f"**Overall ESPR Status:** {emoji_overall} {overall_status}")
+    render_espr_compliance(passport)
 
     # Mostra immagini multiple
     if "images" in passport and passport["images"]:
@@ -260,6 +250,8 @@ with tabs[3]:
 
             # 5️⃣ Salva passport
             services.save_passport_to_file(passport_data)
+            # ⭐ Mostra ESPR Compliance basata sul rating delle sezioni
+            render_espr_compliance(passport_data)
 
             # 6️⃣ Genera QR code + URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
