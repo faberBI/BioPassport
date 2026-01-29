@@ -302,35 +302,18 @@ def safe_json_parse(text):
 
     return json.loads(text)
 
-def compute_espr_compliance(section_data, section_schema):
-    """
-    section_data: dict dei campi normalizzati
-    section_schema: MOBILE_SCHEMA[section]
-    """
-
-    required_fields = [
-        f for f, meta in section_schema.items() if meta.get("required")
-    ]
-
-    present_required = 0
-    scores = []
-
-    for field_name, field in section_data.items():
-        if field_name in required_fields and field.get("value"):
-            present_required += 1
-
-        scores.append(compute_field_rating(field))
-
-    avg_score = sum(scores) / len(scores) if scores else 0.0
-
-    if present_required == len(required_fields) and avg_score >= 0.6:
-        return "OK"
-    elif present_required > 0 or avg_score >= 0.3:
-        return "PARTIAL"
-    else:
-        return "MISSING"
+# ======================================================
+# FIELD RATING & COLOR
+# ======================================================
 def compute_field_rating(field):
-    if not field.get("value"):
+    """
+    Calcola il rating del campo basato su confidence e field_type
+    """
+    value = field.get("value")
+    confidence = field.get("confidence", 0.0)
+    field_type = field.get("field_type", "declaration")
+
+    if not value or str(value).strip().lower() in ["null", "non rilevato", ""]:
         return 0.0
 
     weight = {
@@ -338,15 +321,47 @@ def compute_field_rating(field):
         "declaration": 0.6,
         "lca": 0.5,
         "visual": 0.4
-    }.get(field.get("field_type"), 0.5)
+    }.get(field_type.lower(), 0.5)
 
-    return round(field.get("confidence", 0.0) * weight, 2)
-
+    rating = round(confidence * weight, 2)
+    return rating
 
 def score_to_color(score):
+    """
+    Converte rating numerico 0-1 in colore per UI
+    """
     if score >= 0.66:
         return "🟢"
     elif score >= 0.33:
         return "🟡"
-    return "🔴"
+    else:
+        return "🔴"
+
+# ======================================================
+# ESPR COMPLIANCE
+# ======================================================
+def compute_espr_compliance(section_fields, section_schema):
+    """
+    Calcola ESPR compliance della sezione.
+    OK = tutti i campi obbligatori presenti con rating > 0.5
+    PARTIAL = almeno un campo obbligatorio con rating > 0
+    MISSING = nessun campo valido
+    """
+    required_fields = [f for f, meta in section_schema.items() if meta.get("required", False)]
+
+    if not required_fields:
+        return "OK"  # Nessun obbligo => OK
+
+    ratings = []
+    for f in required_fields:
+        rating = compute_field_rating(section_fields.get(f, {"value": None, "confidence":0.0, "field_type": "declaration"}))
+        ratings.append(rating)
+
+    if all(r >= 0.5 for r in ratings):
+        return "OK"
+    elif any(r > 0 for r in ratings):
+        return "PARTIAL"
+    else:
+        return "MISSING"
+
 
