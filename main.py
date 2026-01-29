@@ -84,14 +84,15 @@ if passport_id:
     **Version:** {passport['metadata']['version']}
     """)
 
-    # Mostra le sezioni e campi con colore
+    # Mostra le sezioni e campi con colore + rating sezione
     for section_name, section in passport["sections"].items():
-        st.subheader(f"{section_name}")
+        st.subheader(f"{section_name} — Rating sezione: {section.get('section_rating',0.0)*100:.0f}%")
         for field_name, field in section["fields"].items():
             required = field.get("required", False)
             label = f"{field_name} {'(obbligatorio)' if required else '(opzionale)'}"
             color = field.get("color","")
             st.write(f"**{label}**: {field['value']} {color}")
+
     
     # Mostra immagini multiple
     if "images" in passport and passport["images"]:
