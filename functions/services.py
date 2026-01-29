@@ -306,18 +306,31 @@ def safe_json_parse(text):
 # RATING / COMPLIANCE
 # ======================================================
 def compute_field_rating(field, type_weight_map=None):
+    """
+    Calcola il rating di un campo (0-1) basato su:
+    - confidence (AI + validazione)
+    - tipo di campo (technical, declaration, lca, visual)
+    - peso EU / obbligatorietà
+    """
     if type_weight_map is None:
         type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
 
     confidence = field.get("confidence", 0.0)
     field_type = field.get("field_type", "declaration")
-    eu_weight = field.get("eu_weight", 1.0)
+    eu_weight = field.get("eu_weight", 1.0)  # peso regolatorio: 1.0=obbligatorio, <1=facoltativo
 
     type_weight = type_weight_map.get(field_type, 0.5)
     rating = round(confidence * type_weight * eu_weight, 2)
     return rating
 
+
 def score_to_color(score):
+    """
+    Converte il rating numerico in colore:
+    🟢 >= 0.7
+    🟡 >= 0.4
+    🔴 < 0.4
+    """
     if score >= 0.7:
         return "🟢"
     elif score >= 0.4:
@@ -325,20 +338,63 @@ def score_to_color(score):
     else:
         return "🔴"
 
+
 def compute_espr_compliance(section_fields, section_schema):
+    """
+    Calcola lo stato di compliance di una sezione:
+    - OK: tutti i campi obbligatori >= 0.5
+    - PARTIAL: almeno 50% dei campi obbligatori >=0.5
+    - MISSING: meno del 50% dei campi obbligatori
+    """
     required_fields = [k for k, v in section_schema.items() if v.get("required", False)]
     if not required_fields:
         return "OK"
+
     ratings = [section_fields[f]["rating"] for f in required_fields if f in section_fields]
     if not ratings:
         return "MISSING"
+
     n_ok = sum(1 for r in ratings if r >= 0.5)
     pct_ok = n_ok / len(required_fields)
+
     if pct_ok == 1.0:
         return "OK"
     elif pct_ok >= 0.5:
         return "PARTIAL"
     else:
         return "MISSING"
+
+
+def score_to_judgment(score):
+    """
+    Converte punteggio complessivo (0-1) in giudizio qualitativo globale
+    """
+    if score >= 0.9:
+        return "🌟 Eccellente"
+    elif score >= 0.7:
+        return "👍 Buono"
+    elif score >= 0.5:
+        return "🟡 Sufficiente"
+    elif score >= 0.3:
+        return "⚠️ Scarso"
+    else:
+        return "❌ Critico"
+
+
+def compute_overall_judgment(sections):
+    """
+    Calcola il giudizio globale del prodotto sulla base dei rating dei campi obbligatori ESPR.
+    Ritorna:
+    - giudizio qualitativo (emoji + testo)
+    - punteggio numerico (0-1)
+    """
+    section_scores = []
+    for section_name, section in sections.items():
+        fields = section["fields"]
+        mandatory_scores = [f["rating"] for f in fields.values() if f.get("eu_weight", 1.0) >= 1.0]
+        if mandatory_scores:
+            section_scores.append(sum(mandatory_scores)/len(mandatory_scores))
+    overall = sum(section_scores)/len(section_scores) if section_scores else 0.0
+    return score_to_judgment(overall), overall
 
 
