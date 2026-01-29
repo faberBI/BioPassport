@@ -134,33 +134,12 @@ if passport_id:
 for k in ["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]:
     if k not in st.session_state:
         st.session_state[k] = None
-
-st.markdown("<h3>Seleziona il tipo di prodotto</h3>", unsafe_allow_html=True)
-
-# Box bianco
-with st.container():
-    st.markdown(
-        """
-        <style>
-        /* Contenitore bianco */
-        .white-box {
-            background-color: white;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            width: fit-content;
-            margin-bottom: 20px;
-        }
-        </style>
-        """, unsafe_allow_html=True
-    )
-
-    st.markdown('<div class="white-box">', unsafe_allow_html=True)
+st.markdown('<div class="white-box">', unsafe_allow_html=True)
     tipo_prodotto = st.selectbox(
         "Seleziona tipo prodotto",
         ["mobile","lampada","bicicletta"]
     )
-    st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 tabs = st.tabs([
     "📤 Upload & Analisi",
     "📝 Validazione PDF",
