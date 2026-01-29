@@ -302,4 +302,51 @@ def safe_json_parse(text):
 
     return json.loads(text)
 
+def compute_espr_compliance(section_data, section_schema):
+    """
+    section_data: dict dei campi normalizzati
+    section_schema: MOBILE_SCHEMA[section]
+    """
+
+    required_fields = [
+        f for f, meta in section_schema.items() if meta.get("required")
+    ]
+
+    present_required = 0
+    scores = []
+
+    for field_name, field in section_data.items():
+        if field_name in required_fields and field.get("value"):
+            present_required += 1
+
+        scores.append(compute_field_rating(field))
+
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+
+    if present_required == len(required_fields) and avg_score >= 0.6:
+        return "OK"
+    elif present_required > 0 or avg_score >= 0.3:
+        return "PARTIAL"
+    else:
+        return "MISSING"
+def compute_field_rating(field):
+    if not field.get("value"):
+        return 0.0
+
+    weight = {
+        "technical": 1.0,
+        "declaration": 0.6,
+        "lca": 0.5,
+        "visual": 0.4
+    }.get(field.get("field_type"), 0.5)
+
+    return round(field.get("confidence", 0.0) * weight, 2)
+
+
+def score_to_color(score):
+    if score >= 0.66:
+        return "🟢"
+    elif score >= 0.33:
+        return "🟡"
+    return "🔴"
 
