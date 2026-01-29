@@ -275,46 +275,67 @@ def score_to_judgment(score):
 # PASSPORT MANAGEMENT
 # ======================================================
 def initialize_passport(product_id: str, product_type: str) -> dict:
+    """
+    Crea un nuovo Digital Product Passport con struttura vuota,
+    pronto per ricevere dati da PDF/immagini.
+    Gestisce campi obbligatori (required) e opzionali.
+    """
     passport = {
         "id": product_id,
         "product_type": product_type,
-        "metadata": {"created_at":datetime.utcnow().isoformat(),"version":"EU-DPP-1.0"},
+        "metadata": {
+            "created_at": datetime.utcnow().isoformat(),
+            "version": "EU-DPP-1.0"
+        },
         "sections": {},
-        "overall_rating":0.0,
-        "images":[]
+        "overall_rating": 0.0,
+        "images": []  # supporto multi-immagini
     }
-    pdf_fields = PRODUCT_FIELDS.get(product_type,{}).get("pdf",[])
-    image_fields = PRODUCT_FIELDS.get(product_type,{}).get("image",[])
 
+    # ======================================================
+    # Campi PDF
+    # ======================================================
+    pdf_fields = services.PRODUCT_FIELDS.get(product_type, {}).get("pdf", [])
     for f in pdf_fields:
-        passport["sections"][f["name"]] = {
+        name = f["name"]
+        required = f.get("required", False)
+        passport["sections"][name] = {
             "fields": {
-                f["name"]: {
+                name: {
                     "value": None,
                     "confidence": 0.0,
                     "field_type": "technical",
                     "eu_weight": 1.0,
                     "rating": 0.0,
                     "color": "🔴",
-                    "required": f.get("required",False)
+                    "required": required
                 }
             }
         }
+
+    # ======================================================
+    # Campi Image
+    # ======================================================
+    image_fields = services.PRODUCT_FIELDS.get(product_type, {}).get("image", [])
     for f in image_fields:
-        passport["sections"][f["name"]] = {
+        name = f["name"]
+        required = f.get("required", False)
+        passport["sections"][name] = {
             "fields": {
-                f["name"]: {
+                name: {
                     "value": None,
-                    "confidence":0.0,
-                    "field_type":"visual",
-                    "eu_weight":1.0,
-                    "rating":0.0,
-                    "color":"🔴",
-                    "required":f.get("required",False)
+                    "confidence": 0.0,
+                    "field_type": "visual",
+                    "eu_weight": 1.0,
+                    "rating": 0.0,
+                    "color": "🔴",
+                    "required": required
                 }
             }
         }
+
     return passport
+
 
 def add_product_image(passport: dict, image_file, caption: str = "", annotation: str = ""):
     img_base64 = image_to_base64(image_file)
