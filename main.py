@@ -136,7 +136,21 @@ for k in ["pdf_data","image_data","validated_pdf","validated_image","uploaded_im
         st.session_state[k] = None
 
 tipo_prodotto = st.selectbox("Seleziona tipo prodotto", ["mobile","lampada","bicicletta"])
-
+# CSS per evidenziare il selectbox
+st.markdown(
+    """
+    <style>
+    /* Evidenzia il selectbox */
+    div[role="combobox"] > div {
+        background-color: white !important;
+        border-radius: 8px !important;
+        padding: 5px 10px !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 tabs = st.tabs([
     "📤 Upload & Analisi",
     "📝 Validazione PDF",
