@@ -429,3 +429,39 @@ def merge_validated_data(passport, validated_pdf, validated_image):
                 field["rating"] = rating
                 field["color"] = services.score_to_color(rating)
 
+
+def compute_espr_status(section):
+    required_fields = [
+        f for f in section["fields"].values()
+        if f.get("required")
+    ]
+
+    if not required_fields:
+        return "OK"
+
+    filled = [
+        f for f in required_fields
+        if f.get("rating", 0) > 0
+    ]
+
+    ratio = len(filled) / len(required_fields)
+
+    if ratio == 1:
+        return "OK"
+    elif ratio >= 0.5:
+        return "PARTIAL"
+    else:
+        return "MISSING"
+
+def compute_overall_espr(passport):
+    statuses = [
+        section["espr_status"]
+        for section in passport["sections"].values()
+    ]
+
+    if "MISSING" in statuses:
+        return "MISSING"
+    if "PARTIAL" in statuses:
+        return "PARTIAL"
+    return "OK"
+
