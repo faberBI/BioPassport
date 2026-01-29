@@ -16,8 +16,8 @@ PASSPORT_DIR = "passports"
 
 PRODUCT_FIELDS = {
     "mobile": {
-        "pdf": ["nome_prodotto","numero_di_modello","produttore","materiali","dimensioni","anno_di_produzione", "certificazione_di_sicurezza", "certificazione_di_sostenibilita", "descrizione_prodotto", "luogo_di_produzione", "manutenzione e cura", "materiali/componenti utilizzati", "tipologia_di_legno", "marchio", "garanzia", "prezzo"],
-        "image": ["tipologia_prodotto", "colore","condizioni"]
+        "pdf": ["Nome prodotto","Numero di modello","Produttore","Materiali","Dimensioni","Anno di produzione", "Certificazione di sicurezza", "Certificazione di sostenibilita", "Descrizione prodotto", "Luogo di produzione", "Manutenzione e cura", "Materiali/componenti utilizzati", "Tipologia di legno", "Marchio", "Garanzia", "Prezzo"],
+        "image": ["Tipologia di prodotto", "Colore","Condizioni"]
     },
     "lampada": {
         "pdf": ["nome_prodotto","produttore","materiale","wattaggio"],
@@ -109,7 +109,7 @@ def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
     import streamlit as st
 
     # Chiavi come devono essere nel form / passport
-    campi = ["tipologia_prodotto", "colore", "condizioni"]
+    campi = ["Tipologia di prodotto", "Colore", "Condizioni"]
 
     prompt = f"""
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
