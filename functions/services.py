@@ -303,63 +303,40 @@ def safe_json_parse(text):
     return json.loads(text)
 
 # ======================================================
-# FIELD RATING & COLOR
+# RATING / COMPLIANCE
 # ======================================================
-def compute_field_rating(field):
-    """
-    Calcola il rating del campo basato su confidence e field_type
-    """
-    value = field.get("value")
+def compute_field_rating(field, type_weight_map=None):
+    if type_weight_map is None:
+        type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
+
     confidence = field.get("confidence", 0.0)
     field_type = field.get("field_type", "declaration")
+    eu_weight = field.get("eu_weight", 1.0)
 
-    if not value or str(value).strip().lower() in ["null", "non rilevato", ""]:
-        return 0.0
-
-    weight = {
-        "technical": 1.0,
-        "declaration": 0.6,
-        "lca": 0.5,
-        "visual": 0.4
-    }.get(field_type.lower(), 0.5)
-
-    rating = round(confidence * weight, 2)
+    type_weight = type_weight_map.get(field_type, 0.5)
+    rating = round(confidence * type_weight * eu_weight, 2)
     return rating
 
 def score_to_color(score):
-    """
-    Converte rating numerico 0-1 in colore per UI
-    """
-    if score >= 0.66:
+    if score >= 0.7:
         return "🟢"
-    elif score >= 0.33:
+    elif score >= 0.4:
         return "🟡"
     else:
         return "🔴"
 
-# ======================================================
-# ESPR COMPLIANCE
-# ======================================================
 def compute_espr_compliance(section_fields, section_schema):
-    """
-    Calcola ESPR compliance della sezione.
-    OK = tutti i campi obbligatori presenti con rating > 0.5
-    PARTIAL = almeno un campo obbligatorio con rating > 0
-    MISSING = nessun campo valido
-    """
-    required_fields = [f for f, meta in section_schema.items() if meta.get("required", False)]
-
+    required_fields = [k for k, v in section_schema.items() if v.get("required", False)]
     if not required_fields:
-        return "OK"  # Nessun obbligo => OK
-
-    ratings = []
-    for f in required_fields:
-        rating = compute_field_rating(section_fields.get(f, {"value": None, "confidence":0.0, "field_type": "declaration"}))
-        ratings.append(rating)
-
-    if all(r >= 0.5 for r in ratings):
         return "OK"
-    elif any(r > 0 for r in ratings):
+    ratings = [section_fields[f]["rating"] for f in required_fields if f in section_fields]
+    if not ratings:
+        return "MISSING"
+    n_ok = sum(1 for r in ratings if r >= 0.5)
+    pct_ok = n_ok / len(required_fields)
+    if pct_ok == 1.0:
+        return "OK"
+    elif pct_ok >= 0.5:
         return "PARTIAL"
     else:
         return "MISSING"
