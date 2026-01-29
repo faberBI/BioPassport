@@ -402,23 +402,24 @@ def reset_session_state(keys=None):
 
 
 def merge_validated_data(passport, validated_pdf, validated_image):
-    """Aggiorna i campi del passport con i dati validati e ricalcola rating + ESPR."""
+    """
+    Aggiorna i campi del passport con i dati validati (PDF + Immagine),
+    ricalcola rating dei campi, rating delle sezioni e ESPR compliance basata sui rating delle sezioni.
+    """
 
     merged_data = {**validated_pdf, **validated_image}
 
+    # 1️⃣ Aggiorna i valori dei campi
     for section in passport["sections"].values():
-
         for field_name, field in section["fields"].items():
-
             val = None
-
+            # cerca la chiave corrispondente tra i dati validati
             for k, v in merged_data.items():
                 if k.strip().lower() == field_name.strip().lower():
                     val = v
                     break
 
             if val is not None:
-
                 if not isinstance(val, dict):
                     val = {
                         "value": val,
@@ -426,22 +427,23 @@ def merge_validated_data(passport, validated_pdf, validated_image):
                         "field_type": field.get("field_type", "technical"),
                         "eu_weight": field.get("eu_weight", 1.0)
                     }
-
                 field.update(val)
-
-                # ⭐ rating campo
+                # ⭐ ricalcola rating e colore del campo
                 rating = compute_field_rating(field)
                 field["rating"] = rating
                 field["color"] = score_to_color(rating)
 
-    # ⭐⭐⭐ QUESTO È IL PEZZO CHE TI MANCAVA ⭐⭐⭐
+    # 2️⃣ Ricalcola rating delle sezioni
+    for section in passport["sections"].values():
+        field_ratings = [f["rating"] for f in section["fields"].values() if isinstance(f, dict)]
+        section["section_rating"] = round(sum(field_ratings)/len(field_ratings), 2) if field_ratings else 0.0
 
+    # 3️⃣ Calcola lo stato ESPR di ciascuna sezione basandosi sul rating della sezione
+    passport["overall_espr_status"] = compute_overall_espr_from_sections(passport)
+
+    # 4️⃣ Ricalcola rating complessivo generale
     compute_overall_rating(passport)
 
-    for section in passport["sections"].values():
-        section["espr_status"] = compute_espr_status(section)
-
-    passport["overall_espr_status"] = compute_overall_espr(passport)
 
 
 
