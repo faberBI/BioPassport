@@ -212,24 +212,23 @@ with tabs[3]:
             merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
 
             # --------------------------------------------------
-            # Normalizza i campi in dizionari completi
-            # --------------------------------------------------
-            normalized_data = {}
-            for k, v in merged_data.items():
-                normalized_data[k] = {
-                    "value": v,
-                    "confidence": 1.0,        # valore massimo per dati validati manualmente
-                    "field_type": "technical", # default, puoi personalizzare per tipo di campo
-                    "eu_weight": 1.0           # default peso EU
-                }
-
-            # --------------------------------------------------
-            # Calcolo rating, colore e costruzione sections
+            # Normalizza i campi
             # --------------------------------------------------
             sections = {}
             overall_scores = []
 
-            for field_name, field in normalized_data.items():
+            for field_name, field_value in merged_data.items():
+                # Se il valore non è un dict (viene dal form), creiamo dict standard
+                if not isinstance(field_value, dict):
+                    field = {
+                        "value": field_value,
+                        "confidence": 1.0,         # valore massimo per dati validati
+                        "field_type": "technical", # default
+                        "eu_weight": 1.0           # default
+                    }
+                else:
+                    field = field_value
+
                 rating = services.compute_field_rating(field)
                 color = services.score_to_color(rating)
 
@@ -237,9 +236,9 @@ with tabs[3]:
                     "fields": {
                         field_name: {
                             "value": field["value"],
-                            "confidence": field["confidence"],
-                            "field_type": field["field_type"],
-                            "eu_weight": field["eu_weight"],
+                            "confidence": field.get("confidence", 0.0),
+                            "field_type": field.get("field_type", "declaration"),
+                            "eu_weight": field.get("eu_weight", 1.0),
                             "rating": rating,
                             "color": color
                         }
@@ -249,11 +248,9 @@ with tabs[3]:
                 overall_scores.append(rating)
 
             # --------------------------------------------------
-            # Giudizio globale
+            # Overall Reliability
             # --------------------------------------------------
-            global_judgment, overall_rating = services.compute_overall_judgment(
-                {k: {"fields": {k: v}} for k, v in normalized_data.items()}
-            )
+            overall_rating = sum(overall_scores) / len(overall_scores) if overall_scores else 0.0
 
             # --------------------------------------------------
             # Costruzione passport
@@ -266,8 +263,7 @@ with tabs[3]:
                     "version": "EU-DPP-1.0"
                 },
                 "sections": sections,
-                "overall_rating": overall_rating,
-                "global_judgment": global_judgment
+                "overall_rating": overall_rating
             }
 
             # Salva immagine Base64 se presente
@@ -276,7 +272,6 @@ with tabs[3]:
                     st.session_state.uploaded_image_file
                 )
 
-            # Salva passport su disco
             services.save_passport_to_file(passport_data)
 
             # --------------------------------------------------
@@ -289,9 +284,9 @@ with tabs[3]:
             # UI Feedback
             # --------------------------------------------------
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
-            st.subheader("📊 Giudizio qualitativo complessivo")
-            st.metric("Affidabilità & compliance globale", global_judgment)
+            st.subheader("📊 Overall Reliability")
             st.progress(overall_rating)
+            st.metric("Overall Reliability Score", f"{int(overall_rating*100)}%")
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
