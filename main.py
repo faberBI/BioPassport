@@ -112,11 +112,6 @@ if passport_id:
             color = field.get("color","")
             st.write(f"**{field_name}**: {field['value']} {color}")
 
-    # ESPR Compliance
-    st.subheader("🇪🇺 ESPR Compliance per sezione")
-    for section_name, section in passport["sections"].items():
-        st.write(f"{section.get('espr_compliance','MISSING')} → {section_name}")
-
     # Overall reliability
     st.subheader("📊 Overall Reliability")
     st.progress(passport.get("overall_rating",0.0))
