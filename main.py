@@ -211,39 +211,59 @@ with tabs[3]:
             # --------------------------------------------------
             merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
 
-            # --------------------------------------------------
-            # Normalizza i campi
-            # --------------------------------------------------
+            # Tutti i campi obbligatori per il tipo prodotto
+            required_fields = services.PRODUCT_FIELDS[tipo_prodotto]["pdf"] + services.PRODUCT_FIELDS[tipo_prodotto]["image"]
+
             sections = {}
             overall_scores = []
 
-            for field_name, field_value in merged_data.items():
-                # Se il valore non è un dict (viene dal form), creiamo dict standard
-                if not isinstance(field_value, dict):
-                    field = {
-                        "value": field_value,
-                        "confidence": 1.0,         # valore massimo per dati validati
-                        "field_type": "technical", # default
-                        "eu_weight": 1.0           # default
-                    }
-                else:
-                    field = field_value
+            for field_name in required_fields:
+                if field_name in merged_data:
+                    field_value = merged_data[field_name]
 
-                rating = services.compute_field_rating(field)
-                color = services.score_to_color(rating)
+                    # Normalizza il campo se non è già un dict
+                    if not isinstance(field_value, dict):
+                        field = {
+                            "value": field_value,
+                            "confidence": 1.0,         # default se presente
+                            "field_type": "technical", # default
+                            "eu_weight": 1.0
+                        }
+                    else:
+                        field = field_value
 
-                sections[field_name] = {
-                    "fields": {
-                        field_name: {
-                            "value": field["value"],
-                            "confidence": field.get("confidence", 0.0),
-                            "field_type": field.get("field_type", "declaration"),
-                            "eu_weight": field.get("eu_weight", 1.0),
-                            "rating": rating,
-                            "color": color
+                    rating = services.compute_field_rating(field)
+                    color = services.score_to_color(rating)
+
+                    sections[field_name] = {
+                        "fields": {
+                            field_name: {
+                                "value": field.get("value"),
+                                "confidence": field.get("confidence", 0.0),
+                                "field_type": field.get("field_type", "declaration"),
+                                "eu_weight": field.get("eu_weight", 1.0),
+                                "rating": rating,
+                                "color": color
+                            }
                         }
                     }
-                }
+
+                else:
+                    # Campo mancante → rating 0
+                    rating = 0.0
+                    color = services.score_to_color(rating)
+                    sections[field_name] = {
+                        "fields": {
+                            field_name: {
+                                "value": None,
+                                "confidence": 0.0,
+                                "field_type": "technical",
+                                "eu_weight": 1.0,
+                                "rating": rating,
+                                "color": color
+                            }
+                        }
+                    }
 
                 overall_scores.append(rating)
 
@@ -268,9 +288,7 @@ with tabs[3]:
 
             # Salva immagine Base64 se presente
             if st.session_state.uploaded_image_file:
-                passport_data["product_image_base64"] = services.image_to_base64(
-                    st.session_state.uploaded_image_file
-                )
+                passport_data["product_image_base64"] = services.image_to_base64(st.session_state.uploaded_image_file)
 
             services.save_passport_to_file(passport_data)
 
