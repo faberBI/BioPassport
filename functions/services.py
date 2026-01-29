@@ -418,5 +418,113 @@ def compute_overall_judgment(sections):
     overall = sum(section_scores)/len(section_scores) if section_scores else 0.0
     return score_to_judgment(overall), overall
 
+# ======================================================
+# NUOVE FUNZIONI DPP COMPLETO
+# ======================================================
+
+from PIL import Image
+from io import BytesIO
+import base64
+
+def initialize_passport(product_id, tipo_prodotto):
+    """Crea struttura DPP completa con sezioni e campi obbligatori/opzionali"""
+    sections = {
+        "Technical": {
+            "fields": {
+                "Nome prodotto": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
+                "Numero di modello": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
+                "Produttore": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
+                "Dimensioni": {"value": None, "required": False, "confidence": 0.0, "field_type":"technical"},
+            },
+            "section_rating": 0.0
+        },
+        "Materials & Sustainability": {
+            "fields": {
+                "Materiali": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
+                "Composizione dettagliata": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
+                "Origine materiali": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
+                "Percentuale riciclato": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
+                "Certificazioni ambientali": {"value": None, "required": False, "confidence": 0.0, "field_type":"lca"},
+                "Gestione fine vita": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
+            },
+            "section_rating": 0.0
+        },
+        "Visual": {
+            "fields": {
+                "Colore": {"value": None, "required": True, "confidence": 0.0, "field_type":"visual"},
+                "Condizioni": {"value": None, "required": True, "confidence": 0.0, "field_type":"visual"},
+                "Dettagli immagini": []
+            },
+            "section_rating": 0.0
+        }
+    }
+
+    return {
+        "id": product_id,
+        "product_type": tipo_prodotto,
+        "metadata": {
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": None,
+            "version": "EU-DPP-1.0",
+            "validated_by": None,
+            "language": "it",
+            "country_of_origin": None,
+            "batch_number": None
+        },
+        "sections": sections,
+        "overall_rating": 0.0,
+        "images": []
+    }
+
+
+def compute_section_rating(section):
+    """Calcola rating medio dei campi di una sezione"""
+    fields = section.get("fields", {})
+    ratings = []
+    for f in fields.values():
+        if isinstance(f, dict):
+            ratings.append(compute_field_rating(f))
+    return round(sum(ratings)/len(ratings), 2) if ratings else 0.0
+
+
+def compute_overall_rating(passport):
+    """Calcola rating per sezione e overall del passport"""
+    sections = passport.get("sections", {})
+    for section_name, section in sections.items():
+        section["section_rating"] = compute_section_rating(section)
+    section_ratings = [s["section_rating"] for s in sections.values()]
+    overall = round(sum(section_ratings)/len(section_ratings), 2) if section_ratings else 0.0
+    passport["overall_rating"] = overall
+    return overall
+
+
+def add_product_image(passport, image_file, caption="Frontale", annotation=None):
+    """Aggiunge immagine con annotazione e salva in base64"""
+    if not image_file:
+        return
+
+    if hasattr(image_file, "getvalue"):  # UploadedFile
+        img = Image.open(image_file).convert("RGB")
+    else:  # PIL Image
+        img = image_file.convert("RGB")
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG")
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode()
+
+    passport["images"].append({
+        "file_base64": img_base64,
+        "caption": caption,
+        "annotation": annotation
+    })
+
+
+def reset_session_state(keys=None):
+    """Reset chiavi dello session_state per nuovo prodotto"""
+    if keys is None:
+        keys = ["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]
+    for k in keys:
+        st.session_state[k] = None
 
 
