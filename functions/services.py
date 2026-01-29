@@ -240,19 +240,29 @@ def score_to_color(score):
     else: return "🔴"
 
 def compute_section_rating(section):
-    fields = section.get("fields",{})
-    ratings = [compute_field_rating(f) for f in fields.values() if isinstance(f,dict)]
-    return round(sum(ratings)/len(ratings),2) if ratings else 0.0
+    """Calcola rating medio dei campi di una sezione"""
+    fields = section.get("fields", {})
+    ratings = [compute_field_rating(f) for f in fields.values() if isinstance(f, dict)]
+    avg = round(sum(ratings)/len(ratings), 2) if ratings else 0.0
+    section["section_rating"] = avg
+    return avg
 
 def compute_overall_rating(passport: dict):
-    total_scores=[]
-    for sec_name,section in passport.get("sections",{}).items():
-        for f_name, field in section.get("fields",{}).items():
+    """Aggiorna rating di ogni campo, di ogni sezione e overall"""
+    total_scores = []
+    for sec_name, section in passport.get("sections", {}).items():
+        section_scores = []
+        for f_name, field in section.get("fields", {}).items():
             r = compute_field_rating(field)
-            field["rating"]=r
-            field["color"]=score_to_color(r)
-            total_scores.append(r)
-    passport["overall_rating"]=sum(total_scores)/len(total_scores) if total_scores else 0.0
+            field["rating"] = r
+            field["color"] = score_to_color(r)
+            section_scores.append(r)
+        # rating medio sezione
+        sec_avg = round(sum(section_scores)/len(section_scores), 2) if section_scores else 0.0
+        section["section_rating"] = sec_avg
+        total_scores.extend(section_scores)
+    passport["overall_rating"] = round(sum(total_scores)/len(total_scores), 2) if total_scores else 0.0
+
 
 def compute_espr_compliance(section_fields):
     required = [f for f,v in section_fields.items() if isinstance(v,dict) and v.get("required",False)]
