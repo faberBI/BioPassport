@@ -275,10 +275,6 @@ def score_to_judgment(score):
 # PASSPORT MANAGEMENT
 # ======================================================
 def initialize_passport(product_id: str, product_type: str) -> dict:
-    """
-    Crea un nuovo Digital Product Passport con struttura vuota,
-    pronto per ricevere dati da PDF/immagini.
-    """
     passport = {
         "id": product_id,
         "product_type": product_type,
@@ -288,15 +284,16 @@ def initialize_passport(product_id: str, product_type: str) -> dict:
         },
         "sections": {},
         "overall_rating": 0.0,
-        "images": []  # supporto multi immagini
+        "images": []
     }
 
-    # ✅ Usa PRODUCT_FIELDS diretto, non services.PRODUCT_FIELDS
     pdf_fields = PRODUCT_FIELDS.get(product_type, {}).get("pdf", [])
     image_fields = PRODUCT_FIELDS.get(product_type, {}).get("image", [])
 
     # PDF fields
     for f in pdf_fields:
+        if not f or not isinstance(f, str):
+            continue  # salta chiavi non valide
         passport["sections"][f] = {
             "fields": {
                 f: {
@@ -312,6 +309,8 @@ def initialize_passport(product_id: str, product_type: str) -> dict:
 
     # Image fields
     for f in image_fields:
+        if not f or not isinstance(f, str):
+            continue
         passport["sections"][f] = {
             "fields": {
                 f: {
