@@ -308,24 +308,27 @@ def safe_json_parse(text):
 def compute_field_rating(field, type_weight_map=None):
     """
     Calcola il rating di un campo (0-1) basato su:
-    - confidence (0-1)
-    - tipo campo (technical, declaration, lca, visual)
-    - peso EU (eu_weight)
+    - presenza/valore reale
+    - confidence
+    - tipo campo
+    - peso EU
     """
     if type_weight_map is None:
         type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
 
-    # fallback sicuro se field non è dict
-    if not isinstance(field, dict):
-        field = {"confidence": 0.0, "field_type": "declaration", "eu_weight": 1.0}
+    # Se il campo è vuoto o None → rating 0
+    value = field.get("value")
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        return 0.0
 
-    confidence = float(field.get("confidence", 0.0) or 0.0)
+    confidence = field.get("confidence", 0.0) or 0.0
     field_type = field.get("field_type", "declaration")
-    eu_weight = float(field.get("eu_weight", 1.0) or 1.0)
+    eu_weight = field.get("eu_weight", 1.0)
 
     type_weight = type_weight_map.get(field_type, 0.5)
     rating = round(confidence * type_weight * eu_weight, 2)
     return rating
+
 
 
 def score_to_color(score):
