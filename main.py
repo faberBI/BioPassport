@@ -94,7 +94,7 @@ if passport_id:
             st.write(f"**{label}**: {field['value']} {color}")
         
     # 🧩 ESPR Compliance
-    render_espr_compliance(passport)
+    services.render_espr_compliance(passport)
 
     # Mostra immagini multiple
     if "images" in passport and passport["images"]:
