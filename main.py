@@ -118,7 +118,6 @@ tabs = st.tabs([
 with tabs[0]:
     with st.form("upload_form"):
         pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
-        # Supporto multi-upload immagini
         image_files = st.file_uploader(
             "Immagini prodotto (puoi caricare più immagini)", 
             type=["jpg","png","jpeg"], 
@@ -141,15 +140,13 @@ with tabs[0]:
 
                     # Immagini
                     st.session_state.image_data = {}
-                    st.session_state.uploaded_image_file = image_files  # salva lista
+                    st.session_state.uploaded_image_file = image_files
                     for idx, img_file in enumerate(image_files):
                         try:
                             image_data = services.gpt_analyze_image(img_file, client, tipo_prodotto)
-                            # Se più immagini, unisci i risultati
                             st.session_state.image_data.update(image_data)
                         except Exception:
                             st.warning(f"GPT Image fallita per immagine {img_file.name}")
-                            # Usa default
                             st.session_state.image_data.update({c: "non rilevato" for c in services.PRODUCT_FIELDS[tipo_prodotto]["image"]})
 
                 st.success("Analisi completata")
@@ -160,10 +157,15 @@ with tabs[0]:
 # ======================================================
 with tabs[1]:
     if st.session_state.pdf_data:
-        st.session_state.validated_pdf = services.render_validation_form(
-            st.session_state.pdf_data,
-            title="✔ Dati certificati (PDF)"
-        )
+        with st.form("validate_pdf_form"):
+            validated_pdf = services.render_validation_form(
+                st.session_state.pdf_data,
+                title="✔ Dati certificati (PDF)"
+            )
+            submitted_pdf = st.form_submit_button("Salva validazione PDF")
+            if submitted_pdf:
+                st.session_state.validated_pdf = validated_pdf
+                st.success("Validazione PDF salvata ✅")
     else:
         st.info("Esegui prima l’analisi")
 
@@ -172,10 +174,15 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.image_data:
-        st.session_state.validated_image = services.render_validation_form(
-            st.session_state.image_data,
-            title="👁️ Dati estratti da immagine"
-        )
+        with st.form("validate_image_form"):
+            validated_image = services.render_validation_form(
+                st.session_state.image_data,
+                title="👁️ Dati estratti da immagine"
+            )
+            submitted_img = st.form_submit_button("Salva validazione Immagine")
+            if submitted_img:
+                st.session_state.validated_image = validated_image
+                st.success("Validazione immagine salvata ✅")
         if st.session_state.uploaded_image_file:
             for img in st.session_state.uploaded_image_file:
                 st.image(img, caption="Foto prodotto", use_column_width=True)
@@ -192,9 +199,7 @@ with tabs[3]:
 
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
-            # --------------------------------------------------
-            # Inizializza passport completo con sezioni obbligatorie/opzionali
-            # --------------------------------------------------
+            # Inizializza passport
             passport_data = services.initialize_passport(product_id, tipo_prodotto)
 
             # Merge dati PDF + Image
