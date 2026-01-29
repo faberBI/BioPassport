@@ -18,7 +18,7 @@ PRODUCT_FIELDS = {
     "mobile": {
         "pdf": ["Nome prodotto","Numero di modello","Produttore","Materiali","Dimensioni","Lotto di produzione ","Anno di produzione", "Certificazione di sicurezza", "Certificazione di sostenibilita", "Descrizione prodotto", "Luogo di produzione", "Manutenzione e cura", "Materiali/componenti utilizzati", "Specie legnosa","% di contenuto riciclato", "Sostanze preoccupanti", "Finitura superficiale", "Marchio", "Garanzia", "Certificazioni materiale", " Impronta carbonio gwp" ,  "Prezzo",
                "Identificativo operatore", "Conformità tecnica", "Gestione fine vita (codice CER)"],
-        "image": ["Tipologia di prodotto", "Colore","Condizioni"]
+        "image": ["Colore","Condizioni"]
     },
     "lampada": {
         "pdf": ["nome_prodotto","produttore","materiale","wattaggio"],
@@ -116,7 +116,6 @@ def gpt_analyze_image(image_file, client: "OpenAI", tipo: str):
 Analizza visivamente l'immagine del prodotto di tipo "{tipo}".
 
 Restituisci SOLO JSON valido con i campi:
-- tipologia prodotto
 - colore
 - condizioni
 
@@ -163,7 +162,6 @@ Esempio:
 
         # 🔹 mapping GPT → chiavi form
         mapping = {
-            "tipologia_prodotto": "Tipologia di prodotto",
             "colore": "Colore",
             "condizioni": "Condizioni"
         }
