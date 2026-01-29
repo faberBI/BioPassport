@@ -306,22 +306,18 @@ def safe_json_parse(text):
 # RATING / COMPLIANCE
 # ======================================================
 def compute_field_rating(field, type_weight_map=None):
-    """
-    Calcola il rating di un campo (0-1) basato su:
-    - confidence (AI + validazione)
-    - tipo di campo (technical, declaration, lca, visual)
-    - peso EU / obbligatorietà
-    """
+    # Calcola il rating di un campo (0-1) basato su confidence, tipo di campo e peso EU
     if type_weight_map is None:
         type_weight_map = {"technical":1.0, "declaration":0.6, "lca":0.5, "visual":0.4}
 
     confidence = field.get("confidence", 0.0)
     field_type = field.get("field_type", "declaration")
-    eu_weight = field.get("eu_weight", 1.0)  # peso regolatorio: 1.0=obbligatorio, <1=facoltativo
+    eu_weight = field.get("eu_weight", 1.0)
 
     type_weight = type_weight_map.get(field_type, 0.5)
     rating = round(confidence * type_weight * eu_weight, 2)
     return rating
+
 
 
 def score_to_color(score):
