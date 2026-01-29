@@ -219,42 +219,55 @@ with tabs[3]:
             # 1️⃣ Inizializza passport con sezione vuota e campi required
             passport_data = services.initialize_passport(product_id, tipo_prodotto)
 
-            # 2️⃣ Merge dati PDF + Image
-            merged_data = {**st.session_state.validated_pdf, **st.session_state.validated_image}
+            # 2️⃣ Funzione helper per mappare dati validati nel passport
+            def merge_validated_data(passport, validated_pdf, validated_image):
+                merged_data = {**validated_pdf, **validated_image}
 
-            for section_name, section in passport_data["sections"].items():
-                for field_name, field in section["fields"].items():
-                    if field_name in merged_data:
-                        val = merged_data[field_name]
-                        # Se non è dict, trasformalo in dict con valore e default
-                        if not isinstance(val, dict):
-                            val = {
-                                "value": val,
-                                "confidence": 1.0,
-                                "field_type": field.get("field_type", "technical"),
-                                "eu_weight": 1.0
-                            }
-                        field.update(val)
-                        # Aggiorna rating e colore
-                        rating = services.compute_field_rating(field)
-                        field["rating"] = rating
-                        field["color"] = services.score_to_color(rating)
+                for section_name, section in passport["sections"].items():
+                    for field_name, field in section["fields"].items():
+                        # Trova la chiave valida nel form (case-insensitive)
+                        val = None
+                        for k, v in merged_data.items():
+                            if k.strip().lower() == field_name.strip().lower():
+                                val = v
+                                break
 
-            # 3️⃣ Aggiungi tutte le immagini caricate
+                        if val is not None:
+                            if not isinstance(val, dict):
+                                val = {
+                                    "value": val,
+                                    "confidence": 1.0,
+                                    "field_type": field.get("field_type", "technical"),
+                                    "eu_weight": 1.0,
+                                    "required": field.get("required", False)
+                                }
+                            else:
+                                # preserva required se non presente
+                                val["required"] = val.get("required", field.get("required", False))
+                            field.update(val)
+                            # aggiorna rating e colore
+                            rating = services.compute_field_rating(field)
+                            field["rating"] = rating
+                            field["color"] = services.score_to_color(rating)
+
+            # 3️⃣ Merge PDF + Image nel passport
+            merge_validated_data(passport_data, st.session_state.validated_pdf, st.session_state.validated_image)
+
+            # 4️⃣ Aggiungi tutte le immagini caricate
             for idx, img_file in enumerate(st.session_state.uploaded_image_files):
                 services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
 
-            # 4️⃣ Calcola rating complessivo considerando campi obbligatori
+            # 5️⃣ Calcola rating complessivo considerando campi obbligatori
             services.compute_overall_rating(passport_data)
 
-            # 5️⃣ Salva passport
+            # 6️⃣ Salva passport
             services.save_passport_to_file(passport_data)
 
-            # 6️⃣ Genera QR code + URL pubblico
+            # 7️⃣ Genera QR code + URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
-            # 7️⃣ UI Feedback
+            # 8️⃣ UI Feedback
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
             st.subheader("📊 Overall Reliability")
             st.progress(passport_data["overall_rating"])
@@ -265,3 +278,4 @@ with tabs[3]:
 
     else:
         st.info("Completa validazione PDF e immagine")
+
