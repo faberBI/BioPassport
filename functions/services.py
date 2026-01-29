@@ -248,21 +248,7 @@ def load_passport_from_file(passport_id):
 # ======================================================
 # QR CODE
 # ======================================================
-def generate_qr_from_url(url):
-    """Genera QR code da un URL e ritorna BytesIO pronto per Streamlit."""
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=10,
-        border=4
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    buf = BytesIO()
-    img = qr.make_image(fill_color="black", back_color="white")
-    img.save(buf)
-    buf.seek(0)
-    return buf
+
 
 def upload_image_to_openai(image_file, client):
     resized = resize_image_for_vision(image_file)
@@ -426,55 +412,7 @@ from PIL import Image
 from io import BytesIO
 import base64
 
-def initialize_passport(product_id, tipo_prodotto):
-    """Crea struttura DPP completa con sezioni e campi obbligatori/opzionali"""
-    sections = {
-        "Technical": {
-            "fields": {
-                "Nome prodotto": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
-                "Numero di modello": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
-                "Produttore": {"value": None, "required": True, "confidence": 0.0, "field_type":"technical"},
-                "Dimensioni": {"value": None, "required": False, "confidence": 0.0, "field_type":"technical"},
-            },
-            "section_rating": 0.0
-        },
-        "Materials & Sustainability": {
-            "fields": {
-                "Materiali": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
-                "Composizione dettagliata": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
-                "Origine materiali": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
-                "Percentuale riciclato": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
-                "Certificazioni ambientali": {"value": None, "required": False, "confidence": 0.0, "field_type":"lca"},
-                "Gestione fine vita": {"value": None, "required": True, "confidence": 0.0, "field_type":"lca"},
-            },
-            "section_rating": 0.0
-        },
-        "Visual": {
-            "fields": {
-                "Colore": {"value": None, "required": True, "confidence": 0.0, "field_type":"visual"},
-                "Condizioni": {"value": None, "required": True, "confidence": 0.0, "field_type":"visual"},
-                "Dettagli immagini": []
-            },
-            "section_rating": 0.0
-        }
-    }
 
-    return {
-        "id": product_id,
-        "product_type": tipo_prodotto,
-        "metadata": {
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": None,
-            "version": "EU-DPP-1.0",
-            "validated_by": None,
-            "language": "it",
-            "country_of_origin": None,
-            "batch_number": None
-        },
-        "sections": sections,
-        "overall_rating": 0.0,
-        "images": []
-    }
 
 
 def compute_section_rating(section):
@@ -487,15 +425,6 @@ def compute_section_rating(section):
     return round(sum(ratings)/len(ratings), 2) if ratings else 0.0
 
 
-def compute_overall_rating(passport):
-    """Calcola rating per sezione e overall del passport"""
-    sections = passport.get("sections", {})
-    for section_name, section in sections.items():
-        section["section_rating"] = compute_section_rating(section)
-    section_ratings = [s["section_rating"] for s in sections.values()]
-    overall = round(sum(section_ratings)/len(section_ratings), 2) if section_ratings else 0.0
-    passport["overall_rating"] = overall
-    return overall
 
 
 def add_product_image(passport, image_file, caption="Frontale", annotation=None):
@@ -526,5 +455,127 @@ def reset_session_state(keys=None):
         keys = ["pdf_data","image_data","validated_pdf","validated_image","uploaded_image_file"]
     for k in keys:
         st.session_state[k] = None
+
+
+from datetime import datetime
+from io import BytesIO
+from PIL import Image
+import base64
+import os
+import json
+import qrcode
+
+# ======================================================
+# Funzione per inizializzare un passport vuoto
+# ======================================================
+def initialize_passport(product_id: str, product_type: str) -> dict:
+    """
+    Crea un nuovo Digital Product Passport con struttura vuota,
+    pronto per ricevere dati da PDF/immagini.
+    """
+    passport = {
+        "id": product_id,
+        "product_type": product_type,
+        "metadata": {
+            "created_at": datetime.utcnow().isoformat(),
+            "version": "EU-DPP-1.0"
+        },
+        "sections": {},
+        "overall_rating": 0.0,
+        "images": []  # supporto multi immagini
+    }
+
+    # Aggiunge sezioni per ciascun campo
+    pdf_fields = PRODUCT_FIELDS.get(product_type, {}).get("pdf", [])
+    image_fields = PRODUCT_FIELDS.get(product_type, {}).get("image", [])
+
+    # PDF fields
+    for f in pdf_fields:
+        passport["sections"][f] = {
+            "fields": {
+                f: {
+                    "value": None,
+                    "confidence": 0.0,
+                    "field_type": "technical",
+                    "eu_weight": 1.0,
+                    "rating": 0.0,
+                    "color": "🔴"
+                }
+            }
+        }
+
+    # Image fields
+    for f in image_fields:
+        passport["sections"][f] = {
+            "fields": {
+                f: {
+                    "value": None,
+                    "confidence": 0.0,
+                    "field_type": "visual",
+                    "eu_weight": 1.0,
+                    "rating": 0.0,
+                    "color": "🔴"
+                }
+            }
+        }
+
+    return passport
+
+
+# ======================================================
+# Funzione per aggiungere un'immagine al passport
+# ======================================================
+def add_product_image(passport: dict, image_file, caption: str = "", annotation: str = ""):
+    """
+    Salva immagine in base64 dentro il passport e aggiunge caption/annotazioni.
+    """
+    img_base64 = image_to_base64(image_file)
+    passport["images"].append({
+        "file_base64": img_base64,
+        "caption": caption,
+        "annotation": annotation
+    })
+
+
+# ======================================================
+# Calcolo rating complessivo del passport
+# ======================================================
+def compute_overall_rating(passport: dict):
+    """
+    Aggiorna il campo overall_rating basandosi sui rating dei singoli campi.
+    Aggiorna anche il colore di ciascun campo.
+    """
+    total_scores = []
+    for section_name, section in passport.get("sections", {}).items():
+        for field_name, field in section.get("fields", {}).items():
+            rating = compute_field_rating(field)
+            color = score_to_color(rating)
+            field["rating"] = rating
+            field["color"] = color
+            total_scores.append(rating)
+
+    passport["overall_rating"] = sum(total_scores)/len(total_scores) if total_scores else 0.0
+
+
+# ======================================================
+# Funzione helper per generare QR
+# ======================================================
+def generate_qr_from_url(url: str):
+    """
+    Genera QR code da URL e ritorna BytesIO pronto per Streamlit.
+    """
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=10,
+        border=4
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    buf = BytesIO()
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.save(buf)
+    buf.seek(0)
+    return buf
 
 
