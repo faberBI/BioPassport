@@ -501,25 +501,38 @@ def compute_overall_espr_from_sections(passport):
         return "PARTIAL"
     else:
         return "OK"
-
-
-def render_espr_compliance(passport: dict):
-    """
-    Mostra la compliance ESPR basata sul rating delle sezioni.
-    ✅ >0.7, ⚠️ 0.4–0.7, ❌ <0.4
-    """
-    emoji_map = lambda r: "✅" if r > 0.7 else "⚠️" if r >= 0.4 else "❌"
-
+        
+# ======================================================
+# FUNZIONE PER MOSTRARE ESPR COMPLIANCE
+# ======================================================
+def render_espr_compliance(passport):
     st.subheader("🧩 ESPR COMPLIANCE")
+    st.markdown("---")
     for section_name, section in passport["sections"].items():
+        # Usa rating della sezione, non i campi obbligatori
         rating = section.get("section_rating", 0.0)
-        emoji = emoji_map(rating)
-        status_text = { "✅":"OK", "⚠️":"PARTIAL", "❌":"MISSING" }[emoji]
-        st.write(f"{section_name:20} {emoji} {status_text}")
+        if rating >= 0.7:
+            emoji = "✅"
+            status = "OK"
+        elif rating >= 0.4:
+            emoji = "⚠️"
+            status = "PARTIAL"
+        else:
+            emoji = "❌"
+            status = "MISSING"
+        st.write(f"{section_name:<20} {emoji} {status}")
+    
+    # Overall ESPR basata sui rating delle sezioni
+    overall_rating = passport.get("overall_rating", 0.0)
+    if overall_rating >= 0.7:
+        emoji_overall = "✅"
+        overall_status = "OK"
+    elif overall_rating >= 0.4:
+        emoji_overall = "⚠️"
+        overall_status = "PARTIAL"
+    else:
+        emoji_overall = "❌"
+        overall_status = "MISSING"
+    st.markdown(f"**Overall ESPR Status:** {emoji_overall} {overall_status}")
 
-    # Overall ESPR basato sul peggior rating delle sezioni
-    overall_rating = min([s.get("section_rating",0.0) for s in passport["sections"].values()])
-    overall_emoji = emoji_map(overall_rating)
-    overall_status = { "✅":"OK", "⚠️":"PARTIAL", "❌":"MISSING" }[overall_emoji]
-    st.write(f"\nOverall ESPR Status: {overall_emoji} {overall_status}")
 
