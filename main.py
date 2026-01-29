@@ -251,7 +251,7 @@ with tabs[3]:
             # 5️⃣ Salva passport
             services.save_passport_to_file(passport_data)
             # ⭐ Mostra ESPR Compliance basata sul rating delle sezioni
-            render_espr_compliance(passport_data)
+            services.render_espr_compliance(passport_data)
 
             # 6️⃣ Genera QR code + URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
