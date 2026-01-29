@@ -34,6 +34,10 @@ h1, h2, h3, h4, h5, h6 {{ color: #3a2607; }}
     border-radius: 8px;
     border: none;
 }}
+.required-field {{
+    font-weight: bold;
+    color: #d9534f;
+}}
 </style>
 <div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
     <img src="data:image/jpeg;base64,{logo_base64}" width="450">
@@ -84,8 +88,10 @@ if passport_id:
     for section_name, section in passport["sections"].items():
         st.subheader(f"{section_name}")
         for field_name, field in section["fields"].items():
+            required = field.get("required", False)
+            label = f"{field_name} {'(obbligatorio)' if required else '(opzionale)'}"
             color = field.get("color","")
-            st.write(f"**{field_name}**: {field['value']} {color}")
+            st.write(f"**{label}**: {field['value']} {color}")
     
     # Mostra immagini multiple
     if "images" in passport and passport["images"]:
@@ -137,7 +143,6 @@ with tabs[0]:
             if not pdf_file or not image_files:
                 st.warning("Carica PDF e almeno un'immagine")
             else:
-                # Salva file in session_state
                 st.session_state.uploaded_pdf_file = pdf_file
                 st.session_state.uploaded_image_files = image_files
 
@@ -221,14 +226,19 @@ with tabs[3]:
                     if field_name in merged_data:
                         val = merged_data[field_name]
                         if not isinstance(val, dict):
-                            val = {"value": val, "confidence": 1.0, "field_type": field.get("field_type","technical")}
+                            val = {
+                                "value": val,
+                                "confidence": 1.0,
+                                "field_type": field.get("field_type","technical"),
+                                "required": True if field_name in services.PRODUCT_FIELDS[tipo_prodotto]["pdf"] else False
+                            }
                         field.update(val)
 
             # Aggiungi tutte le immagini caricate
             for idx, img_file in enumerate(st.session_state.uploaded_image_files):
                 services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
 
-            # Calcola rating complessivo
+            # Calcola rating complessivo considerando obbligatori/opzionali
             services.compute_overall_rating(passport_data)
 
             # Salva passport
@@ -247,6 +257,5 @@ with tabs[3]:
             st.image(qr_buf)
             st.code(public_url)
 
-            # NON resettare session_state qui, così puoi caricare nuovo prodotto manualmente
     else:
         st.info("Completa validazione PDF e immagine")
