@@ -201,101 +201,88 @@ with tabs[2]:
 # ======================================================
 with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
         if st.button("🚀 Pubblica Digital Product Passport"):
 
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
-            created_at = datetime.utcnow().isoformat()
 
             # --------------------------------------------------
-            # UNIONE E NORMALIZZAZIONE CAMPI
+            # Normalizza + rating
             # --------------------------------------------------
-            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
             sections = {}
             overall_scores = []
 
-            # Usa i campi definiti nel services
-            pdf_fields = services.PRODUCT_FIELDS[tipo_prodotto]["pdf"]
-            image_fields = services.PRODUCT_FIELDS[tipo_prodotto]["image"]
+            # Unisci PDF + IMAGE (PDF prioritario)
+            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
 
-            # PDF
-            pdf_section_fields = {}
-            for f in pdf_fields:
-                val = merged_data.get(f)
-                field = {
-                    "value": val,
-                    "confidence": 1.0 if val else 0.0,
-                    "field_type": "technical",
-                    "source": "PDF"
+            # Definisci schema semplificato con obbligatorietà per esempio
+            section_schema = {k: {"required": True, "type":"technical"} for k in merged_data.keys()}
+
+            for field_name in merged_data.keys():
+                field = merged_data[field_name]
+                rating = services.compute_field_rating(field)
+                color = services.score_to_color(rating)
+
+                sections[field_name] = {
+                    "fields": {
+                        field_name: {
+                            "value": field.get("value"),
+                            "confidence": field.get("confidence", 0.0),
+                            "field_type": field.get("field_type", "declaration"),
+                            "eu_weight": field.get("eu_weight", 1.0),
+                            "rating": rating,
+                            "color": color
+                        }
+                    },
+                    "espr_compliance": services.compute_espr_compliance(
+                        {field_name: {"rating": rating, "eu_weight": field.get("eu_weight", 1.0)}},
+                        {field_name: {"required": True}}
+                    )
                 }
-                rating = compute_field_rating(field)
-                color = score_to_color(rating)
-                field.update({"rating": rating, "color": color})
-                pdf_section_fields[f] = field
+
                 overall_scores.append(rating)
 
-            pdf_espr = compute_espr_compliance(pdf_section_fields, pdf_fields)
-            sections["PDF"] = {"fields": pdf_section_fields, "espr_compliance": pdf_espr}
-
-            # IMAGE
-            image_section_fields = {}
-            for f in image_fields:
-                val = merged_data.get(f)
-                field = {
-                    "value": val,
-                    "confidence": 1.0 if val else 0.0,
-                    "field_type": "visual",
-                    "source": "IMAGE"
-                }
-                rating = compute_field_rating(field)
-                color = score_to_color(rating)
-                field.update({"rating": rating, "color": color})
-                image_section_fields[f] = field
-                overall_scores.append(rating)
-
-            image_espr = compute_espr_compliance(image_section_fields, image_fields)
-            sections["IMAGE"] = {"fields": image_section_fields, "espr_compliance": image_espr}
+            # Giudizio globale
+            global_judgment, overall_rating = services.compute_overall_judgment(sections)
 
             # --------------------------------------------------
-            # OVERALL RATING
-            # --------------------------------------------------
-            overall_rating = round(sum(overall_scores)/len(overall_scores),2) if overall_scores else 0.0
-
-            # --------------------------------------------------
-            # BUILD PASSPORT
+            # Costruzione passport
             # --------------------------------------------------
             passport_data = {
                 "id": product_id,
                 "product_type": tipo_prodotto,
-                "metadata": {"created_at": created_at, "version":"EU-DPP-1.0"},
+                "metadata": {
+                    "created_at": datetime.utcnow().isoformat(),
+                    "version": "EU-DPP-1.0"
+                },
                 "sections": sections,
-                "overall_rating": overall_rating
+                "overall_rating": overall_rating,
+                "global_judgment": global_judgment
             }
 
-            # Salva immagine base64
+            # Salva immagine Base64 se presente
             if st.session_state.uploaded_image_file:
                 passport_data["product_image_base64"] = services.image_to_base64(st.session_state.uploaded_image_file)
 
             services.save_passport_to_file(passport_data)
 
-            # URL + QR
+            # --------------------------------------------------
+            # QR + URL pubblico
+            # --------------------------------------------------
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
 
             # --------------------------------------------------
-            # UI FEEDBACK
+            # UI Feedback
             # --------------------------------------------------
-            st.success("🇪🇺 Digital Product Passport pubblicato con successo")
-            st.subheader("📊 Overall Reliability")
+            st.success("🇪🇺 Digital Product Passport pubblicato ✅")
+            st.subheader("📊 Giudizio qualitativo complessivo")
+            st.metric("Affidabilità & compliance globale", global_judgment)
             st.progress(overall_rating)
-            st.metric("Overall Reliability Score", f"{int(overall_rating*100)}%")
-
-            st.subheader("🇪🇺 ESPR Compliance Summary")
-            for sec_name, sec in sections.items():
-                st.write(f"{sec.get('espr_compliance','MISSING')} → {sec_name}")
-
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
 
     else:
         st.info("Completa validazione PDF e immagine")
+
