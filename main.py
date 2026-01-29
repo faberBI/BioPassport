@@ -207,25 +207,39 @@ with tabs[3]:
             product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
 
             # --------------------------------------------------
-            # Normalizza + rating
+            # Unisci PDF + IMAGE (PDF prioritario)
+            # --------------------------------------------------
+            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
+
+            # --------------------------------------------------
+            # Normalizza i campi in dizionari completi
+            # --------------------------------------------------
+            normalized_data = {}
+            for k, v in merged_data.items():
+                normalized_data[k] = {
+                    "value": v,
+                    "confidence": 1.0,        # valore massimo per dati validati manualmente
+                    "field_type": "technical", # default, puoi personalizzare per tipo di campo
+                    "eu_weight": 1.0           # default peso EU
+                }
+
+            # --------------------------------------------------
+            # Calcolo rating, colore e costruzione sections
             # --------------------------------------------------
             sections = {}
             overall_scores = []
 
-            # Unisci PDF + IMAGE (PDF prioritario)
-            merged_data = {**st.session_state.validated_image, **st.session_state.validated_pdf}
-
-            for field_name, field in merged_data.items():
+            for field_name, field in normalized_data.items():
                 rating = services.compute_field_rating(field)
                 color = services.score_to_color(rating)
 
                 sections[field_name] = {
                     "fields": {
                         field_name: {
-                            "value": field.get("value"),
-                            "confidence": field.get("confidence", 0.0),
-                            "field_type": field.get("field_type", "declaration"),
-                            "eu_weight": field.get("eu_weight", 1.0),
+                            "value": field["value"],
+                            "confidence": field["confidence"],
+                            "field_type": field["field_type"],
+                            "eu_weight": field["eu_weight"],
                             "rating": rating,
                             "color": color
                         }
@@ -234,11 +248,12 @@ with tabs[3]:
 
                 overall_scores.append(rating)
 
+            # --------------------------------------------------
             # Giudizio globale
-            global_judgment, overall_rating = services.compute_overall_judgment({
-                field_name: {"fields": {field_name: sections[field_name]["fields"][field_name]}}
-                for field_name in sections
-            })
+            # --------------------------------------------------
+            global_judgment, overall_rating = services.compute_overall_judgment(
+                {k: {"fields": {k: v}} for k, v in normalized_data.items()}
+            )
 
             # --------------------------------------------------
             # Costruzione passport
@@ -257,8 +272,11 @@ with tabs[3]:
 
             # Salva immagine Base64 se presente
             if st.session_state.uploaded_image_file:
-                passport_data["product_image_base64"] = services.image_to_base64(st.session_state.uploaded_image_file)
+                passport_data["product_image_base64"] = services.image_to_base64(
+                    st.session_state.uploaded_image_file
+                )
 
+            # Salva passport su disco
             services.save_passport_to_file(passport_data)
 
             # --------------------------------------------------
