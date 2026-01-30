@@ -8,5 +8,5 @@ Carica PDF e immagini del prodotto, estrai automaticamente i dati certificati e 
 * Form di validazione interattivi
 * Pubblicazione read-only con QR code
 * UI moderna con font Nunito Sans e palette personalizzata
-* Logo Nuvia integrato
+* Logo Nuvia integrato ![Nuvia Logo](functions/logo_nuvia.jpeg)
 
