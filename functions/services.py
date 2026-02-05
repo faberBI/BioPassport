@@ -248,37 +248,27 @@ def compute_section_rating(section):
     return avg
 
 def compute_overall_rating(passport: dict):
-
-    total_scores = []
+    """Calcola rating di ciascun campo, rating sezioni e rating complessivo (Data Reliability)"""
     section_scores = []
 
     for section in passport.get("sections", {}).values():
+        fields = section.get("fields", {})
+        field_ratings = []
+        total_weight = 0.0
 
-        field_scores = []
+        for f in fields.values():
+            if isinstance(f, dict):
+                r = f.get("rating", 0.0)
+                w = f.get("eu_weight", 1.0)
+                field_ratings.append(r * w)
+                total_weight += w
 
-        for field in section.get("fields", {}).values():
+        # ⭐ rating normalizzato tra 0 e 1
+        section["section_rating"] = round(sum(field_ratings) / total_weight, 2) if total_weight else 0.0
+        section_scores.append(section["section_rating"])
 
-            r = compute_field_rating(field)
-
-            field["rating"] = r
-            field["color"] = score_to_color(r)
-
-            field_scores.append(r)
-            total_scores.append(r)
-
-        # ⭐ CALCOLO RATING SEZIONE
-        if field_scores:
-            section_rating = sum(field_scores) / len(field_scores)
-        else:
-            section_rating = 0.0
-
-        section["section_rating"] = round(section_rating, 2)
-        section_scores.append(section_rating)
-
-    passport["overall_rating"] = (
-        round(sum(section_scores) / len(section_scores), 2)
-        if section_scores else 0.0
-    )
+    # Overall Data Reliability
+    passport["overall_rating"] = round(sum(section_scores) / len(section_scores), 2) if section_scores else 0.0
 
 
 def compute_espr_compliance(section_fields):
