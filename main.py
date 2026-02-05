@@ -256,8 +256,9 @@ with tabs[3]:
             # 5️⃣ Calcola ESPR COMPLIANCE (REGOLATORIA)
             # → questo serve SOLO per OK / PARTIAL / MISSING
             passport_data["overall_espr_compliance"] = (
-                services.compute_overall_espr_compliance(passport_data)
+            services.compute_overall_espr_from_sections(passport_data)
             )
+
             
             # 6️⃣ Salva il passport su file
             services.save_passport_to_file(passport_data)
