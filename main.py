@@ -232,9 +232,9 @@ with tabs[3]:
                         if not isinstance(val, dict):
                             val = {
                                 "value": val,
-                                "confidence": 1.0,
+                                "confidence": 0.5,
                                 "field_type": field.get("field_type", "technical"),
-                                "eu_weight": 2.0 if field.get("required") else 1.0
+                                "eu_weight": (2.0 if field.get("required") else 1.0) * 0.5 
                             }
                         field.update(val)
 
