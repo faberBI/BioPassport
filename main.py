@@ -234,11 +234,11 @@ with tabs[3]:
                                 "value": val,
                                 "confidence": 1.0,
                                 "field_type": field.get("field_type", "technical"),
-                                "eu_weight": 1.0
+                                "eu_weight":  2.0 if field.get("required") else 1.0
                             }
                         field.update(val)
-                        rating = services.compute_field_rating(field)
-                        field["rating"] = rating
+                        field["confidence"] = 1.0
+                        field["rating"] = 1.0
                         field["color"] = services.score_to_color(rating)
 
                       # 3️⃣ Aggiungi tutte le immagini caricate
