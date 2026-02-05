@@ -448,8 +448,10 @@ def merge_validated_data(passport, validated_pdf, validated_image):
 
 
 def compute_espr_status(section, threshold_ok=0.5):
-    """Calcola lo stato ESPR di una sezione basandosi sul rating dei campi obbligatori"""
-    required_fields = [f for f in section["fields"].values() if f.get("required")]
+    required_fields = [
+        f for f in section["fields"].values()
+        if f.get("required")
+    ]
 
     if not required_fields:
         return "OK"
@@ -464,6 +466,19 @@ def compute_espr_status(section, threshold_ok=0.5):
     else:
         return "MISSING"
 
+def compute_overall_espr_compliance(passport):
+    statuses = []
+    for section in passport["sections"].values():
+        status = compute_espr_status(section)
+        section["espr_compliance"] = status
+        statuses.append(status)
+
+    if "MISSING" in statuses:
+        return "MISSING"
+    elif "PARTIAL" in statuses:
+        return "PARTIAL"
+    else:
+        return "OK"
 
 def compute_overall_espr(passport):
     statuses = [
