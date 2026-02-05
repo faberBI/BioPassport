@@ -239,7 +239,7 @@ with tabs[3]:
                         field.update(val)
                         field["confidence"] = 1.0
                         field["rating"] = 1.0
-                        field["color"] = services.score_to_color(rating)
+                        field["color"] = services.score_to_color(field["rating"])
 
                       # 3️⃣ Aggiungi tutte le immagini caricate
             for idx, img_file in enumerate(st.session_state.uploaded_image_files):
