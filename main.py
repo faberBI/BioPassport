@@ -241,30 +241,55 @@ with tabs[3]:
                         field["rating"] = rating
                         field["color"] = services.score_to_color(rating)
 
-            # 3️⃣ Aggiungi tutte le immagini caricate
+                      # 3️⃣ Aggiungi tutte le immagini caricate
             for idx, img_file in enumerate(st.session_state.uploaded_image_files):
-                services.add_product_image(passport_data, img_file, caption=f"Immagine {idx+1}")
-
-            # 4️⃣ Calcola rating complessivo + rating sezioni
+                services.add_product_image(
+                    passport_data,
+                    img_file,
+                    caption=f"Immagine {idx+1}"
+                )
+            
+            # 4️⃣ Calcola i rating (DATA RELIABILITY)
+            # → questo serve SOLO per la percentuale di affidabilità
             services.compute_overall_rating(passport_data)
-
-            # 5️⃣ Salva passport
+            
+            # 5️⃣ Calcola ESPR COMPLIANCE (REGOLATORIA)
+            # → questo serve SOLO per OK / PARTIAL / MISSING
+            passport_data["overall_espr_compliance"] = (
+                services.compute_overall_espr_compliance(passport_data)
+            )
+            
+            # 6️⃣ Salva il passport su file
             services.save_passport_to_file(passport_data)
-            # ⭐ Mostra ESPR Compliance basata sul rating delle sezioni
-            services.render_espr_compliance(passport_data)
-
-            # 6️⃣ Genera QR code + URL pubblico
+            
+            # 7️⃣ Genera QR code + URL pubblico
             public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
             qr_buf = services.generate_qr_from_url(public_url)
-
-            # 7️⃣ UI Feedback
+            
+            # 8️⃣ UI FEEDBACK (CHIARO E SEPARATO)
             st.success("🇪🇺 Digital Product Passport pubblicato ✅")
-            st.subheader("📊 Overall Reliability")
+            
+            # --- ESPR (normativa) ---
+            st.subheader("🧩 ESPR Compliance")
+            overall_espr = passport_data["overall_espr_compliance"]
+            emoji = "✅" if overall_espr == "OK" else "⚠️" if overall_espr == "PARTIAL" else "❌"
+            st.write(f"{emoji} **{overall_espr}**")
+            
+            # --- DATA RELIABILITY ---
+            st.subheader("📊 Data Reliability")
             st.progress(passport_data["overall_rating"])
-            st.metric("Overall Reliability Score", f"{int(passport_data['overall_rating']*100)}%")
+            st.metric(
+                "Overall Data Reliability Score",
+                f"{int(passport_data['overall_rating'] * 100)}%"
+            )
+            st.caption(
+                "Il Data Reliability Score misura la qualità e affidabilità delle informazioni. "
+                "Non influisce sulla conformità ESPR."
+            )
+            
+            # --- LINK PUBBLICO ---
             st.subheader("🔗 Accesso pubblico")
             st.image(qr_buf)
             st.code(public_url)
-
     else:
         st.info("Completa validazione PDF e immagine")
