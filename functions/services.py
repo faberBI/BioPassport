@@ -16,7 +16,66 @@ import pyodbc
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
-
+PRODUCT_FIELDS = {
+    "mobile": {
+        "pdf": [
+            {"name":"Nome prodotto", "required": True},
+            {"name":"Numero di modello", "required": True},
+            {"name":"Produttore", "required": True},
+            {"name":"Materiali", "required": True},
+            {"name":"Dimensioni", "required": False},
+            {"name":"Lotto di produzione", "required": False},
+            {"name":"Anno di produzione", "required": False},
+            {"name":"Certificazione di sicurezza", "required": True},
+            {"name":"Certificazione di sostenibilita", "required": True},
+            {"name":"Descrizione prodotto", "required": False},
+            {"name":"Luogo di produzione", "required": False},
+            {"name":"Manutenzione e cura", "required": False},
+            {"name":"Materiali/componenti utilizzati", "required": True},
+            {"name":"Specie legnosa", "required": False},
+            {"name":"% di contenuto riciclato", "required": True},
+            {"name":"Sostanze preoccupanti", "required": True},
+            {"name":"Finitura superficiale", "required": False},
+            {"name":"Marchio", "required": False},
+            {"name":"Garanzia", "required": False},
+            {"name":"Certificazioni materiale", "required": False},
+            {"name":"Impronta carbonio GWP", "required": False},
+            {"name":"Prezzo", "required": False},
+            {"name":"Identificativo operatore", "required": False},
+            {"name":"Conformità tecnica", "required": True},
+            {"name":"Gestione fine vita (codice CER)", "required": True}
+        ],
+        "image": [
+            {"name":"Colore", "required": True},
+            {"name":"Condizioni", "required": True}
+        ]
+    },
+    "lampada": {
+        "pdf": [
+            {"name":"nome_prodotto", "required": True},
+            {"name":"produttore", "required": True},
+            {"name":"materiale", "required": True},
+            {"name":"wattaggio", "required": True}
+        ],
+        "image": [
+            {"name":"tipologia_prodotto", "required": True},
+            {"name":"colore", "required": True},
+            {"name":"stile", "required": False}
+        ]
+    },
+    "bicicletta": {
+        "pdf": [
+            {"name":"nome_prodotto", "required": True},
+            {"name":"produttore", "required": True},
+            {"name":"modello", "required": True},
+            {"name":"anno_produzione", "required": False}
+        ],
+        "image": [
+            {"name":"colore_telaio", "required": True},
+            {"name":"condizioni", "required": True}
+        ]
+    }
+}
 # ======================================================
 # NORMALIZATION / MATCHING
 # ======================================================
