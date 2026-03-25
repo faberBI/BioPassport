@@ -243,29 +243,124 @@ with tabs[2]:
 # ======================================================
 with tabs[3]:
     st.header("Archivio Passport")
+
     if os.path.exists(services.EXCEL_FILE):
         try:
-            df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport", header=0)
-            if "id" not in df_passport.columns or df_passport.empty:
-                st.info("Nessun passport disponibile o foglio Excel vuoto/malformato")
+            df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
+            df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
+
+            # Pulizia colonne
+            df_passport.columns = df_passport.columns.str.strip()
+            df_fields.columns = df_fields.columns.str.strip()
+
+            if df_passport.empty:
+                st.info("Nessun passport disponibile")
             else:
-                passport_ids = df_passport["id"].tolist()
-                selected_id = st.selectbox("Seleziona Passport da visualizzare", passport_ids)
+                # ======================================================
+                # COSTRUZIONE DATASET UNIFICATO
+                # ======================================================
+                df_pivot = df_fields.pivot_table(
+                    index="passport_id",
+                    columns="field_name",
+                    values="value",
+                    aggfunc="first"
+                ).reset_index()
 
-                if selected_id:
-                    st.subheader("Dati Generali")
-                    st.dataframe(df_passport[df_passport["id"]==selected_id])
+                df_full = df_passport.merge(
+                    df_pivot,
+                    left_on="id",
+                    right_on="passport_id",
+                    how="left"
+                )
 
-                    st.subheader("Fields")
-                    df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields", header=0)
-                    st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
+                # ======================================================
+                # FILTRI
+                # ======================================================
+                st.subheader("Filtri")
 
-                    st.subheader("Immagini")
-                    df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images", header=0)
-                    images = df_images[df_images["passport_id"]==selected_id]
-                    for idx, row in images.iterrows():
-                        st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
+                col1, col2 = st.columns(2)
+
+                # Filtro nome prodotto
+                nome = col1.text_input("Nome prodotto")
+
+                # Filtro luogo produzione
+                luogo = col2.text_input("Luogo di produzione")
+
+                # Filtro prezzo
+                prezzo_min = st.number_input("Prezzo minimo", value=0)
+                prezzo_max = st.number_input("Prezzo massimo", value=10000)
+
+                # Filtro data
+                data_min = st.date_input("Data da")
+                data_max = st.date_input("Data a")
+
+                df_filtered = df_full.copy()
+
+                # ======================================================
+                # APPLICAZIONE FILTRI
+                # ======================================================
+                if nome:
+                    df_filtered = df_filtered[
+                        df_filtered["Nome prodotto"].astype(str).str.contains(nome, case=False, na=False)
+                    ]
+
+                if luogo:
+                    df_filtered = df_filtered[
+                        df_filtered["Luogo di produzione"].astype(str).str.contains(luogo, case=False, na=False)
+                    ]
+
+                if "Prezzo" in df_filtered.columns:
+                    df_filtered["Prezzo_num"] = (
+                        df_filtered["Prezzo"]
+                        .astype(str)
+                        .str.replace("€", "")
+                        .str.replace(",", ".")
+                        .str.extract(r'(\d+\.?\d*)')[0]
+                        .astype(float)
+                    )
+                    df_filtered = df_filtered[
+                        (df_filtered["Prezzo_num"] >= prezzo_min) &
+                        (df_filtered["Prezzo_num"] <= prezzo_max)
+                    ]
+
+                if "created_at" in df_filtered.columns:
+                    df_filtered["created_at"] = pd.to_datetime(df_filtered["created_at"], errors="coerce")
+                    df_filtered = df_filtered[
+                        (df_filtered["created_at"].dt.date >= data_min) &
+                        (df_filtered["created_at"].dt.date <= data_max)
+                    ]
+
+                # ======================================================
+                # RISULTATI
+                # ======================================================
+                st.subheader("Risultati filtrati")
+                st.dataframe(df_filtered)
+
+                # Selezione passport
+                if not df_filtered.empty:
+                    selected_id = st.selectbox("Seleziona Passport", df_filtered["id"])
+
+                    if selected_id:
+                        st.subheader("Dettaglio")
+
+                        st.dataframe(df_passport[df_passport["id"] == selected_id])
+
+                        st.subheader("Fields")
+                        st.dataframe(df_fields[df_fields["passport_id"] == selected_id])
+
+                        st.subheader("Immagini")
+                        df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images")
+                        df_images.columns = df_images.columns.str.strip()
+
+                        images = df_images[df_images["passport_id"] == selected_id]
+
+                        for _, row in images.iterrows():
+                            st.image(
+                                f"data:image/jpeg;base64,{row['file_base64']}",
+                                caption=row.get("caption", "")
+                            )
+
         except Exception as e:
-            st.error(f"Errore lettura archivio: {e}")
+            st.error(f"Errore archivio: {e}")
     else:
         st.info("Nessun file Excel trovato")
