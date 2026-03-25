@@ -186,12 +186,18 @@ with tabs[2]:
             # ======================================================
             for sec_name, sec in passport["sections"].items():
                 for fname, field in sec["fields"].items():
+
+                    # PDF
                     if fname in st.session_state.validated_pdf:
-                        field["value"] = st.session_state.validated_pdf[fname]
-                        field["confidence"] = 1.0 if field["value"] else 0.0
+                        val_dict = st.session_state.validated_pdf[fname]
+                        field["value"] = val_dict.get("value")
+                        field["confidence"] = val_dict.get("confidence", 0)
+
+                    # IMAGE
                     if fname in st.session_state.validated_image:
-                        field["value"] = st.session_state.validated_image[fname]
-                        field["confidence"] = 1.0 if field["value"] else 0.0
+                        val_dict = st.session_state.validated_image[fname]
+                        field["value"] = val_dict.get("value")
+                        field["confidence"] = val_dict.get("confidence", 0)
 
             # ======================================================
             # Ricalcola punteggi overall e reliability aggiornati
