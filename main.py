@@ -58,7 +58,7 @@ if passport_id:
     st.title("🇪🇺 Digital Product Passport")
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
-    
+
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
@@ -67,8 +67,8 @@ if passport_id:
                 st.caption(f["explanation"])
 
     services.render_espr_compliance(passport)
-    st.progress(passport.get("overall_rating", 0))
-    st.metric("Reliability", f"{int(passport.get('overall_rating',0)*100)}%")
+    st.progress(passport["overall_rating"])
+    st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -113,7 +113,7 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-    # Evidenzia PDF
+    # Evidenzia PDF e visualizza in-app
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
             highlighted_pdf_path = services.highlight_pdf_fields(
@@ -121,7 +121,16 @@ with tabs[0]:
                 st.session_state.pdf_data
             )
             st.success("PDF evidenziato pronto!")
-            st.download_button("Scarica PDF evidenziato", highlighted_pdf_path, file_name="highlighted.pdf")
+
+            # Bottone per scaricare PDF
+            with open(highlighted_pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf", mime="application/pdf")
+
+            # Visualizza PDF nell'app
+            base64_pdf = services.file_to_base64(highlighted_pdf_path)
+            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="700" height="1000" type="application/pdf"></iframe>'
+            st.components.v1.html(pdf_display, height=1000)
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -156,29 +165,27 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("Pubblica Digital Product Passport"):
 
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati PDF + immagini
+            # Merge dati PDF + immagini validati
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Ricalcola rating e overall correttamente
+            # Calcola ESPR e overall reliability aggiornati
             services.compute_overall(passport)
 
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e Excel (append)
+            # Salva su file e Excel
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            # Genera QR pubblico con URL corretto
-            app_url = "https://biopassport-versione-modify1.streamlit.app/"
-            url = f"{app_url}?passport_id={pid}"
+            # Genera QR pubblico
+            url = f"https://biopassport-versione-modify1.streamlit.app/?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
 
             st.success("DPP pubblicato ✅")
