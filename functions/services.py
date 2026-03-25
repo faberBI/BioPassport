@@ -14,6 +14,7 @@ import pyodbc
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.colors import yellow
+import fitz 
 
 # ======================================================
 # CONFIG
@@ -428,9 +429,6 @@ def save_passport_to_access(passport):
 
     conn.commit()
     conn.close()
-
-
-import fitz  # PyMuPDF
 
 def highlight_pdf_fields(pdf_file, fields_dict, output_path="highlighted.pdf"):
     """
