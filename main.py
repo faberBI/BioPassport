@@ -228,31 +228,30 @@ with tabs[2]:
 with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
-        # Carica il foglio passport in sicurezza
         try:
             df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
-        except ValueError:
-            st.info("Foglio 'passport' non trovato nel file Excel")
+        except Exception as e:
+            st.error(f"Errore lettura foglio passport: {e}")
             df_passport = pd.DataFrame()
 
-        if not df_passport.empty and "id" in df_passport.columns:
+        if df_passport.empty:
+            st.info("Nessun passport disponibile o foglio Excel vuoto")
+        else:
             passport_ids = df_passport["id"].tolist()
             selected_id = st.selectbox("Seleziona Passport da visualizzare", passport_ids)
 
             if selected_id:
                 st.subheader("Dati Generali")
-                st.dataframe(df_passport[df_passport["id"] == selected_id])
+                st.dataframe(df_passport[df_passport["id"]==selected_id])
 
                 st.subheader("Fields")
                 df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
-                st.dataframe(df_fields[df_fields["passport_id"] == selected_id])
+                st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
 
                 st.subheader("Immagini")
                 df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images")
-                images = df_images[df_images["passport_id"] == selected_id]
+                images = df_images[df_images["passport_id"]==selected_id]
                 for idx, row in images.iterrows():
                     st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
-        else:
-            st.info("Nessun passport disponibile o foglio Excel vuoto")
     else:
         st.info("Nessun dato archivio disponibile")
