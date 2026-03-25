@@ -274,6 +274,35 @@ def score_to_color(score):
         return "🟡"
     return "🔴"
 
+
+# ======================================================
+# ADD PRODUCT IMAGE
+# ======================================================
+def add_product_image(passport, image_file, caption=None):
+    """
+    Aggiunge un'immagine al passport.
+    image_file può essere un UploadedFile (Streamlit) o PIL Image.
+    """
+    try:
+        # Se è UploadedFile di Streamlit
+        if hasattr(image_file, "read"):
+            img = Image.open(image_file).convert("RGB")
+        else:
+            img = image_file
+
+        buf = BytesIO()
+        img.save(buf, format="JPEG")
+        img_base64 = base64.b64encode(buf.getvalue()).decode()
+
+        passport.setdefault("images", []).append({
+            "file_base64": img_base64,
+            "caption": caption or "Immagine prodotto",
+            "annotation": ""
+        })
+    except Exception as e:
+        import streamlit as st
+        st.error(f"Errore add_product_image: {e}")
+
 # ======================================================
 # PASSPORT
 # ======================================================
