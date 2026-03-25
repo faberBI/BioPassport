@@ -9,3 +9,4 @@ pyodbc
 reportlab
 fitz
 PyMuPDF
+openpyxl
