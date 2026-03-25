@@ -3,10 +3,11 @@ import uuid
 from openai import OpenAI
 from functions import services
 from PIL import Image
-import os
 import pandas as pd
-import base64
 from io import BytesIO
+import base64
+import streamlit.components.v1 as components
+import os
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -60,20 +61,17 @@ if passport_id:
     st.title("🇪🇺 Digital Product Passport")
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
-
+    
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
-            conf = f.get("confidence", 0)
-            st.write(f"**{fname}**: {f['value']} {f['color']} (conf: {conf})")
-            if conf < 0.5:
-                st.caption("Bassa confidenza")
+            st.write(f"**{fname}**: {f['value']} {f['color']} (conf: {f.get('confidence',0)})")
             if f.get("explanation"):
                 st.caption(f["explanation"])
 
     services.render_espr_compliance(passport)
-    st.progress(passport.get("overall_rating", 0))
-    st.metric("Reliability", f"{int(passport.get('overall_rating', 0)*100)}%")
+    st.progress(passport["overall_rating"])
+    st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -95,8 +93,6 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "�
 with tabs[0]:
     pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg","png"], accept_multiple_files=True)
-
-    highlighted_pdf_io = None
 
     if st.button("Analizza"):
         if not pdf_file or not image_files:
@@ -120,22 +116,29 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-    # Evidenzia PDF e visualizza inline
+    # Evidenzia PDF
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_io = services.highlight_pdf_fields(
+            highlighted_pdf_bytes = services.highlight_pdf_fields(
                 pdf_file,
                 st.session_state.pdf_data
             )
-            st.success("PDF evidenziato pronto!")
 
-            # Mostra inline
-            pdf_bytes = highlighted_pdf_io.getvalue()
-            b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-            st.markdown(f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="700" height="500" type="application/pdf"></iframe>', unsafe_allow_html=True)
+            # Mostra PDF nell'app
+            pdf_base64 = base64.b64encode(highlighted_pdf_bytes.getbuffer()).decode("utf-8")
+            pdf_display_html = f"""
+            <iframe src="data:application/pdf;base64,{pdf_base64}" 
+                    width="700" height="900" type="application/pdf"></iframe>
+            """
+            components.html(pdf_display_html, height=900)
 
-            # Download
-            st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf", mime="application/pdf")
+            # Pulsante download
+            st.download_button(
+                label="Scarica PDF evidenziato",
+                data=highlighted_pdf_bytes.getvalue(),
+                file_name="highlighted.pdf",
+                mime="application/pdf"
+            )
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -146,22 +149,22 @@ with tabs[1]:
         validated_pdf = {}
         for k,v in st.session_state.pdf_data.items():
             val = v["value"]
-            conf = v.get("confidence", 0)
             explanation = v.get("explanation","")
-            # Mantieni valore e confidence insieme
-            validated_pdf[k] = {"value": st.text_input(f"{k} (conf: {conf})", val, help=explanation), "confidence": conf}
+            conf = v.get("confidence",0)
+            validated_pdf[k] = st.text_input(f"{k} (conf: {conf})", val, help=explanation)
         st.session_state.validated_pdf = validated_pdf
 
         st.subheader("Validazione dati Immagini")
         validated_img = {}
         for k,v in st.session_state.image_data.items():
             val = v["value"]
-            conf = v.get("confidence",0)
             explanation = v.get("explanation","")
-            validated_img[k] = {"value": st.text_input(f"{k} (conf: {conf})", val, help=explanation), "confidence": conf}
+            conf = v.get("confidence",0)
+            validated_img[k] = st.text_input(f"{k} (conf: {conf})", val, help=explanation)
         st.session_state.validated_image = validated_img
 
         if st.button("Completa validazione"):
+            # Dopo la validazione aggiorniamo il passport con merge e ricalcoliamo confidenza e overall
             st.success("Validazione completata ✅")
     else:
         st.info("Esegui prima l’analisi PDF e immagini")
@@ -171,35 +174,34 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("Pubblica Digital Product Passport"):
 
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati PDF + immagini (con confidenze)
+            # Merge dati PDF + immagini
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Calcola overall e reliability aggiornati
+            # Ricalcola confidenze e overall dopo merge
             services.compute_overall(passport)
 
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e Excel
+            # Salva su file e Excel (append)
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            # Genera QR pubblico
-            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+            # Genera QR pubblico corretto
+            url = f"https://biopassport-versione-modify1.streamlit.app/?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
 
             st.success("DPP pubblicato ✅")
             st.subheader("ESPR")
-            st.write(passport.get("overall_espr", "MISSING"))
+            st.write(passport["overall_espr"])
             st.subheader("Reliability")
-            st.progress(passport.get("overall_rating",0))
+            st.progress(passport["overall_rating"])
 
             st.image(qr)
             st.code(url)
