@@ -430,39 +430,33 @@ def save_passport_to_access(passport):
     conn.close()
 
 
-def highlight_pdf_terms(pdf_file, terms):
+import fitz  # PyMuPDF
+
+def highlight_pdf_fields(pdf_file, fields_dict, output_path="highlighted.pdf"):
     """
-    Evidenzia nel PDF le parole corrispondenti ai termini estratti.
-
-    pdf_file: file-like object del PDF originale
-    terms: lista di stringhe da evidenziare
+    Evidenzia i valori dei campi estratti nel PDF.
+    
+    pdf_file: file-like o path del PDF originale
+    fields_dict: dict dei campi estratti {field_name: {"value":..., "explanation":..., "confidence":...}}
+    output_path: path PDF evidenziato
     """
-    # Apri PDF con pdfplumber
-    pdf = pdfplumber.open(pdf_file)
-    output = BytesIO()
-    can = canvas.Canvas(output, pagesize=letter)
+    doc = fitz.open(pdf_file)
 
-    for page_num, page in enumerate(pdf.pages):
-        text = page.extract_text()
-        if not text:
-            continue
+    for page in doc:
+        text_instances = page.get_text("words")  # lista di tuple: x0, y0, x1, y1, "word", block_no, line_no, word_no
 
-        # dimensioni pagina
-        width, height = letter
+        for field_name, info in fields_dict.items():
+            val = str(info.get("value") or "").strip()
+            if not val:
+                continue
 
-        # Draw la pagina come sfondo (opzionale)
-        # ... oppure copiamo il testo e aggiungiamo highlight
+            # cerca tutte le occorrenze del valore
+            for inst in text_instances:
+                x0, y0, x1, y1, word = inst[:5]
+                if val.lower() in word.lower():
+                    highlight = page.add_rect_annot([x0, y0, x1, y1])
+                    highlight.set_colors(stroke=(1, 1, 0))  # giallo
+                    highlight.update()
 
-        for word in page.extract_words():
-            if word['text'] in terms:
-                # Coordinate pdfplumber
-                x0, top, x1, bottom = word['x0'], word['top'], word['x1'], word['bottom']
-                y = height - top  # inverti y per reportlab
-                can.setFillColor(yellow)
-                can.rect(x0, y, x1 - x0, bottom - top, fill=True, stroke=False)
-
-        can.showPage()
-
-    can.save()
-    output.seek(0)
-    return output
+    doc.save(output_path)
+    return output_path
