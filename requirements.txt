@@ -8,3 +8,4 @@ bcrypt
 pyodbc
 reportlab
 fitz
+PyMuPDF
