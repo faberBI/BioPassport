@@ -16,7 +16,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.colors import yellow
 import fitz 
 import pandas as pd
-
+import openpyxl
 # ======================================================
 # CONFIG
 # ======================================================
