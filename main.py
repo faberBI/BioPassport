@@ -174,20 +174,35 @@ with tabs[2]:
 
         if st.button("Pubblica Digital Product Passport"):
 
+            # Crea ID passport
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati PDF + immagini (con confidenze)
+            # Merge dati PDF + immagini (aggiornando i valori dai campi validati)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Calcola overall e reliability aggiornati
+            # ======================================================
+            # Aggiorna le confidenze dai valori validati
+            # ======================================================
+            for sec_name, sec in passport["sections"].items():
+                for fname, field in sec["fields"].items():
+                    if fname in st.session_state.validated_pdf:
+                        field["value"] = st.session_state.validated_pdf[fname]
+                        field["confidence"] = 1.0 if field["value"] else 0.0
+                    if fname in st.session_state.validated_image:
+                        field["value"] = st.session_state.validated_image[fname]
+                        field["confidence"] = 1.0 if field["value"] else 0.0
+
+            # ======================================================
+            # Ricalcola punteggi overall e reliability aggiornati
+            # ======================================================
             services.compute_overall(passport)
 
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e Excel
+            # Salva su file e Excel (con dati aggiornati)
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
@@ -199,10 +214,11 @@ with tabs[2]:
             st.subheader("ESPR")
             st.write(passport.get("overall_espr", "MISSING"))
             st.subheader("Reliability")
-            st.progress(passport.get("overall_rating",0))
+            st.progress(passport.get("overall_rating", 0))
 
             st.image(qr)
             st.code(url)
+
     else:
         st.info("Completa prima la validazione PDF e immagini")
 
