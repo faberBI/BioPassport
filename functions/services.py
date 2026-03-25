@@ -114,12 +114,11 @@ def split_text(text, max_chars=3000, overlap=300):
 # PDF / IMAGE UTILITIES
 # ======================================================
 def extract_text_from_pdf(pdf_file):
-    pages = []
+    text = ""
     with pdfplumber.open(pdf_file) as pdf:
-        for i, page in enumerate(pdf.pages):
-            txt = page.extract_text() or ""
-            pages.append({"page": i+1, "text": txt})
-    return pages
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    return text
 
 def image_to_base64(image_file):
     if hasattr(image_file, "getvalue"):
@@ -138,20 +137,13 @@ def resize_image_for_vision(image_file, max_size=512):
     return buf
 
 # ======================================================
-# CONFIDENCE / EXPLANATION
+# CONFIDENCE
 # ======================================================
 def compute_confidence(values):
     if not values:
         return 0.0
     most_common = max(set(values), key=values.count)
     return round(values.count(most_common) / len(values), 2)
-
-def generate_explanation(field):
-    if field["value"] in [None, "", "null"]:
-        return "Dato mancante"
-    if field.get("confidence", 0) < 0.5:
-        return "Bassa confidenza"
-    return "Dato affidabile"
 
 # ======================================================
 # GPT PDF EXTRACTION
@@ -163,26 +155,21 @@ def gpt_extract_from_pdf(text, client: OpenAI, tipo, fields):
     for chunk in chunks:
         prompt = f"""
 Estrai dati tecnici del prodotto ({tipo}).
+Rispondi SOLO con JSON valido. Usa null se non presente.
+Campi: {json.dumps(fields)}
 
-Regole:
-- SOLO JSON valido
-- Usa null se non presente
-- NON inventare
-
-Campi:
-{json.dumps(fields, indent=2)}
-
-Testo:
-{chunk}
+Testo: {chunk}
 """
         try:
             r = client.chat.completions.create(
                 model="gpt-4.1",
-                response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
-            results.append(json.loads(r.choices[0].message.content))
+            resp_text = r.choices[0].message.content
+            if resp_text.startswith("```"):
+                resp_text = "\n".join(resp_text.splitlines()[1:-1])
+            results.append(json.loads(resp_text))
         except Exception:
             continue
 
@@ -200,24 +187,13 @@ Testo:
 # GPT IMAGE ANALYSIS
 # ======================================================
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-
     prompt = f"""
 Analizza immagine prodotto ({tipo}).
-
-Estrai:
-- colore
-- condizioni
-- materiale_probabile
-- categoria_visiva
-- segni_usura
-
+Estrai: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
 Rispondi con JSON valido.
-Usa null se non determinabile.
 """
-
     try:
         file_id = upload_image_to_openai(image_file, client)
-
         resp = client.responses.create(
             model="gpt-4o",
             input=[{
@@ -228,15 +204,7 @@ Usa null se non determinabile.
                 ]
             }]
         )
-
-        # ✅ Usa resp.output_parsed se disponibile
-        if hasattr(resp, "output_parsed") and resp.output_parsed:
-            data = resp.output_parsed
-        else:
-            # fallback: estrai tutto il testo e prova a fare json.loads
-            text = "".join([m.text for m in resp.output if hasattr(m, "text")])
-            data = json.loads(text) if text else {}
-
+        data = json.loads(resp.output_text)
         result = {}
         for k, v in data.items():
             result[k] = {
@@ -244,9 +212,7 @@ Usa null se non determinabile.
                 "confidence": 0.7 if v else 0.0,
                 "explanation": "Dato estratto da immagine" if v else "Non rilevabile"
             }
-
         return result
-
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         return {}
@@ -257,7 +223,7 @@ def upload_image_to_openai(image_file, client):
     return uploaded.id
 
 # ======================================================
-# RATING / COLOR
+# FIELD RATING / EXPLAINABILITY
 # ======================================================
 def compute_field_rating(field):
     val = field.get("value")
@@ -267,6 +233,13 @@ def compute_field_rating(field):
     weight = field.get("eu_weight", 1.0)
     return round(conf * weight, 2)
 
+def generate_explanation(field):
+    if field["value"] in [None, "", "null"]:
+        return "Dato mancante"
+    if field["confidence"] < 0.5:
+        return "Bassa confidenza"
+    return "Dato affidabile"
+
 def score_to_color(score):
     if score >= 0.7:
         return "🟢"
@@ -275,16 +248,13 @@ def score_to_color(score):
     return "🔴"
 
 # ======================================================
-# PASSPORT CORE
+# PASSPORT
 # ======================================================
 def initialize_passport(product_id, product_type, fields):
     passport = {
         "id": product_id,
         "product_type": product_type,
-        "metadata": {
-            "created_at": datetime.utcnow().isoformat(),
-            "version": "EU-DPP-2.0"
-        },
+        "metadata": {"created_at": datetime.utcnow().isoformat(), "version": "EU-DPP-2.0"},
         "sections": {
             "Technical": {"fields": {}, "section_rating": 0},
             "Visual": {"fields": {}, "section_rating": 0}
@@ -303,9 +273,6 @@ def initialize_passport(product_id, product_type, fields):
         }
     return passport
 
-# ======================================================
-# MERGE DATA
-# ======================================================
 def merge_data(passport, pdf_data, image_data):
     all_data = {**pdf_data, **image_data}
     for section in passport["sections"].values():
@@ -322,9 +289,6 @@ def merge_data(passport, pdf_data, image_data):
                     field["explanation"] = generate_explanation(field)
     compute_overall(passport)
 
-# ======================================================
-# OVERALL + ESPR
-# ======================================================
 def compute_overall(passport):
     section_scores = []
     for section in passport["sections"].values():
@@ -340,7 +304,7 @@ def compute_overall(passport):
         passport["overall_espr"] = "MISSING"
 
 # ======================================================
-# STORAGE JSON
+# STORAGE FILE / ACCESS
 # ======================================================
 def save_passport_to_file(passport):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
@@ -355,8 +319,32 @@ def load_passport_from_file(passport_id):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def get_db_connection():
+    conn = pyodbc.connect(
+        r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=database/dpp.accdb;'
+    )
+    return conn
+
+def save_passport_to_access(passport):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO passports (id, product_type, created_at, overall_rating, overall_espr) VALUES (?, ?, ?, ?, ?)",
+        passport["id"], passport["product_type"], passport["metadata"]["created_at"], passport["overall_rating"], passport["overall_espr"]
+    )
+    for section_name, section in passport["sections"].items():
+        for field_name, field in section["fields"].items():
+            cursor.execute(
+                "INSERT INTO fields (passport_id, section, field_name, value, confidence, rating, explanation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                passport["id"], section_name, field_name, str(field.get("value")), field.get("confidence",0), field.get("rating",0), field.get("explanation","")
+            )
+    for img in passport.get("images", []):
+        cursor.execute("INSERT INTO images (passport_id, image_base64) VALUES (?, ?)", passport["id"], img["file_base64"])
+    conn.commit()
+    conn.close()
+
 # ======================================================
-# QR
+# QR CODE
 # ======================================================
 def generate_qr_from_url(url):
     qr = qrcode.QRCode()
@@ -368,7 +356,7 @@ def generate_qr_from_url(url):
     return buf
 
 # ======================================================
-# ESPR UI
+# UI / ESPR
 # ======================================================
 def render_espr_compliance(passport):
     st.subheader("ESPR Compliance")
@@ -379,82 +367,23 @@ def render_espr_compliance(passport):
     st.markdown(f"**Overall:** {passport['overall_espr']}")
 
 # ======================================================
-# SAVE TO ACCESS DB
+# HIGHLIGHT PDF FIELDS
 # ======================================================
-def get_db_connection():
-    conn = pyodbc.connect(
-        r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};'
-        r'DBQ=database/dpp.accdb;'
-    )
-    return conn
-
-def save_passport_to_access(passport):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # passport
-    cursor.execute("""
-        INSERT INTO passports (id, product_type, created_at, overall_rating, overall_espr)
-        VALUES (?, ?, ?, ?, ?)
-    """,
-    passport["id"],
-    passport["product_type"],
-    passport["metadata"]["created_at"],
-    passport["overall_rating"],
-    passport["overall_espr"])
-
-    # fields
-    for section_name, section in passport["sections"].items():
-        for field_name, field in section["fields"].items():
-            cursor.execute("""
-                INSERT INTO fields (passport_id, section, field_name, value, confidence, rating, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            passport["id"],
-            section_name,
-            field_name,
-            str(field.get("value")),
-            field.get("confidence", 0),
-            field.get("rating", 0),
-            field.get("explanation", ""))
-
-    # images
-    for img in passport.get("images", []):
-        cursor.execute("""
-            INSERT INTO images (passport_id, image_base64)
-            VALUES (?, ?)
-        """,
-        passport["id"],
-        img["file_base64"])
-
-    conn.commit()
-    conn.close()
-
-def highlight_pdf_fields(pdf_file, fields_dict, output_path="highlighted.pdf"):
-    """
-    Evidenzia i valori dei campi estratti nel PDF.
-    
-    pdf_file: file-like o path del PDF originale
-    fields_dict: dict dei campi estratti {field_name: {"value":..., "explanation":..., "confidence":...}}
-    output_path: path PDF evidenziato
-    """
-    doc = fitz.open(pdf_file)
-
+def highlight_pdf_fields(pdf_file, extracted_data):
+    # Supporta UploadedFile o path
+    pdf_bytes = pdf_file.read() if hasattr(pdf_file, "read") else open(pdf_file, "rb").read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     for page in doc:
-        text_instances = page.get_text("words")  # lista di tuple: x0, y0, x1, y1, "word", block_no, line_no, word_no
-
-        for field_name, info in fields_dict.items():
-            val = str(info.get("value") or "").strip()
-            if not val:
-                continue
-
-            # cerca tutte le occorrenze del valore
-            for inst in text_instances:
-                x0, y0, x1, y1, word = inst[:5]
-                if val.lower() in word.lower():
-                    highlight = page.add_rect_annot([x0, y0, x1, y1])
+        for field_name, field in extracted_data.items():
+            val = field.get("value")
+            if val:
+                text_instances = page.search_for(str(val))
+                for inst in text_instances:
+                    highlight = page.add_highlight_annot(inst)
                     highlight.set_colors(stroke=(1, 1, 0))  # giallo
                     highlight.update()
-
-    doc.save(output_path)
-    return output_path
+    out = BytesIO()
+    doc.save(out)
+    out.seek(0)
+    doc.close()
+    return out
