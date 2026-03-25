@@ -141,10 +141,15 @@ def resize_image_for_vision(image_file, max_size=512):
 # CONFIDENCE
 # ======================================================
 def compute_confidence(values):
+    """
+    Calcola la confidenza di un campo basandosi sui valori estratti.
+    Restituisce 0 se la lista è vuota.
+    """
     if not values:
-        return 0.0
+        return 0.0  # Nessun dato → confidenza 0
     most_common = max(set(values), key=values.count)
-    return round(values.count(most_common) / len(values), 2)
+    confidence = values.count(most_common) / len(values)
+    return confidence
 
 # ======================================================
 # GPT PDF EXTRACTION
