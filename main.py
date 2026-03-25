@@ -117,28 +117,27 @@ with tabs[0]:
     # Evidenzia PDF
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_bytes = services.highlight_pdf_fields(
+            highlighted_pdf_path = services.highlight_pdf_fields(
                 pdf_file,
                 st.session_state.pdf_data
             )
 
-            if highlighted_pdf_bytes:
-                st.success("PDF evidenziato pronto!")
+            if highlighted_pdf_path and os.path.exists(highlighted_pdf_path):
+                with open(highlighted_pdf_path, "rb") as f:
+                    highlighted_pdf_bytes = f.read()
 
-                # Download
+                pdf_base64 = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
+                st.markdown(
+                    f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
+                    unsafe_allow_html=True
+                )
                 st.download_button(
                     "Scarica PDF evidenziato",
                     highlighted_pdf_bytes,
                     file_name="highlighted.pdf",
                     mime="application/pdf"
                 )
-
-                # Visualizzazione inline
-                pdf_base64 = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
-                    unsafe_allow_html=True
-                )
+                st.success("PDF evidenziato pronto!")
             else:
                 st.error("Errore nella generazione del PDF evidenziato")
 
@@ -175,27 +174,25 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("Pubblica Digital Product Passport"):
-
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
             # Merge dati PDF + immagini
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Ricalcola ESPR e Reliability dopo validazione
+            # Ricalcolo ESPR e Reliability dopo validazione
             services.compute_overall(passport)
 
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e append su Excel
+            # Salva su file e Excel (append)
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            # Genera QR pubblico corretto
+            # Genera QR pubblico
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
 
