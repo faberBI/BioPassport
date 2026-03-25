@@ -331,3 +331,63 @@ def render_espr_compliance(passport):
         st.write(f"{name}: {emoji} {score}")
 
     st.markdown(f"**Overall:** {passport['overall_espr']}")
+
+# ======================================================
+# SAVE DATA
+# ======================================================
+
+import pyodbc
+
+def get_db_connection():
+    conn = pyodbc.connect(
+        r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};'
+        r'DBQ=database/dpp.accdb;'
+    )
+    return conn
+    
+def save_passport_to_access(passport):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # -------- passport --------
+    cursor.execute("""
+        INSERT INTO passports (id, product_type, created_at, overall_rating, overall_espr)
+        VALUES (?, ?, ?, ?, ?)
+    """,
+        passport["id"],
+        passport["product_type"],
+        passport["metadata"]["created_at"],
+        passport["overall_rating"],
+        passport["overall_espr"]
+    )
+
+    # -------- fields --------
+    for section_name, section in passport["sections"].items():
+        for field_name, field in section["fields"].items():
+
+            cursor.execute("""
+                INSERT INTO fields (passport_id, section, field_name, value, confidence, rating, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                passport["id"],
+                section_name,
+                field_name,
+                str(field.get("value")),
+                field.get("confidence", 0),
+                field.get("rating", 0),
+                field.get("explanation", "")
+            )
+
+    # -------- images --------
+    for img in passport.get("images", []):
+        cursor.execute("""
+            INSERT INTO images (passport_id, image_base64)
+            VALUES (?, ?)
+        """,
+            passport["id"],
+            img["file_base64"]
+        )
+
+    conn.commit()
+    conn.close()
