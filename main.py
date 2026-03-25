@@ -217,6 +217,15 @@ with tabs[2]:
             st.progress(passport.get("overall_rating", 0))
 
             st.image(qr)
+            # Bottone per scaricare il QR code come immagine
+            qr_bytes = qr.getvalue()
+            st.download_button(
+            label="Scarica QR code",
+            data=qr_bytes,
+            file_name=f"{pid}_qr.png",
+            mime="image/png"
+            )
+
             st.code(url)
 
     else:
