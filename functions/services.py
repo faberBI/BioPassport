@@ -532,7 +532,7 @@ def save_passport_to_excel_append(passport):
 
     # Scrivi in append
     if os.path.exists(EXCEL_FILE):
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
             df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
             df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
