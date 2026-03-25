@@ -67,8 +67,8 @@ if passport_id:
                 st.caption(f["explanation"])
 
     services.render_espr_compliance(passport)
-    st.progress(passport["overall_rating"])
-    st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
+    st.progress(passport.get("overall_rating", 0))
+    st.metric("Reliability", f"{int(passport.get('overall_rating',0)*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -165,6 +165,9 @@ with tabs[2]:
             # Merge dati PDF + immagini
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
+            # Ricalcola rating e overall correttamente
+            services.compute_overall(passport)
+
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
@@ -173,15 +176,16 @@ with tabs[2]:
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            # Genera QR pubblico
-            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+            # Genera QR pubblico con URL corretto
+            app_url = "https://biopassport-versione-modify1.streamlit.app/"
+            url = f"{app_url}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
 
             st.success("DPP pubblicato ✅")
             st.subheader("ESPR")
-            st.write(passport["overall_espr"])
+            st.write(passport.get("overall_espr","MISSING"))
             st.subheader("Reliability")
-            st.progress(passport["overall_rating"])
+            st.progress(passport.get("overall_rating",0))
 
             st.image(qr)
             st.code(url)
@@ -194,8 +198,6 @@ with tabs[2]:
 with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
-        xl = pd.ExcelFile(services.EXCEL_FILE)
-
         # Lista ID passport
         df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
         passport_ids = df_passport["id"].tolist()
