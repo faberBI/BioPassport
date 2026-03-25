@@ -5,8 +5,8 @@ from functions import services
 from PIL import Image
 import os
 import pandas as pd
+import base64
 from io import BytesIO
-import tempfile
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -64,13 +64,16 @@ if passport_id:
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
-            st.write(f"**{fname}**: {f['value']} {f['color']} (conf: {f.get('confidence',0)})")
+            conf = f.get("confidence", 0)
+            st.write(f"**{fname}**: {f['value']} {f['color']} (conf: {conf})")
+            if conf < 0.5:
+                st.caption("Bassa confidenza")
             if f.get("explanation"):
                 st.caption(f["explanation"])
 
     services.render_espr_compliance(passport)
-    st.progress(passport["overall_rating"])
-    st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
+    st.progress(passport.get("overall_rating", 0))
+    st.metric("Reliability", f"{int(passport.get('overall_rating', 0)*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -92,6 +95,8 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "�
 with tabs[0]:
     pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg","png"], accept_multiple_files=True)
+
+    highlighted_pdf_io = None
 
     if st.button("Analizza"):
         if not pdf_file or not image_files:
@@ -115,25 +120,22 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-    # Evidenzia PDF
+    # Evidenzia PDF e visualizza inline
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_io = services.highlight_pdf_fields(pdf_file, st.session_state.pdf_data)
+            highlighted_pdf_io = services.highlight_pdf_fields(
+                pdf_file,
+                st.session_state.pdf_data
+            )
             st.success("PDF evidenziato pronto!")
 
-            # Download
-            st.download_button(
-                "Scarica PDF evidenziato",
-                highlighted_pdf_io,
-                file_name="highlighted.pdf",
-                mime="application/pdf"
-            )
+            # Mostra inline
+            pdf_bytes = highlighted_pdf_io.getvalue()
+            b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+            st.markdown(f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="700" height="500" type="application/pdf"></iframe>', unsafe_allow_html=True)
 
-            # Visualizza in nuova scheda
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(highlighted_pdf_io.read())
-                tmp_path = tmp.name
-            st.markdown(f"[Apri PDF evidenziato in nuova scheda]({tmp_path})", unsafe_allow_html=True)
+            # Download
+            st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf", mime="application/pdf")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -144,18 +146,19 @@ with tabs[1]:
         validated_pdf = {}
         for k,v in st.session_state.pdf_data.items():
             val = v["value"]
+            conf = v.get("confidence", 0)
             explanation = v.get("explanation","")
-            conf = v.get("confidence",0)
-            validated_pdf[k] = st.text_input(f"{k} (conf: {conf})", val, help=explanation)
+            # Mantieni valore e confidence insieme
+            validated_pdf[k] = {"value": st.text_input(f"{k} (conf: {conf})", val, help=explanation), "confidence": conf}
         st.session_state.validated_pdf = validated_pdf
 
         st.subheader("Validazione dati Immagini")
         validated_img = {}
         for k,v in st.session_state.image_data.items():
             val = v["value"]
-            explanation = v.get("explanation","")
             conf = v.get("confidence",0)
-            validated_img[k] = st.text_input(f"{k} (conf: {conf})", val, help=explanation)
+            explanation = v.get("explanation","")
+            validated_img[k] = {"value": st.text_input(f"{k} (conf: {conf})", val, help=explanation), "confidence": conf}
         st.session_state.validated_image = validated_img
 
         if st.button("Completa validazione"):
@@ -168,21 +171,23 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
         if st.button("Pubblica Digital Product Passport"):
+
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati validati
+            # Merge dati PDF + immagini (con confidenze)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Calcola punteggi aggiornati
+            # Calcola overall e reliability aggiornati
             services.compute_overall(passport)
 
             # Salva immagini
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e Excel (append)
+            # Salva su file e Excel
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
@@ -192,9 +197,9 @@ with tabs[2]:
 
             st.success("DPP pubblicato ✅")
             st.subheader("ESPR")
-            st.write(passport["overall_espr"])
+            st.write(passport.get("overall_espr", "MISSING"))
             st.subheader("Reliability")
-            st.progress(passport["overall_rating"])
+            st.progress(passport.get("overall_rating",0))
 
             st.image(qr)
             st.code(url)
@@ -207,7 +212,6 @@ with tabs[2]:
 with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
-        # Lista ID passport
         df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
         passport_ids = df_passport["id"].tolist()
         selected_id = st.selectbox("Seleziona Passport da visualizzare", passport_ids)
