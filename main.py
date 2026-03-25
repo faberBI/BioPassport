@@ -117,29 +117,28 @@ with tabs[0]:
     # Evidenzia PDF
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_path = services.highlight_pdf_fields(
+            highlighted_pdf_bytesio = services.highlight_pdf_fields(
                 pdf_file,
                 st.session_state.pdf_data
             )
+            highlighted_pdf_bytes = highlighted_pdf_bytesio.getvalue()
 
-            if highlighted_pdf_path and os.path.exists(highlighted_pdf_path):
-                with open(highlighted_pdf_path, "rb") as f:
-                    highlighted_pdf_bytes = f.read()
+            # Visualizza PDF nella web app
+            pdf_base64 = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
+            st.markdown(
+                f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
+                unsafe_allow_html=True
+            )
 
-                pdf_base64 = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
-                    unsafe_allow_html=True
-                )
-                st.download_button(
-                    "Scarica PDF evidenziato",
-                    highlighted_pdf_bytes,
-                    file_name="highlighted.pdf",
-                    mime="application/pdf"
-                )
-                st.success("PDF evidenziato pronto!")
-            else:
-                st.error("Errore nella generazione del PDF evidenziato")
+            # Pulsante download
+            st.download_button(
+                "Scarica PDF evidenziato",
+                highlighted_pdf_bytes,
+                file_name="highlighted.pdf",
+                mime="application/pdf"
+            )
+
+            st.success("PDF evidenziato pronto!")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -174,14 +173,16 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
         if st.button("Pubblica Digital Product Passport"):
+
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati PDF + immagini
+            # Merge dati PDF + immagini validati
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Ricalcolo ESPR e Reliability dopo validazione
+            # Calcola ESPR e Reliability aggiornati
             services.compute_overall(passport)
 
             # Salva immagini
