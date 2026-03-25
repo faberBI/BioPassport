@@ -187,13 +187,43 @@ Testo: {chunk}
 # GPT IMAGE ANALYSIS
 # ======================================================
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    """
+    Analizza un'immagine del prodotto usando GPT Vision (o GPT multimodale) e
+    restituisce un dizionario con i dati estratti, la confidenza e una spiegazione.
+
+    Parametri:
+    - image_file: file immagine (JPEG/PNG) caricato via Streamlit o PIL.
+    - client: istanza OpenAI già autenticata.
+    - tipo: tipo di prodotto, es. "mobile", "lampada".
+
+    Ritorna:
+    {
+        "colore": {"value": "rosso", "confidence": 0.7, "explanation": "Dato estratto da immagine"},
+        "condizioni": {...},
+        ...
+    }
+    """
+
+    # Prompt per GPT: cosa estrarre dall'immagine
     prompt = f"""
-Analizza immagine prodotto ({tipo}).
-Estrai: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
-Rispondi con JSON valido.
+Analizza questa immagine del prodotto ({tipo}) e restituisci JSON valido con:
+- colore
+- condizioni
+- materiale_probabile
+- categoria_visiva
+- segni_usura
+Usa null se il dato non è determinabile.
 """
+
     try:
-        file_id = upload_image_to_openai(image_file, client)
+        # Step 1: ridimensiona l'immagine per sicurezza (max 512x512)
+        buf = resize_image_for_vision(image_file)
+
+        # Step 2: carica l'immagine su OpenAI
+        uploaded = client.files.create(file=buf, purpose="vision")
+        file_id = uploaded.id
+
+        # Step 3: invia richiesta al modello GPT multimodale
         resp = client.responses.create(
             model="gpt-4o",
             input=[{
@@ -204,15 +234,33 @@ Rispondi con JSON valido.
                 ]
             }]
         )
-        data = json.loads(resp.output_text)
+
+        # Step 4: estrai output testuale
+        text_output = resp.output_text.strip()
+
+        if not text_output:
+            # fallback se il modello non risponde
+            st.warning("GPT Vision non ha generato output per questa immagine.")
+            return {}
+
+        # Step 5: prova a convertire in JSON
+        try:
+            data = json.loads(text_output)
+        except json.JSONDecodeError:
+            st.warning("Output GPT non è JSON valido. Restituisco dati vuoti.")
+            return {}
+
+        # Step 6: struttura il dizionario finale con confidence ed explanation
         result = {}
         for k, v in data.items():
             result[k] = {
                 "value": v,
-                "confidence": 0.7 if v else 0.0,
-                "explanation": "Dato estratto da immagine" if v else "Non rilevabile"
+                "confidence": 0.7 if v not in [None, "null", ""] else 0.0,
+                "explanation": "Dato estratto da immagine" if v not in [None, "null", ""] else "Non rilevabile"
             }
+
         return result
+
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         return {}
