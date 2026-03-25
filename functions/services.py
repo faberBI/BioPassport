@@ -496,57 +496,54 @@ EXCEL_FILE = "database/passports.xlsx"
 os.makedirs(os.path.dirname(EXCEL_FILE), exist_ok=True)
 
 def save_passport_to_excel_append(passport):
-    # Passport sheet
     df_passport = pd.DataFrame([{
         "id": passport["id"],
         "product_type": passport["product_type"],
         "created_at": passport["metadata"]["created_at"],
-        "overall_rating": passport.get("overall_rating",0),
-        "overall_espr": passport.get("overall_espr","MISSING")
+        "overall_rating": passport["overall_rating"],
+        "overall_espr": passport["overall_espr"]
     }])
 
-    # Fields sheet
-    rows = []
-    for section_name, section in passport["sections"].items():
-        for field_name, field in section["fields"].items():
-            rows.append({
-                "passport_id": passport["id"],
-                "section": section_name,
-                "field_name": field_name,
-                "value": field.get("value"),
-                "confidence": field.get("confidence",0),
-                "rating": field.get("rating",0),
-                "explanation": field.get("explanation")
-            })
-    df_fields = pd.DataFrame(rows)
+    df_fields = pd.DataFrame([
+        {
+            "passport_id": passport["id"],
+            "section": sec_name,
+            "field_name": f_name,
+            "value": f.get("value"),
+            "confidence": f.get("confidence"),
+            "rating": f.get("rating"),
+            "explanation": f.get("explanation")
+        }
+        for sec_name, sec in passport["sections"].items()
+        for f_name, f in sec["fields"].items()
+    ])
 
-    # Images sheet
-    img_rows = []
-    for img in passport.get("images", []):
-        img_rows.append({
+    df_images = pd.DataFrame([
+        {
             "passport_id": passport["id"],
             "file_base64": img.get("file_base64"),
             "caption": img.get("caption")
-        })
-    df_images = pd.DataFrame(img_rows)
+        }
+        for img in passport.get("images", [])
+    ])
 
-    # Se il file non esiste, crea e scrivi header
-    if not os.path.exists(EXCEL_FILE):
+    if os.path.exists(EXCEL_FILE):
+        wb = openpyxl.load_workbook(EXCEL_FILE)
+
+        # Passport
+        if "passport" in wb.sheetnames:
+            sheet = wb["passport"]
+            startrow = sheet.max_row
+        else:
+            startrow = 0
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=startrow==0, startrow=startrow)
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=startrow==0, startrow=writer.sheets["fields"].max_row if "fields" in writer.sheets else 0)
+            df_images.to_excel(writer, sheet_name="images", index=False, header=startrow==0, startrow=writer.sheets["images"].max_row if "images" in writer.sheets else 0)
+    else:
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
             df_fields.to_excel(writer, sheet_name="fields", index=False)
             df_images.to_excel(writer, sheet_name="images", index=False)
-    else:
-        # Append senza rompere header
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
-            # Passport
-            startrow = writer.sheets["passport"].max_row if "passport" in writer.sheets else 0
-            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
-            # Fields
-            startrow_fields = writer.sheets["fields"].max_row if "fields" in writer.sheets else 0
-            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow_fields)
-            # Images
-            startrow_images = writer.sheets["images"].max_row if "images" in writer.sheets else 0
-            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow_images)
 
     return EXCEL_FILE
