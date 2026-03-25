@@ -5,7 +5,8 @@ from functions import services
 from PIL import Image
 import os
 import pandas as pd
-import base64
+from io import BytesIO
+import tempfile
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -117,28 +118,22 @@ with tabs[0]:
     # Evidenzia PDF
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_bytesio = services.highlight_pdf_fields(
-                pdf_file,
-                st.session_state.pdf_data
-            )
-            highlighted_pdf_bytes = highlighted_pdf_bytesio.getvalue()
+            highlighted_pdf_io = services.highlight_pdf_fields(pdf_file, st.session_state.pdf_data)
+            st.success("PDF evidenziato pronto!")
 
-            # Visualizza PDF nella web app
-            pdf_base64 = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
-            st.markdown(
-                f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
-                unsafe_allow_html=True
-            )
-
-            # Pulsante download
+            # Download
             st.download_button(
                 "Scarica PDF evidenziato",
-                highlighted_pdf_bytes,
+                highlighted_pdf_io,
                 file_name="highlighted.pdf",
                 mime="application/pdf"
             )
 
-            st.success("PDF evidenziato pronto!")
+            # Visualizza in nuova scheda
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(highlighted_pdf_io.read())
+                tmp_path = tmp.name
+            st.markdown(f"[Apri PDF evidenziato in nuova scheda]({tmp_path})", unsafe_allow_html=True)
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -173,16 +168,14 @@ with tabs[1]:
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-
         if st.button("Pubblica Digital Product Passport"):
-
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # Merge dati PDF + immagini validati
+            # Merge dati validati
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Calcola ESPR e Reliability aggiornati
+            # Calcola punteggi aggiornati
             services.compute_overall(passport)
 
             # Salva immagini
