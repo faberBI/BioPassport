@@ -501,8 +501,8 @@ def save_passport_to_excel_append(passport):
         "id": passport["id"],
         "product_type": passport["product_type"],
         "created_at": passport["metadata"]["created_at"],
-        "overall_rating": passport["overall_rating"],
-        "overall_espr": passport["overall_espr"]
+        "overall_rating": passport.get("overall_rating",0),
+        "overall_espr": passport.get("overall_espr","MISSING")
     }])
 
     # Fields sheet
@@ -514,8 +514,8 @@ def save_passport_to_excel_append(passport):
                 "section": section_name,
                 "field_name": field_name,
                 "value": field.get("value"),
-                "confidence": field.get("confidence"),
-                "rating": field.get("rating"),
+                "confidence": field.get("confidence",0),
+                "rating": field.get("rating",0),
                 "explanation": field.get("explanation")
             })
     df_fields = pd.DataFrame(rows)
@@ -530,20 +530,23 @@ def save_passport_to_excel_append(passport):
         })
     df_images = pd.DataFrame(img_rows)
 
-    # Scrivi in append o crea nuovo
-    if os.path.exists(EXCEL_FILE):
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
-            # Append con header solo se il foglio è vuoto
-            for df, sheet in [(df_passport, "passport"), (df_fields, "fields"), (df_images, "images")]:
-                if sheet in writer.sheets and writer.sheets[sheet].max_row > 0:
-                    startrow = writer.sheets[sheet].max_row
-                    df.to_excel(writer, sheet_name=sheet, index=False, header=False, startrow=startrow)
-                else:
-                    df.to_excel(writer, sheet_name=sheet, index=False, header=True)
-    else:
+    # Se il file non esiste, crea e scrivi header
+    if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            df_passport.to_excel(writer, sheet_name="passport", index=False, header=True)
-            df_fields.to_excel(writer, sheet_name="fields", index=False, header=True)
-            df_images.to_excel(writer, sheet_name="images", index=False, header=True)
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            df_fields.to_excel(writer, sheet_name="fields", index=False)
+            df_images.to_excel(writer, sheet_name="images", index=False)
+    else:
+        # Append senza rompere header
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            # Passport
+            startrow = writer.sheets["passport"].max_row if "passport" in writer.sheets else 0
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
+            # Fields
+            startrow_fields = writer.sheets["fields"].max_row if "fields" in writer.sheets else 0
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow_fields)
+            # Images
+            startrow_images = writer.sheets["images"].max_row if "images" in writer.sheets else 0
+            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow_images)
 
     return EXCEL_FILE
