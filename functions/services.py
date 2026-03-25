@@ -196,18 +196,24 @@ Testo:
 # GPT IMAGE ANALYSIS
 # ======================================================
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
+
     prompt = f"""
 Analizza immagine prodotto ({tipo}).
+
 Estrai:
 - colore
 - condizioni
 - materiale_probabile
 - categoria_visiva
 - segni_usura
-Rispondi con JSON valido. Usa null se non determinabile.
+
+Rispondi con JSON valido.
+Usa null se non determinabile.
 """
+
     try:
         file_id = upload_image_to_openai(image_file, client)
+
         resp = client.responses.create(
             model="gpt-4o",
             input=[{
@@ -218,7 +224,15 @@ Rispondi con JSON valido. Usa null se non determinabile.
                 ]
             }]
         )
-        data = json.loads(resp.output_text)
+
+        # ✅ Usa resp.output_parsed se disponibile
+        if hasattr(resp, "output_parsed") and resp.output_parsed:
+            data = resp.output_parsed
+        else:
+            # fallback: estrai tutto il testo e prova a fare json.loads
+            text = "".join([m.text for m in resp.output if hasattr(m, "text")])
+            data = json.loads(text) if text else {}
+
         result = {}
         for k, v in data.items():
             result[k] = {
@@ -226,7 +240,9 @@ Rispondi con JSON valido. Usa null se non determinabile.
                 "confidence": 0.7 if v else 0.0,
                 "explanation": "Dato estratto da immagine" if v else "Non rilevabile"
             }
+
         return result
+
     except Exception as e:
         st.error(f"Errore GPT Image: {e}")
         return {}
