@@ -168,6 +168,7 @@ with tabs[2]:
                 services.add_product_image(passport, img)
 
             services.save_passport_to_file(passport)
+            services.save_passport_to_access(passport)
 
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
