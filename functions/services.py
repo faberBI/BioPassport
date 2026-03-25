@@ -492,9 +492,7 @@ def highlight_pdf_fields(pdf_file, extracted_data):
 # ======================================================
 # CREAZIONE ARCHIVO SU EXCEL
 # ======================================================
-
-EXCEL_FILE = "archivio_passport.xlsx"
-os.makedirs(os.path.dirname(EXCEL_FILE), exist_ok=True)
+EXCEL_FILE = os.path.join(DATA_DIR, "archivio_passport.xlsx")
 
 def save_passport_to_excel_append(passport):
     df_passport = pd.DataFrame([{
