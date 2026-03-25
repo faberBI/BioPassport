@@ -17,6 +17,7 @@ from reportlab.lib.colors import yellow
 import fitz 
 import pandas as pd
 import openpyxl
+from openpyxl import load_workbook
 # ======================================================
 # CONFIG
 # ======================================================
@@ -492,7 +493,7 @@ def highlight_pdf_fields(pdf_file, extracted_data):
 # CREAZIONE ARCHIVO SU EXCEL
 # ======================================================
 
-EXCEL_FILE = "database/passports.xlsx"
+EXCEL_FILE = "archivio_passport.xlsx"
 os.makedirs(os.path.dirname(EXCEL_FILE), exist_ok=True)
 
 def save_passport_to_excel_append(passport):
