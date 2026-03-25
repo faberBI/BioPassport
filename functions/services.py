@@ -11,6 +11,9 @@ import streamlit as st
 from PIL import Image
 from datetime import datetime
 import pyodbc
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.colors import yellow
 
 # ======================================================
 # CONFIG
@@ -425,3 +428,41 @@ def save_passport_to_access(passport):
 
     conn.commit()
     conn.close()
+
+
+def highlight_pdf_terms(pdf_file, terms):
+    """
+    Evidenzia nel PDF le parole corrispondenti ai termini estratti.
+
+    pdf_file: file-like object del PDF originale
+    terms: lista di stringhe da evidenziare
+    """
+    # Apri PDF con pdfplumber
+    pdf = pdfplumber.open(pdf_file)
+    output = BytesIO()
+    can = canvas.Canvas(output, pagesize=letter)
+
+    for page_num, page in enumerate(pdf.pages):
+        text = page.extract_text()
+        if not text:
+            continue
+
+        # dimensioni pagina
+        width, height = letter
+
+        # Draw la pagina come sfondo (opzionale)
+        # ... oppure copiamo il testo e aggiungiamo highlight
+
+        for word in page.extract_words():
+            if word['text'] in terms:
+                # Coordinate pdfplumber
+                x0, top, x1, bottom = word['x0'], word['top'], word['x1'], word['bottom']
+                y = height - top  # inverti y per reportlab
+                can.setFillColor(yellow)
+                can.rect(x0, y, x1 - x0, bottom - top, fill=True, stroke=False)
+
+        can.showPage()
+
+    can.save()
+    output.seek(0)
+    return output
