@@ -1,6 +1,5 @@
 import streamlit as st
 import uuid
-from datetime import datetime
 from openai import OpenAI
 from functions import services
 from PIL import Image
@@ -15,286 +14,174 @@ st.set_page_config(
 )
 
 # ======================================================
-# STILE GLOBALE + LOGO
+# UI / LOGO
 # ======================================================
 logo = Image.open("functions/logo_nuvia.jpeg")
 logo_base64 = services.image_to_base64(logo)
 
 st.markdown(f"""
 <style>
-body, div, span, input, button {{
-    font-family: 'Nunito Sans', sans-serif;
-    background-color: #f5f1ed;
-    color: #3a2607;
-}}
-h1, h2, h3, h4, h5, h6 {{ color: #3a2607; }}
-.stButton>button {{
-    background-color: #25ce6c;
-    color: white;
-    border-radius: 8px;
-    border: none;
-}}
-.required-field {{
-    font-weight: bold;
-    color: #d9534f;
-}}
+body {{background-color:#f5f1ed; color:#3a2607; font-family:Nunito Sans;}}
+.stButton>button {{background-color:#25ce6c; color:white; border-radius:8px;}}
 </style>
-<div style="display:flex; align-items:center; gap:15px; margin-bottom:20px;">
-    <img src="data:image/jpeg;base64,{logo_base64}" width="450">
-    <h1 style="margin:0;"></h1>
-</div>
+<img src="data:image/jpeg;base64,{logo_base64}" width="350">
 """, unsafe_allow_html=True)
 
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# INIZIALIZZA SESSION STATE
+# SESSION STATE
 # ======================================================
-for key in ["uploaded_pdf_file", "uploaded_image_files",
-            "pdf_data", "image_data",
-            "validated_pdf", "validated_image"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
+keys = ["pdf_data","image_data","validated_pdf","validated_image","images"]
+for k in keys:
+    if k not in st.session_state:
+        st.session_state[k] = None
 
 # ======================================================
-# ROUTING QR → PAGINA PUBBLICA
+# PUBLIC VIEW
 # ======================================================
 passport_id = st.query_params.get("passport_id")
+
 if passport_id:
     passport = services.load_passport_from_file(passport_id)
+
     if not passport:
-        st.error("Digital Product Passport not found")
+        st.error("Passport non trovato")
         st.stop()
 
-    st.markdown("""
-        <style>
-        [data-testid="stSidebar"] {display:none;}
-        header {visibility:hidden;}
-        footer {visibility:hidden;}
-        </style>
-    """, unsafe_allow_html=True)
-
     st.title("🇪🇺 Digital Product Passport")
-    st.caption("Regulation (EU) – Ecodesign for Sustainable Products (ESPR)")
 
-    st.markdown(f"""
-    **Product ID:** `{passport['id']}`  
-    **Product type:** {passport['product_type']}  
-    **Created:** {passport['metadata']['created_at']}  
-    **Version:** {passport['metadata']['version']}
-    """)
+    st.write(f"**ID:** {passport['id']}")
+    st.write(f"**Tipo:** {passport['product_type']}")
 
-    # Mostra le sezioni e campi con colore + rating sezione + ESPR
-    for section_name, section in passport["sections"].items():
-        st.subheader(f"{section_name} — Rating sezione: {section.get('section_rating',0.0)*100:.0f}%")
-        for field_name, field in section["fields"].items():
-            required = field.get("required", False)
-            label = f"{field_name} {'(obbligatorio)' if required else '(opzionale)'}"
-            color = field.get("color","")
-            st.write(f"**{label}**: {field['value']} {color}")
-        
-    # 🧩 ESPR Compliance
+    for sec_name, sec in passport["sections"].items():
+        st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
+
+        for fname, f in sec["fields"].items():
+            st.write(f"**{fname}**: {f['value']} {f['color']}")
+            if f.get("explanation"):
+                st.caption(f["explanation"])
+
     services.render_espr_compliance(passport)
 
-    # Mostra immagini multiple
-    if "images" in passport and passport["images"]:
+    st.progress(passport["overall_rating"])
+    st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
+
+    if passport["images"]:
         for img in passport["images"]:
-            st.image(
-                f"data:image/jpeg;base64,{img['file_base64']}",
-                caption=f"{img.get('caption','Immagine')} - {img.get('annotation','')}",
-                use_column_width=True
-            )
+            st.image(f"data:image/jpeg;base64,{img['file_base64']}")
 
-    # Overall reliability
-    st.subheader("📊 Overall Reliability")
-    st.progress(passport.get("overall_rating",0.0))
-    st.metric("Overall Reliability Score", f"{int(passport.get('overall_rating',0.0)*100)}%")
-
-    st.caption("Public read-only Digital Product Passport. Generated via AI extraction and human validation.")
     st.stop()
 
 # ======================================================
-# SELEZIONE TIPO PRODOTTO
+# PRODUCT TYPE
 # ======================================================
-tipo_prodotto = st.selectbox(
-    "Seleziona tipo prodotto",
-    ["mobile","lampada","bicicletta"]
-)
+tipo = st.selectbox("Tipo prodotto", ["mobile","lampada","bicicletta"])
 
-tabs = st.tabs([
-    "📤 Upload & Analisi",
-    "📝 Validazione PDF",
-    "👁️ Validazione Immagine",
-    "🔗 Pubblica DPP"
-])
+# fields dinamici
+fields = [f["name"] for f in services.PRODUCT_FIELDS[tipo]["pdf"]]
+
+tabs = st.tabs(["Upload","Validazione","Pubblica"])
 
 # ======================================================
-# TAB 1 — UPLOAD & GPT
+# TAB 1 — UPLOAD + AI
 # ======================================================
 with tabs[0]:
-    with st.form("upload_form"):
-        pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
-        image_files = st.file_uploader(
-            "Immagini prodotto (puoi caricare più immagini)", 
-            type=["jpg","png","jpeg"], 
-            accept_multiple_files=True
-        )
 
-        submitted = st.form_submit_button("🔍 Analizza")
+    pdf = st.file_uploader("PDF", type=["pdf"])
+    images = st.file_uploader("Immagini", type=["jpg","png"], accept_multiple_files=True)
 
-        if submitted:
-            if not pdf_file or not image_files:
-                st.warning("Carica PDF e almeno un'immagine")
-            else:
-                st.session_state.uploaded_pdf_file = pdf_file
-                st.session_state.uploaded_image_files = image_files
+    if st.button("Analizza"):
 
-                with st.spinner("Analisi in corso ⏳…"):
-                    # PDF
-                    try:
-                        pdf_text = services.extract_text_from_pdf(pdf_file)
-                        st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo_prodotto)
-                    except Exception:
-                        st.warning("GPT PDF fallito, userà dati vuoti")
-                        st.session_state.pdf_data = {c: None for c in services.PRODUCT_FIELDS[tipo_prodotto]["pdf"]}
+        if not pdf or not images:
+            st.warning("Carica PDF e immagini")
+        else:
+            with st.spinner("Analisi..."):
 
-                    # Immagini multiple
-                    st.session_state.image_data = {}
-                    for idx, img_file in enumerate(image_files):
-                        try:
-                            image_data = services.gpt_analyze_image(img_file, client, tipo_prodotto)
-                            st.session_state.image_data.update(image_data)
-                        except Exception:
-                            st.warning(f"GPT Image fallita per immagine {img_file.name}")
-                            st.session_state.image_data.update({c: "non rilevato" for c in services.PRODUCT_FIELDS[tipo_prodotto]["image"]})
+                # PDF (chunked + confidence)
+                text = services.extract_text_from_pdf(pdf)
+                st.session_state.pdf_data = services.gpt_extract_from_pdf(
+                    text, client, tipo, fields
+                )
 
-                st.success("Analisi completata")
-                st.info("I dati sono stati estratti e popolati automaticamente nei form di validazione.")
+                # IMAGE (enhanced)
+                img_data = {}
+                for img in images:
+                    res = services.gpt_analyze_image(img, client, tipo)
+                    img_data.update(res)
+
+                st.session_state.image_data = img_data
+                st.session_state.images = images
+
+            st.success("Analisi completata")
 
 # ======================================================
-# TAB 2 — VALIDAZIONE PDF
+# TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
+
     if st.session_state.pdf_data:
-        with st.form("validate_pdf_form"):
-            validated_pdf = services.render_validation_form(
-                st.session_state.pdf_data,
-                title="✔ Dati certificati (PDF)"
-            )
-            submitted_pdf = st.form_submit_button("Salva validazione PDF")
-            if submitted_pdf:
-                st.session_state.validated_pdf = validated_pdf
-                st.success("Validazione PDF salvata ✅")
+
+        st.subheader("PDF")
+
+        validated_pdf = {}
+        for k,v in st.session_state.pdf_data.items():
+            val = v["value"] if isinstance(v,dict) else v
+            validated_pdf[k] = st.text_input(k, val)
+
+        st.session_state.validated_pdf = validated_pdf
+
+        st.subheader("Immagine")
+
+        validated_img = {}
+        for k,v in (st.session_state.image_data or {}).items():
+            val = v["value"] if isinstance(v,dict) else v
+            validated_img[k] = st.text_input(k, val)
+
+        st.session_state.validated_image = validated_img
+
     else:
-        st.info("Esegui prima l’analisi")
+        st.info("Esegui prima analisi")
 
 # ======================================================
-# TAB 3 — VALIDAZIONE IMMAGINE
+# TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
-    if st.session_state.image_data:
-        with st.form("validate_image_form"):
-            validated_image = services.render_validation_form(
-                st.session_state.image_data,
-                title="👁️ Dati estratti da immagine"
-            )
-            submitted_img = st.form_submit_button("Salva validazione Immagine")
-            if submitted_img:
-                st.session_state.validated_image = validated_image
-                st.success("Validazione immagine salvata ✅")
-        # Mostra tutte le immagini caricate
-        if st.session_state.uploaded_image_files:
-            for idx, img in enumerate(st.session_state.uploaded_image_files):
-                st.image(img, caption=f"Foto prodotto {idx+1}", use_column_width=True)
-    else:
-        st.info("Esegui prima l’analisi")
 
-# ======================================================
-# TAB 4 — PUBBLICAZIONE DPP
-# ======================================================
-with tabs[3]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
 
-        if st.button("🚀 Pubblica Digital Product Passport"):
+        if st.button("Pubblica"):
 
-            product_id = f"{tipo_prodotto.upper()}-{uuid.uuid4().hex[:8]}"
+            pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
 
-            # 1️⃣ Inizializza passport con sezioni e campi
-            passport_data = services.initialize_passport(product_id, tipo_prodotto)
+            passport = services.initialize_passport(pid, tipo, fields)
 
-            # 2️⃣ Merge dati PDF + Image
-            merged_data = {**st.session_state.validated_pdf, **st.session_state.validated_image}
-
-            for section_name, section in passport_data["sections"].items():
-                for field_name, field in section["fields"].items():
-                    if field_name in merged_data:
-                        val = merged_data[field_name]
-                        if not isinstance(val, dict):
-                            val = {
-                                "value": val,
-                                "confidence": 0.5,
-                                "field_type": field.get("field_type", "technical"),
-                                "eu_weight": (2.0 if field.get("required") else 1.0) * 0.5 
-                            }
-                        field.update(val)
-
-                        # ⭐ Forza rating solo per campi obbligatori compilati
-                        if field.get("required") and field.get("value") not in [None,"","null"]:
-                            field["rating"] = 1.0
-                        else:
-                            # per opzionali calcola rating base (confidence * eu_weight)
-                            field["rating"] = services.compute_field_rating(field)
-                        
-                        # colore basato sul rating
-                        field["color"] = services.score_to_color(field["rating"])
-
-            # 3️⃣ Aggiungi tutte le immagini caricate
-            for idx, img_file in enumerate(st.session_state.uploaded_image_files):
-                services.add_product_image(
-                    passport_data,
-                    img_file,
-                    caption=f"Immagine {idx+1}"
-                )
-            
-            # 4️⃣ Calcola rating delle sezioni e rating complessivo (Data Reliability)
-            services.compute_overall_rating(passport_data)
-            
-            # 5️⃣ Calcola ESPR COMPLIANCE normativa
-            passport_data["overall_espr_compliance"] = services.compute_overall_espr_from_sections(passport_data)
-            
-            # 6️⃣ Salva il passport su file
-            services.save_passport_to_file(passport_data)
-            
-            # 7️⃣ Genera QR code + URL pubblico
-            public_url = f"{st.secrets['APP_URL']}?passport_id={product_id}"
-            qr_buf = services.generate_qr_from_url(public_url)
-            
-            # 8️⃣ UI FEEDBACK chiaro e separato
-            st.success("🇪🇺 Digital Product Passport pubblicato ✅")
-            
-            # --- ESPR Compliance ---
-            st.subheader("🧩 ESPR Compliance")
-            overall_espr = passport_data["overall_espr_compliance"]
-            emoji = "✅" if overall_espr == "OK" else "⚠️" if overall_espr == "PARTIAL" else "❌"
-            st.write(f"{emoji} **{overall_espr}**")
-            
-            # --- DATA RELIABILITY ---
-            st.subheader("📊 Data Reliability")
-            st.progress(passport_data["overall_rating"])
-            st.metric(
-                "Overall Data Reliability Score",
-                f"{int(passport_data['overall_rating'] * 100)}%"
+            # merge intelligente
+            services.merge_data(
+                passport,
+                st.session_state.validated_pdf,
+                st.session_state.validated_image
             )
-            st.caption(
-                "Il Data Reliability Score misura la qualità e affidabilità delle informazioni. "
-                "Non influisce sulla conformità ESPR."
-            )
-            
-            # --- LINK PUBBLICO ---
-            st.subheader("🔗 Accesso pubblico")
-            st.image(qr_buf)
-            st.code(public_url)
+
+            # salva immagini
+            for img in st.session_state.images:
+                services.add_product_image(passport, img)
+
+            services.save_passport_to_file(passport)
+
+            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+            qr = services.generate_qr_from_url(url)
+
+            st.success("DPP pubblicato")
+
+            st.subheader("ESPR")
+            st.write(passport["overall_espr"])
+
+            st.subheader("Reliability")
+            st.progress(passport["overall_rating"])
+
+            st.image(qr)
+            st.code(url)
 
     else:
-        st.info("Completa validazione PDF e immagine")
-
+        st.info("Completa validazione")
