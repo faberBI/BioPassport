@@ -210,7 +210,6 @@ Rispondi con JSON valido. Usa null se non determinabile.
         file_id = upload_image_to_openai(image_file, client)
         resp = client.responses.create(
             model="gpt-4o",
-            response_format={"type": "json_object"},
             input=[{
                 "role": "user",
                 "content": [
