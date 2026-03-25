@@ -497,7 +497,7 @@ os.makedirs(PASSPORT_DIR, exist_ok=True)
 
 def save_passport_to_excel_append(passport):
     import pandas as pd
-    from openpyxl import load_workbook
+    import os
 
     df_passport = pd.DataFrame([{
         "id": passport["id"],
@@ -530,37 +530,27 @@ def save_passport_to_excel_append(passport):
         })
     df_images = pd.DataFrame(img_rows)
 
-    # Controlla se il file Excel esiste e se è leggibile
-    if os.path.exists(EXCEL_FILE):
-        try:
-            wb = load_workbook(EXCEL_FILE)
-        except Exception:
-            # File corrotto: creane uno nuovo
-            os.remove(EXCEL_FILE)
-            wb = None
-    else:
-        wb = None
-
-    # Salva o append
-    if wb is None:
+    # CREA FILE SE NON ESISTE
+    if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
             df_fields.to_excel(writer, sheet_name="fields", index=False)
             df_images.to_excel(writer, sheet_name="images", index=False)
+
     else:
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            writer.book = wb
-            writer.sheets = {ws.title: ws for ws in wb.worksheets}
+        # APPEND SICURO
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
 
-            startrow_passport = wb["passport"].max_row
-            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow_passport)
+            # passport
+            startrow = writer.sheets["passport"].max_row
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
 
-            startrow_fields = wb["fields"].max_row
-            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow_fields)
+            # fields
+            startrow = writer.sheets["fields"].max_row
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow)
 
-            startrow_images = wb["images"].max_row
-            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow_images)
-
-            writer.save()
+            # images
+            startrow = writer.sheets["images"].max_row
+            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow)
 
     return EXCEL_FILE
