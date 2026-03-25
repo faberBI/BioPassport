@@ -496,7 +496,6 @@ EXCEL_FILE = "database/passports.xlsx"
 os.makedirs(os.path.dirname(EXCEL_FILE), exist_ok=True)
 
 def save_passport_to_excel_append(passport):
-    # Passport sheet
     df_passport = pd.DataFrame([{
         "id": passport["id"],
         "product_type": passport["product_type"],
@@ -504,7 +503,6 @@ def save_passport_to_excel_append(passport):
         "overall_rating": passport["overall_rating"],
         "overall_espr": passport["overall_espr"]
     }])
-
     # Fields sheet
     rows = []
     for section_name, section in passport["sections"].items():
@@ -530,37 +528,28 @@ def save_passport_to_excel_append(passport):
         })
     df_images = pd.DataFrame(img_rows)
 
-    # Scrivi in Excel
-    if os.path.exists(EXCEL_FILE):
-        wb = openpyxl.load_workbook(EXCEL_FILE)
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            writer.book = wb
-            writer.sheets = {ws.title: ws for ws in wb.worksheets}
-
-            # Passport
-            if "passport" not in writer.sheets:
-                df_passport.to_excel(writer, sheet_name="passport", index=False)
-            else:
-                startrow = writer.sheets["passport"].max_row
-                df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
-
-            # Fields
-            if "fields" not in writer.sheets:
-                df_fields.to_excel(writer, sheet_name="fields", index=False)
-            else:
-                startrow = writer.sheets["fields"].max_row
-                df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow)
-
-            # Images
-            if "images" not in writer.sheets:
-                df_images.to_excel(writer, sheet_name="images", index=False)
-            else:
-                startrow = writer.sheets["images"].max_row
-                df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow)
-    else:
+    # Se il file non esiste, crealo da zero
+    if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
             df_fields.to_excel(writer, sheet_name="fields", index=False)
             df_images.to_excel(writer, sheet_name="images", index=False)
+    else:
+        # Apri il workbook esistente
+        wb = load_workbook(EXCEL_FILE)
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            writer.book = wb
+            writer.sheets = {ws.title: ws for ws in wb.worksheets}
+
+            startrow_passport = wb["passport"].max_row
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow_passport)
+
+            startrow_fields = wb["fields"].max_row
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow_fields)
+
+            startrow_images = wb["images"].max_row
+            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow_images)
+
+            writer.save()
 
     return EXCEL_FILE
