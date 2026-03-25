@@ -496,6 +496,9 @@ EXCEL_FILE = os.path.join(PASSPORT_DIR, "archivio_passport.xlsx")
 os.makedirs(PASSPORT_DIR, exist_ok=True) 
 
 def save_passport_to_excel_append(passport):
+    import pandas as pd
+    from openpyxl import load_workbook
+
     df_passport = pd.DataFrame([{
         "id": passport["id"],
         "product_type": passport["product_type"],
@@ -503,7 +506,7 @@ def save_passport_to_excel_append(passport):
         "overall_rating": passport["overall_rating"],
         "overall_espr": passport["overall_espr"]
     }])
-    # Fields sheet
+
     rows = []
     for section_name, section in passport["sections"].items():
         for field_name, field in section["fields"].items():
@@ -518,7 +521,6 @@ def save_passport_to_excel_append(passport):
             })
     df_fields = pd.DataFrame(rows)
 
-    # Images sheet
     img_rows = []
     for img in passport.get("images", []):
         img_rows.append({
@@ -528,15 +530,24 @@ def save_passport_to_excel_append(passport):
         })
     df_images = pd.DataFrame(img_rows)
 
-    # Se il file non esiste, crealo da zero
-    if not os.path.exists(EXCEL_FILE):
+    # Controlla se il file Excel esiste e se è leggibile
+    if os.path.exists(EXCEL_FILE):
+        try:
+            wb = load_workbook(EXCEL_FILE)
+        except Exception:
+            # File corrotto: creane uno nuovo
+            os.remove(EXCEL_FILE)
+            wb = None
+    else:
+        wb = None
+
+    # Salva o append
+    if wb is None:
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
             df_fields.to_excel(writer, sheet_name="fields", index=False)
             df_images.to_excel(writer, sheet_name="images", index=False)
     else:
-        # Apri il workbook esistente
-        wb = load_workbook(EXCEL_FILE)
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             writer.book = wb
             writer.sheets = {ws.title: ws for ws in wb.worksheets}
