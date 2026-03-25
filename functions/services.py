@@ -15,6 +15,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.colors import yellow
 import fitz 
+import pandas as pd
 
 # ======================================================
 # CONFIG
@@ -443,3 +444,61 @@ def highlight_pdf_fields(pdf_file, extracted_data):
     out.seek(0)
     doc.close()
     return out
+
+
+
+# ======================================================
+# CREAZIONE ARCHIVO SU EXCEL
+# ======================================================
+
+EXCEL_FILE = "database/passports.xlsx"
+os.makedirs(os.path.dirname(EXCEL_FILE), exist_ok=True)
+
+def save_passport_to_excel_append(passport):
+    # Passport sheet
+    df_passport = pd.DataFrame([{
+        "id": passport["id"],
+        "product_type": passport["product_type"],
+        "created_at": passport["metadata"]["created_at"],
+        "overall_rating": passport["overall_rating"],
+        "overall_espr": passport["overall_espr"]
+    }])
+
+    # Fields sheet
+    rows = []
+    for section_name, section in passport["sections"].items():
+        for field_name, field in section["fields"].items():
+            rows.append({
+                "passport_id": passport["id"],
+                "section": section_name,
+                "field_name": field_name,
+                "value": field.get("value"),
+                "confidence": field.get("confidence"),
+                "rating": field.get("rating"),
+                "explanation": field.get("explanation")
+            })
+    df_fields = pd.DataFrame(rows)
+
+    # Images sheet
+    img_rows = []
+    for img in passport.get("images", []):
+        img_rows.append({
+            "passport_id": passport["id"],
+            "file_base64": img.get("file_base64"),
+            "caption": img.get("caption")
+        })
+    df_images = pd.DataFrame(img_rows)
+
+    # Scrivi in append
+    if os.path.exists(EXCEL_FILE):
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
+            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
+    else:
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            df_fields.to_excel(writer, sheet_name="fields", index=False)
+            df_images.to_excel(writer, sheet_name="images", index=False)
+
+    return EXCEL_FILE
