@@ -347,18 +347,54 @@ def merge_data(passport, pdf_data, image_data):
     compute_overall(passport)
 
 def compute_overall(passport):
-    section_scores = []
+    """
+    Calcola l'overall ESPR e Reliability del passport
+    sulla base dei campi validati.
+    Aggiorna passport["overall_espr"] e passport["overall_rating"].
+    """
+    total_conf = 0
+    total_fields = 0
+
+    # Cicla tutte le sezioni e campi
+    for section_name, section in passport["sections"].items():
+        section_conf_sum = 0
+        field_count = 0
+        for fname, field in section["fields"].items():
+            conf = field.get("confidence", 0)
+            # Se confidence non è presente, default a 0
+            try:
+                conf = float(conf)
+            except:
+                conf = 0
+            section_conf_sum += conf
+            field_count += 1
+
+        # Aggiorna rating se ci sono campi
+        if field_count > 0:
+            section["section_rating"] = section_conf_sum / field_count
+        else:
+            section["section_rating"] = 0
+
+        total_conf += section_conf_sum
+        total_fields += field_count
+
+    # Overall reliability
+    passport["overall_rating"] = (total_conf / total_fields) if total_fields > 0 else 0
+
+    # Calcolo ESPR: media dei valori dei campi qualitativi
+    # Se vuoi usare un criterio più avanzato, puoi mappare i valori testuali a punteggi numerici
+    espr_sum = 0
+    espr_count = 0
     for section in passport["sections"].values():
-        ratings = [f["rating"] for f in section["fields"].values()]
-        section["section_rating"] = round(sum(ratings)/len(ratings), 2) if ratings else 0
-        section_scores.append(section["section_rating"])
-    passport["overall_rating"] = round(sum(section_scores)/len(section_scores), 2)
-    if passport["overall_rating"] >= 0.7:
-        passport["overall_espr"] = "OK"
-    elif passport["overall_rating"] >= 0.4:
-        passport["overall_espr"] = "PARTIAL"
-    else:
-        passport["overall_espr"] = "MISSING"
+        for field in section["fields"].values():
+            val = field.get("value")
+            # esempio semplificato: se il campo ha valore 'ok' = 1, altro = 0
+            if val is not None:
+                espr_sum += 1 if str(val).lower() not in ["non rilevato", "missing", ""] else 0
+                espr_count += 1
+    passport["overall_espr"] = (espr_sum / espr_count) if espr_count > 0 else 0
+
+    return passport
 
 # ======================================================
 # STORAGE FILE / ACCESS
