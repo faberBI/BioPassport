@@ -1,11 +1,11 @@
 import streamlit as st
 import uuid
-from openai import OpenAI
-from functions import services
-from PIL import Image
 import os
-import pandas as pd
 import base64
+import pandas as pd
+from openai import OpenAI
+from PIL import Image
+from functions import services
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -59,7 +59,7 @@ if passport_id:
     st.title("🇪🇺 Digital Product Passport")
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
-    
+
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
@@ -68,8 +68,8 @@ if passport_id:
                 st.caption(f["explanation"])
 
     services.render_espr_compliance(passport)
-    st.progress(passport.get("overall_rating",0))
-    st.metric("Reliability", f"{int(passport.get('overall_rating',0)*100)}%")
+    st.progress(passport.get("overall_rating", 0))
+    st.metric("Reliability", f"{int(passport.get('overall_rating', 0)*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -117,21 +117,37 @@ with tabs[0]:
     # Evidenzia PDF e visualizza
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
-            highlighted_pdf_path = services.highlight_pdf_fields(
+            highlighted_pdf_bytes = services.highlight_pdf_fields(
                 pdf_file,
                 st.session_state.pdf_data
             )
-            if highlighted_pdf_path and os.path.exists(highlighted_pdf_path):
+
+            if highlighted_pdf_bytes:
                 st.success("PDF evidenziato pronto!")
+
+                # Salva temporaneamente
+                temp_path = f"temp_highlighted_{uuid.uuid4().hex}.pdf"
+                with open(temp_path, "wb") as f:
+                    f.write(highlighted_pdf_bytes)
+
                 # Download
-                with open(highlighted_pdf_path, "rb") as f:
+                with open(temp_path, "rb") as f:
                     pdf_bytes = f.read()
                     st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf")
-                    # Visualizza PDF inline
-                    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-                    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000" type="application/pdf"></iframe>', unsafe_allow_html=True)
+
+                # Visualizza inline
+                pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+                st.markdown(
+                    f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="700" height="1000"></iframe>',
+                    unsafe_allow_html=True
+                )
+
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
             else:
-                st.error("Errore: PDF evidenziato non trovato")
+                st.error("Errore: PDF evidenziato non generato")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -175,7 +191,7 @@ with tabs[2]:
             # Merge dati PDF + immagini
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
 
-            # Calcolo ESPR e Reliability aggiornato
+            # Calcola ESPR e Reliability sui dati validati
             services.compute_overall(passport)
 
             # Salva immagini
@@ -186,8 +202,8 @@ with tabs[2]:
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            # Genera QR pubblico corretto
-            url = f"{st.secrets['APP_URL']}/?passport_id={pid}"
+            # Genera QR pubblico
+            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
 
             st.success("DPP pubblicato ✅")
