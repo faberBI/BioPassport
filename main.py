@@ -3,6 +3,8 @@ import uuid
 from openai import OpenAI
 from functions import services
 from PIL import Image
+import os
+import pandas as pd
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -80,7 +82,7 @@ if passport_id:
 tipo = st.selectbox("Tipo prodotto", ["mobile","lampada","bicicletta"])
 fields = [f["name"] for f in services.PRODUCT_FIELDS[tipo]["pdf"]]
 
-tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica"])
+tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "📚 Archivio"])
 
 # ======================================================
 # TAB 1 — UPLOAD + AI
@@ -167,9 +169,9 @@ with tabs[2]:
             for img in st.session_state.images:
                 services.add_product_image(passport, img)
 
-            # Salva su file e DB Access
+            # Salva su file e Excel (append)
             services.save_passport_to_file(passport)
-            services.save_passport_to_access(passport)
+            services.save_passport_to_excel_append(passport)
 
             # Genera QR pubblico
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
@@ -185,3 +187,32 @@ with tabs[2]:
             st.code(url)
     else:
         st.info("Completa prima la validazione PDF e immagini")
+
+# ======================================================
+# TAB 4 — ARCHIVIO
+# ======================================================
+with tabs[3]:
+    st.header("Archivio Passport")
+    if os.path.exists(services.EXCEL_FILE):
+        xl = pd.ExcelFile(services.EXCEL_FILE)
+
+        # Lista ID passport
+        df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
+        passport_ids = df_passport["id"].tolist()
+        selected_id = st.selectbox("Seleziona Passport da visualizzare", passport_ids)
+
+        if selected_id:
+            st.subheader("Dati Generali")
+            st.dataframe(df_passport[df_passport["id"]==selected_id])
+
+            st.subheader("Fields")
+            df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
+            st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
+
+            st.subheader("Immagini")
+            df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images")
+            images = df_images[df_images["passport_id"]==selected_id]
+            for idx, row in images.iterrows():
+                st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
+    else:
+        st.info("Nessun dato archivio disponibile")
