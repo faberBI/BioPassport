@@ -68,7 +68,7 @@ if passport_id:
     st.progress(passport["overall_rating"])
     st.metric("Reliability", f"{int(passport['overall_rating']*100)}%")
 
-    if passport["images"]:
+    if passport.get("images"):
         for img in passport["images"]:
             st.image(f"data:image/jpeg;base64,{img['file_base64']}")
 
@@ -125,7 +125,7 @@ with tabs[0]:
 # TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
-    if st.session_state.pdf_data:
+    if st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione dati PDF")
         validated_pdf = {}
         for k,v in st.session_state.pdf_data.items():
@@ -137,7 +137,7 @@ with tabs[1]:
 
         st.subheader("Validazione dati Immagini")
         validated_img = {}
-        for k,v in (st.session_state.image_data or {}).items():
+        for k,v in st.session_state.image_data.items():
             val = v["value"]
             explanation = v.get("explanation","")
             conf = v.get("confidence",0)
