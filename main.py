@@ -186,9 +186,9 @@ with tabs[1]:
     else:
         st.info("Esegui prima l’analisi PDF e immagini")
 
-# ======================================================
+# =======================================
 # TAB 3 — PUBBLICA
-# ======================================================
+# =======================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
         if st.button("Pubblica Digital Product Passport"):
@@ -196,7 +196,7 @@ with tabs[2]:
             passport = services.initialize_passport(pid, tipo, fields)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image, st.session_state.validated_cert)
 
-            # Immagini
+            # Aggiungi immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
 
@@ -204,10 +204,28 @@ with tabs[2]:
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
+            st.success("DPP pubblicato ✅")
+
+            # ========================
+            # VISUALIZZAZIONE PDF
+            # ========================
+            st.subheader("Anteprima PDF")
+            pdf_bytes_io = BytesIO(st.session_state.uploaded_pdf_bytes)
+            pdf_display_base64 = base64.b64encode(pdf_bytes_io.read()).decode("utf-8")
+            st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_display_base64}" width="700" height="800" type="application/pdf"></iframe>', unsafe_allow_html=True)
+
+            # ========================
+            # METRICHE
+            # ========================
+            st.subheader("Metriche")
+            overall = passport.get("overall_rating", 0)
+            sustainability = passport.get("sustainability_score", 0)
+            st.metric("Affidabilità", f"{int(overall*100)}%")
+            st.metric("Sostenibilità", f"{int(sustainability*100)}%")
+
             # QR
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
-            st.success("DPP pubblicato ✅")
             st.image(qr)
             st.download_button("Scarica QR code", data=qr.getvalue(), file_name=f"{pid}_qr.png", mime="image/png")
             st.code(url)
