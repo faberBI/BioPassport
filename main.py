@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import base64
 from io import BytesIO
+import streamlit.components.v1 as components
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -123,16 +124,21 @@ with tabs[0]:
     # Evidenzia PDF e visualizza inline
     if st.session_state.pdf_data and pdf_file:
         if st.button("Evidenzia PDF"):
+            pdf_file.seek(0)
             highlighted_pdf_io = services.highlight_pdf_fields(
                 pdf_file,
                 st.session_state.pdf_data
             )
-            st.success("PDF evidenziato pronto!")
-
-            # Mostra inline
+            st.success("PDF evidenziato pronto!")            
             pdf_bytes = highlighted_pdf_io.getvalue()
-            b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-            st.markdown(f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="700" height="500" type="application/pdf"></iframe>', unsafe_allow_html=True)
+            components.html(f"""<iframe 
+            src="data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}" 
+            width="100%" 
+            height="600px"
+            type="application/pdf">
+            </iframe>
+            """,
+            height=600)
 
             # Download
             st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf", mime="application/pdf")
