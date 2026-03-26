@@ -271,27 +271,47 @@ with tabs[1]:
         st.info("Esegui prima l’analisi PDF e immagini")
 
 # =======================================
-# TAB 3 — PUBBLICA
+# TAB 3 — PUBBLICA (aggiornato)
 # =======================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
         if st.button("Pubblica Digital Product Passport"):
+            # ========================
+            # GENERA ID UNIVOCO
+            # ========================
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
-            passport = services.initialize_passport(pid, tipo, fields)
-            services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image, st.session_state.validated_cert)
 
-            # Aggiungi immagini
+            # ========================
+            # INIZIALIZZA PASSPORT
+            # ========================
+            passport = services.initialize_passport(pid, tipo, fields)
+
+            # ========================
+            # MERGE DATI VALIDATI
+            # ========================
+            services.merge_data(
+                passport,
+                st.session_state.validated_pdf,
+                st.session_state.validated_image,
+                st.session_state.validated_cert
+            )
+
+            # ========================
+            # AGGIUNGI IMMAGINI PRODOTTO
+            # ========================
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
 
-            # Salvataggio
+            # ========================
+            # SALVATAGGI
+            # ========================
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
             st.success("DPP pubblicato ✅")
 
             # ========================
-            # METRICHE
+            # METRICHE PASSPORT
             # ========================
             st.subheader("Metriche")
             overall = passport.get("overall_rating", 0)
@@ -299,7 +319,9 @@ with tabs[2]:
             st.metric("Affidabilità", f"{int(overall*100)}%")
             st.metric("Sostenibilità", f"{int(sustainability*100)}%")
 
-            # QR
+            # ========================
+            # GENERA QR CODE PUBBLICO
+            # ========================
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
             st.image(qr)
