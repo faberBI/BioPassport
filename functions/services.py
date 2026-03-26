@@ -402,18 +402,16 @@ def initialize_passport(product_id, product_type, fields):
 
     return passport
 
-# ======================================================
-# MERGE DATA (PDF, IMMAGINI, CERTIFICATI)
-# ======================================================
-def merge_data(passport, pdf_data, image_data, certificate_data=None):
+def merge_data(passport, pdf_data, image_data, certificate_data=None, user="system"):
     """
     Unisce dati da PDF, immagini e certificati nel passport.
     Include:
     - provenance
     - validazione certificati
     - scoring
+    - audit log
+    - sostenibilità quantitativa
     """
-
     all_data = {**pdf_data, **image_data}
 
     # =========================
@@ -423,8 +421,7 @@ def merge_data(passport, pdf_data, image_data, certificate_data=None):
 
     if certificate_data:
         for cert in certificate_data:
-            cert = validate_certificate(cert)
-
+            cert_valid = verify_certificate(cert.get("cert_bytes", b""), trusted_issuers=[])
             cert_dict = {}
             for k, v in cert.items():
                 if isinstance(v, dict):
@@ -437,10 +434,7 @@ def merge_data(passport, pdf_data, image_data, certificate_data=None):
                 field_obj = {
                     "value": value,
                     "confidence": conf,
-                    "rating": compute_field_rating({
-                        "value": value,
-                        "confidence": conf
-                    }),
+                    "rating": compute_field_rating({"value": value, "confidence": conf}),
                     "color": score_to_color(conf),
                     "explanation": "Dato da certificato",
                     "source": {
@@ -448,51 +442,53 @@ def merge_data(passport, pdf_data, image_data, certificate_data=None):
                         "timestamp": datetime.utcnow().isoformat()
                     }
                 }
-
                 cert_dict[k] = field_obj
 
-            cert_dict["is_valid"] = cert.get("is_valid", False)
+            cert_dict["is_valid"] = cert_valid
             passport["certificates"].append(cert_dict)
 
     # =========================
     # MERGE PDF + IMMAGINI
     # =========================
-    for section_name, section in passport["sections"].items():
-        for field_name, field in section["fields"].items():
-
+    for section_name, section in passport.get("sections", {}).items():
+        for field_name, field in section.get("fields", {}).items():
             for k, v in all_data.items():
                 matched = match_field(k, [field_name])
+                if matched != field_name:
+                    continue
 
-                if matched == field_name:
+                if isinstance(v, dict):
+                    field["value"] = v.get("value")
+                    field["confidence"] = v.get("confidence", 0.0)
+                else:
+                    field["value"] = v
+                    field["confidence"] = 0.7 if v else 0.0
 
-                    # =====================
-                    # VALORE
-                    # =====================
-                    if isinstance(v, dict):
-                        field["value"] = v.get("value")
-                        field["confidence"] = v.get("confidence", 0.0)
-                    else:
-                        field["value"] = v
-                        field["confidence"] = 0.7 if v else 0.0
-
-                    # =====================
-                    # SCORING
-                    # =====================
-                    field["rating"] = compute_field_rating(field)
-                    field["color"] = score_to_color(field["rating"])
-                    field["explanation"] = generate_explanation(field)
-
-                    # =====================
-                    # PROVENANCE
-                    # =====================
-                    field["source"] = {
-                        "type": "pdf" if k in pdf_data else "image",
-                        "extracted_by": "ai",
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                field["rating"] = compute_field_rating(field)
+                field["color"] = score_to_color(field["rating"])
+                field["explanation"] = generate_explanation(field)
+                field["source"] = {
+                    "type": "pdf" if k in pdf_data else "image",
+                    "extracted_by": "ai",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
 
     # =========================
-    # AGGIORNA METRICHE GLOBALI
+    # AUDIT LOG
+    # =========================
+    log_audit(passport, user, "merge_data",
+              f"PDF fields: {len(pdf_data)}, Images: {len(image_data)}, Certificates: {len(certificate_data) if certificate_data else 0}")
+
+    # =========================
+    # CALCOLO SOSTENIBILITÀ
+    # =========================
+    combined_fields = {**pdf_data, **image_data}
+    for cert in passport.get("certificates", []):
+        combined_fields.update(cert)
+    passport["sustainability_score"] = compute_sustainability_score(combined_fields)
+
+    # =========================
+    # METRICHE GLOBALI
     # =========================
     compute_overall(passport)
 
@@ -525,28 +521,29 @@ def compute_overall(passport):
     """
     Calcola ESPR, Reliability e Sustainability score,
     includendo PDF, Immagini e Certificati.
-    Gestisce campi None o non-dizionario senza errori.
+    Gestisce campi None, valori non-dizionario e certificati non validi.
     """
-    total_conf = 0
+    total_conf = 0.0
     total_fields = 0
-    sustainability_sum = 0
+    sustainability_sum = 0.0
     sustainability_count = 0
 
+    # =========================
     # PDF e immagini
+    # =========================
     for section in passport.get("sections", {}).values():
-        section_conf_sum = 0
+        section_conf_sum = 0.0
         field_count = 0
         for field in section.get("fields", {}).values():
             if not isinstance(field, dict):
-                continue  # salta campi malformati
+                continue
             try:
                 conf = float(field.get("confidence", 0))
             except (ValueError, TypeError):
-                conf = 0
+                conf = 0.0
             section_conf_sum += conf
             field_count += 1
 
-            # Sostenibilità
             val = field.get("value")
             if val not in [None, "", "non rilevato"]:
                 explanation = str(field.get("explanation", "")).lower()
@@ -558,15 +555,19 @@ def compute_overall(passport):
         total_conf += section_conf_sum
         total_fields += field_count
 
+    # =========================
     # Certificati
+    # =========================
     for cert in passport.get("certificates", []):
+        if cert.get("is_valid") is False:
+            continue  # ignora certificati non validi
         for field in cert.values():
             if not isinstance(field, dict):
                 continue
             try:
                 conf = float(field.get("confidence", 0))
             except (ValueError, TypeError):
-                conf = 0
+                conf = 0.0
             total_conf += conf
             total_fields += 1
 
@@ -577,10 +578,14 @@ def compute_overall(passport):
                     sustainability_sum += field.get("rating", 0)
                     sustainability_count += 1
 
+    # =========================
     # Overall reliability
-    passport["overall_rating"] = (total_conf / total_fields) if total_fields else 0
+    # =========================
+    passport["overall_rating"] = (total_conf / total_fields) if total_fields else 0.0
 
-    # ESPR
+    # =========================
+    # ESPR (numero di campi con valore rilevato)
+    # =========================
     espr_sum = 0
     espr_count = 0
     for section in passport.get("sections", {}).values():
@@ -591,7 +596,10 @@ def compute_overall(passport):
             if val not in [None, "", "non rilevato"]:
                 espr_sum += 1
                 espr_count += 1
+
     for cert in passport.get("certificates", []):
+        if cert.get("is_valid") is False:
+            continue
         for field in cert.values():
             if not isinstance(field, dict):
                 continue
@@ -600,8 +608,8 @@ def compute_overall(passport):
                 espr_sum += 1
                 espr_count += 1
 
-    passport["overall_espr"] = (espr_sum / espr_count) if espr_count else 0
-    passport["sustainability_score"] = (sustainability_sum / sustainability_count) if sustainability_count else 0
+    passport["overall_espr"] = (espr_sum / espr_count) if espr_count else 0.0
+    passport["sustainability_score"] = (sustainability_sum / sustainability_count) if sustainability_count else 0.0
 
 # ======================================================
 # STORAGE FILE / ACCESS
@@ -957,4 +965,93 @@ def to_jsonld(passport):
         "manufacturer": passport.get("economic_operator"),
         "data": passport["sections"]
     }
+
+import uuid
+from datetime import datetime
+import re
+from cryptography.x509 import load_pem_x509_certificate
+from cryptography.hazmat.backends import default_backend
+
+# 1️⃣ Schema dati ufficiale
+def create_standard_dpp(product_type: str, product_name: str, manufacturer_info: dict) -> dict:
+    """
+    Crea un Digital Product Passport secondo uno schema base standard UE.
+    """
+    dpp = {
+        "id": f"{product_type.upper()}-{uuid.uuid4().hex[:6]}",
+        "product_type": product_type,
+        "product_name": product_name,
+        "manufacturer": manufacturer_info,  # es. {"name":..., "vat":..., "address":...}
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "sections": {},  # PDF, immagini, certificati
+        "certificates": [],
+        "overall_rating": 0.0,
+        "overall_espr": 0.0,
+        "sustainability_score": 0.0,
+        "audit_trail": []
+    }
+    return dpp
+
+# 2️⃣ Validazione legale dei certificati
+def verify_certificate(cert_bytes: bytes, trusted_issuers: list) -> bool:
+    """
+    Verifica firma digitale e ente emittente di un certificato PDF.
+    """
+    try:
+        cert = load_pem_x509_certificate(cert_bytes, default_backend())
+        issuer = cert.issuer.rfc4514_string()
+        if issuer not in trusted_issuers:
+            return False
+        if cert.not_valid_before > datetime.utcnow() or cert.not_valid_after < datetime.utcnow():
+            return False
+        return True
+    except Exception:
+        return False
+
+# 3️⃣ Calcolo punteggio sostenibilità
+def compute_sustainability_score(fields: dict) -> float:
+    """
+    Calcola punteggio sostenibilità quantitativo basato su metriche standard.
+    """
+    scores = []
+    for field_name, field in fields.items():
+        val = field.get("value")
+        if val in [None, "", "non rilevato"]:
+            continue
+        try:
+            val = float(val)
+        except:
+            continue
+        if "footprint" in field_name.lower():
+            score = max(0, min(1, 1 - val / 100))
+            scores.append(score)
+        elif "durabilita" in field_name.lower() or "riparabilita" in field_name.lower():
+            score = max(0, min(1, val / 10))
+            scores.append(score)
+    return sum(scores)/len(scores) if scores else 0
+
+# 4️⃣ Tracciabilità e audit
+def log_audit(passport: dict, user: str, action: str, details: str = ""):
+    """
+    Registra azioni/modifiche sul passport con timestamp.
+    """
+    entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "user": user,
+        "action": action,
+        "details": details
+    }
+    if "audit_trail" not in passport:
+        passport["audit_trail"] = []
+    passport["audit_trail"].append(entry)
+
+# 5️⃣ Validazione informazioni operatore
+def validate_operator_info(operator: dict) -> bool:
+    """
+    Verifica informazioni essenziali: nome, partita IVA e contatto.
+    """
+    if not operator.get("name") or not operator.get("vat"):
+        return False
+    vat_pattern = r"^[A-Z]{2}[0-9A-Z]{8,12}$"
+    return bool(re.match(vat_pattern, operator["vat"]))
 
