@@ -256,16 +256,6 @@ def upload_image_to_openai(image_file, client):
     uploaded = client.files.create(file=resized, purpose="vision")
     return uploaded.id
 
-def compute_overall(passport):
-    overall = 0
-    count = 0
-    for section in passport.get("sections", {}).values():
-        for field in section.get("fields", {}).values():
-            if isinstance(field, dict):
-                conf = float(field.get("confidence", 0))
-                overall += conf
-                count += 1
-    passport["overall_rating"] = overall / count if count > 0 else 0
     
 # ======================================================
 # FIELD RATING / EXPLAINABILITY
