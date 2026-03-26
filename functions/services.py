@@ -525,6 +525,7 @@ def compute_overall(passport):
     """
     Calcola ESPR, Reliability e Sustainability score,
     includendo PDF, Immagini e Certificati.
+    Gestisce campi None o non-dizionario senza errori.
     """
     total_conf = 0
     total_fields = 0
@@ -532,18 +533,24 @@ def compute_overall(passport):
     sustainability_count = 0
 
     # PDF e immagini
-    for section in passport["sections"].values():
+    for section in passport.get("sections", {}).values():
         section_conf_sum = 0
         field_count = 0
-        for field in section["fields"].values():
-            conf = float(field.get("confidence", 0))
+        for field in section.get("fields", {}).values():
+            if not isinstance(field, dict):
+                continue  # salta campi malformati
+            try:
+                conf = float(field.get("confidence", 0))
+            except (ValueError, TypeError):
+                conf = 0
             section_conf_sum += conf
             field_count += 1
 
-            # Se campo rilevante per sostenibilità
-            if field.get("value") not in [None, "", "non rilevato"]:
-                if "sostenibilita" in field.get("explanation", "").lower() or \
-                   "riciclato" in str(field.get("value")).lower():
+            # Sostenibilità
+            val = field.get("value")
+            if val not in [None, "", "non rilevato"]:
+                explanation = str(field.get("explanation", "")).lower()
+                if "sostenibilita" in explanation or "riciclato" in str(val).lower():
                     sustainability_sum += field.get("rating", 0)
                     sustainability_count += 1
 
@@ -554,30 +561,40 @@ def compute_overall(passport):
     # Certificati
     for cert in passport.get("certificates", []):
         for field in cert.values():
-            conf = float(field.get("confidence", 0))
+            if not isinstance(field, dict):
+                continue
+            try:
+                conf = float(field.get("confidence", 0))
+            except (ValueError, TypeError):
+                conf = 0
             total_conf += conf
             total_fields += 1
 
-            if field.get("value") not in [None, "", "non rilevato"]:
-                if "sostenibilita" in field.get("explanation", "").lower() or \
-                   "riciclato" in str(field.get("value")).lower():
+            val = field.get("value")
+            if val not in [None, "", "non rilevato"]:
+                explanation = str(field.get("explanation", "")).lower()
+                if "sostenibilita" in explanation or "riciclato" in str(val).lower():
                     sustainability_sum += field.get("rating", 0)
                     sustainability_count += 1
 
     # Overall reliability
     passport["overall_rating"] = (total_conf / total_fields) if total_fields else 0
 
-    # ESPR (campo qualitativo)
+    # ESPR
     espr_sum = 0
     espr_count = 0
-    for section in passport["sections"].values():
-        for field in section["fields"].values():
+    for section in passport.get("sections", {}).values():
+        for field in section.get("fields", {}).values():
+            if not isinstance(field, dict):
+                continue
             val = field.get("value")
             if val not in [None, "", "non rilevato"]:
                 espr_sum += 1
                 espr_count += 1
     for cert in passport.get("certificates", []):
         for field in cert.values():
+            if not isinstance(field, dict):
+                continue
             val = field.get("value")
             if val not in [None, "", "non rilevato"]:
                 espr_sum += 1
