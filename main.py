@@ -61,12 +61,11 @@ if passport_id:
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
 
-    # Sezioni tecniche e visuali
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
             conf = f.get("confidence", 0)
-            st.write(f"**{fname}**: {f['value']} {f['color']} (conf: {conf})")
+            st.write(f"**{fname}**: {f.get('value','')} {f.get('color','')} (conf: {conf})")
             if conf < 0.5:
                 st.caption("Bassa confidenza")
             if f.get("explanation"):
@@ -76,11 +75,11 @@ if passport_id:
     if "certificates" in passport and passport["certificates"]:
         st.subheader("Certificati")
         for cert in passport["certificates"]:
-            st.write(f"**Nome:** {cert.get('nome_certificato', {}).get('value')}")
-            st.write(f"**Ente:** {cert.get('ente_emittente', {}).get('value')}")
-            st.write(f"**Numero:** {cert.get('numero_certificato', {}).get('value')}")
-            st.write(f"**Emissione:** {cert.get('data_emissione', {}).get('value')}")
-            st.write(f"**Scadenza:** {cert.get('data_scadenza', {}).get('value')}")
+            st.write(f"**Nome:** {cert.get('nome_certificato', {}).get('value','')}")
+            st.write(f"**Ente:** {cert.get('ente_emittente', {}).get('value','')}")
+            st.write(f"**Numero:** {cert.get('numero_certificato', {}).get('value','')}")
+            st.write(f"**Emissione:** {cert.get('data_emissione', {}).get('value','')}")
+            st.write(f"**Scadenza:** {cert.get('data_scadenza', {}).get('value','')}")
             st.write("---")
 
     services.render_espr_compliance(passport)
@@ -121,11 +120,11 @@ with tabs[0]:
             st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # PDF prodotto
+                # PDF
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini prodotto
+                # Immagini
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
@@ -139,8 +138,7 @@ with tabs[0]:
                         res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
                         cert_data_list.append(res)
                     except Exception as e:
-                        st.warning(f"Errore estrazione certificato: {e}")
-                        continue
+                        st.error(f"Errore nell'analisi del certificato: {e}")
                 st.session_state.cert_data = cert_data_list
 
             st.success("Analisi completata ✅")
@@ -152,7 +150,7 @@ with tabs[1]:
     if st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione dati PDF")
         validated_pdf = {
-            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v["value"], help=v.get("explanation","")), 
+            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")), 
                 "confidence": v.get("confidence",0)}
             for k,v in st.session_state.pdf_data.items()
         }
@@ -160,7 +158,7 @@ with tabs[1]:
 
         st.subheader("Validazione dati Immagini")
         validated_img = {
-            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v["value"], help=v.get("explanation","")),
+            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")),
                 "confidence": v.get("confidence",0)}
             for k,v in st.session_state.image_data.items()
         }
@@ -174,9 +172,11 @@ with tabs[1]:
                 validated_cert = {}
                 st.markdown(f"**Certificato {i+1}**")
                 for k, v in cert.items():
+                    val = v.get("value", "") if isinstance(v, dict) else str(v)
+                    conf = v.get("confidence", 0) if isinstance(v, dict) else 0
                     validated_cert[k] = {
-                        "value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v["value"], key=f"cert_{i}_{k}"),
-                        "confidence": v.get("confidence",0)
+                        "value": st.text_input(f"{k} (conf: {conf})", val, key=f"cert_{i}_{k}"),
+                        "confidence": conf
                     }
                 validated_cert_list.append(validated_cert)
             st.session_state.validated_cert = validated_cert_list
@@ -195,9 +195,6 @@ with tabs[2]:
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image, st.session_state.validated_cert)
-
-            # Calcolo punteggio sostenibilità
-            passport["sustainability_score"] = services.compute_sustainability_score(passport)
 
             # Immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
