@@ -128,10 +128,8 @@ if st.session_state.pdf_data and pdf_file:
         import streamlit.components.v1 as components
         import base64
 
-        # reset file pointer
         pdf_file.seek(0)
 
-        # genera PDF evidenziato UNA SOLA VOLTA
         highlighted_pdf_io = services.highlight_pdf_fields(
             pdf_file,
             st.session_state.pdf_data
@@ -142,7 +140,6 @@ if st.session_state.pdf_data and pdf_file:
         pdf_bytes = highlighted_pdf_io.getvalue()
         b64 = base64.b64encode(pdf_bytes).decode()
 
-        # viewer PDF con pdf.js (NO blocchi Chrome)
         components.html(f"""
         <!DOCTYPE html>
         <html>
@@ -189,14 +186,12 @@ if st.session_state.pdf_data and pdf_file:
         </html>
         """, height=700)
 
-        # download (fallback sempre utile)
         st.download_button(
             "Scarica PDF evidenziato",
             data=pdf_bytes,
             file_name="highlighted.pdf",
             mime="application/pdf"
         )
-
 # ======================================================
 # TAB 2 — VALIDAZIONE
 # ======================================================
