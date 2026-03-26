@@ -41,8 +41,9 @@ client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 # ======================================================
 # SESSION STATE OTTIMIZZATO
 # ======================================================
-for key in ["uploaded_pdf_bytes", "uploaded_images_bytes", "pdf_data", "image_data", 
-            "validated_pdf", "validated_image", "images"]:
+for key in ["uploaded_pdf_bytes", "uploaded_images_bytes", "uploaded_cert_bytes",
+            "pdf_data", "image_data", "cert_data",
+            "validated_pdf", "validated_image", "validated_cert", "images", "cert_files"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -60,6 +61,7 @@ if passport_id:
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
 
+    # Sezioni tecniche e visuali
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
@@ -69,6 +71,17 @@ if passport_id:
                 st.caption("Bassa confidenza")
             if f.get("explanation"):
                 st.caption(f["explanation"])
+
+    # Certificati
+    if "certificates" in passport and passport["certificates"]:
+        st.subheader("Certificati")
+        for cert in passport["certificates"]:
+            st.write(f"**Nome:** {cert.get('nome_certificato', {}).get('value')}")
+            st.write(f"**Ente:** {cert.get('ente_emittente', {}).get('value')}")
+            st.write(f"**Numero:** {cert.get('numero_certificato', {}).get('value')}")
+            st.write(f"**Emissione:** {cert.get('data_emissione', {}).get('value')}")
+            st.write(f"**Scadenza:** {cert.get('data_scadenza', {}).get('value')}")
+            st.write("---")
 
     services.render_espr_compliance(passport)
     st.progress(passport.get("overall_rating", 0))
@@ -94,81 +107,39 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "�
 with tabs[0]:
     pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
+    cert_files = st.file_uploader("Certificati (PDF o immagini)", type=["pdf","jpg","png"], accept_multiple_files=True)
 
     if st.button("Analizza"):
         if not pdf_file or not image_files:
             st.warning("Carica PDF e almeno un'immagine")
         else:
-            # Salva solo byte in session_state
+            # Salva byte in session_state
             st.session_state.uploaded_pdf_bytes = pdf_file.read()
             st.session_state.uploaded_images_bytes = [img.read() for img in image_files]
             st.session_state.images = image_files
+            st.session_state.cert_files = cert_files or []
+            st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # PDF
+                # PDF prodotto
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini
+                # Immagini prodotto
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
                     img_data.update(res)
                 st.session_state.image_data = img_data
 
+                # Certificati
+                cert_data_list = []
+                for cert_bytes in st.session_state.uploaded_cert_bytes:
+                    res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
+                    cert_data_list.append(res)
+                st.session_state.cert_data = cert_data_list
+
             st.success("Analisi completata ✅")
-
-    # ======================================================
-    # Evidenzia PDF multipagina
-    # ======================================================
-    if st.session_state.pdf_data and st.session_state.uploaded_pdf_bytes:
-        if st.button("Evidenzia PDF"):
-            highlighted_pdf_io = services.highlight_pdf_fields(
-                BytesIO(st.session_state.uploaded_pdf_bytes),
-                st.session_state.pdf_data
-            )
-            st.success("PDF evidenziato pronto!")
-
-            pdf_bytes = highlighted_pdf_io.getvalue()
-            b64 = base64.b64encode(pdf_bytes).decode()
-
-            html_code = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-            </head>
-            <body>
-            <div id="pdf-container"></div>
-            <script>
-            var pdfData = atob("{b64}");
-            var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
-            loadingTask.promise.then(function(pdf) {{
-                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
-                    pdf.getPage(pageNum).then(function(page) {{
-                        var scale = 1.2;
-                        var viewport = page.getViewport({{scale: scale}});
-                        var canvas = document.createElement("canvas");
-                        var context = canvas.getContext("2d");
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        document.getElementById("pdf-container").appendChild(canvas);
-                        page.render({{canvasContext: context, viewport: viewport}});
-                    }});
-                }}
-            }});
-            </script>
-            </body>
-            </html>
-            """
-            components.html(html_code, height=700)
-
-            st.download_button(
-                "Scarica PDF evidenziato",
-                data=pdf_bytes,
-                file_name="highlighted.pdf",
-                mime="application/pdf"
-            )
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -191,6 +162,21 @@ with tabs[1]:
         }
         st.session_state.validated_image = validated_img
 
+        # Validazione certificati
+        if st.session_state.cert_data:
+            st.subheader("Validazione certificati")
+            validated_cert_list = []
+            for i, cert in enumerate(st.session_state.cert_data):
+                validated_cert = {}
+                st.markdown(f"**Certificato {i+1}**")
+                for k, v in cert.items():
+                    validated_cert[k] = {
+                        "value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v["value"], key=f"cert_{i}_{k}"),
+                        "confidence": v.get("confidence",0)
+                    }
+                validated_cert_list.append(validated_cert)
+            st.session_state.validated_cert = validated_cert_list
+
         if st.button("Completa validazione"):
             st.success("Validazione completata ✅")
     else:
@@ -205,9 +191,16 @@ with tabs[2]:
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
-            services.compute_overall(passport)
+
+            # Aggiungi certificati
+            if st.session_state.validated_cert:
+                passport["certificates"] = st.session_state.validated_cert
+
+            # Aggiungi immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
+
+            # Salvataggio
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
@@ -235,7 +228,6 @@ with tabs[3]:
             if df_passport.empty:
                 st.info("Nessun passport disponibile")
             else:
-                # Dataset unificato
                 df_full = df_passport.merge(
                     df_fields.pivot_table(index="passport_id", columns="field_name", values="value", aggfunc="first").reset_index(),
                     left_on="id", right_on="passport_id", how="left"
