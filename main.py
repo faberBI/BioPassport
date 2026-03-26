@@ -121,7 +121,7 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-# Evidenzia PDF e visualizza inline (pdf.js)
+# Evidenzia PDF e visualizza inline (pdf.js SAFE)
 if st.session_state.pdf_data and pdf_file:
     if st.button("Evidenzia PDF"):
 
@@ -140,7 +140,7 @@ if st.session_state.pdf_data and pdf_file:
         pdf_bytes = highlighted_pdf_io.getvalue()
         b64 = base64.b64encode(pdf_bytes).decode()
 
-        components.html(f"""
+        html_code = """
         <!DOCTYPE html>
         <html>
         <head>
@@ -151,17 +151,17 @@ if st.session_state.pdf_data and pdf_file:
         <div id="pdf-container"></div>
 
         <script>
-        var pdfData = atob("{b64}");
+        var pdfData = atob("PDF_BASE64");
 
-        var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
-        loadingTask.promise.then(function(pdf) {{
+        var loadingTask = pdfjsLib.getDocument({data: pdfData});
+        loadingTask.promise.then(function(pdf) {
 
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
 
-                pdf.getPage(pageNum).then(function(page) {{
+                pdf.getPage(pageNum).then(function(page) {
 
                     var scale = 1.2;
-                    var viewport = page.getViewport({{scale: scale}});
+                    var viewport = page.getViewport({scale: scale});
 
                     var canvas = document.createElement("canvas");
                     var context = canvas.getContext("2d");
@@ -171,20 +171,25 @@ if st.session_state.pdf_data and pdf_file:
 
                     document.getElementById("pdf-container").appendChild(canvas);
 
-                    page.render({{
+                    page.render({
                         canvasContext: context,
                         viewport: viewport
-                    }});
+                    });
 
-                }});
+                });
             }
 
-        }});
+        });
         </script>
 
         </body>
         </html>
-        """, height=700)
+        """
+
+        # sostituzione base64 (NO f-string)
+        html_code = html_code.replace("PDF_BASE64", b64)
+
+        components.html(html_code, height=700)
 
         st.download_button(
             "Scarica PDF evidenziato",
