@@ -159,7 +159,7 @@ with tabs[0]:
                 pdf_bytes,
                 file_name="highlighted.pdf",
                 mime="application/pdf"
-            )"application/pdf")
+                "application/pdf")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
