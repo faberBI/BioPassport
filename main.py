@@ -61,7 +61,6 @@ if passport_id:
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
 
-    # Sezioni tecniche e visuali
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
@@ -72,7 +71,6 @@ if passport_id:
             if f.get("explanation"):
                 st.caption(f["explanation"])
 
-    # Certificati
     if "certificates" in passport and passport["certificates"]:
         st.subheader("Certificati")
         for cert in passport["certificates"]:
@@ -86,6 +84,7 @@ if passport_id:
     services.render_espr_compliance(passport)
     st.progress(passport.get("overall_rating", 0))
     st.metric("Reliability", f"{int(passport.get('overall_rating', 0)*100)}%")
+    st.metric("Sustainability", f"{int(passport.get('sustainability_score', 0)*100)}%")
 
     if passport.get("images"):
         for img in passport["images"]:
@@ -113,7 +112,6 @@ with tabs[0]:
         if not pdf_file or not image_files:
             st.warning("Carica PDF e almeno un'immagine")
         else:
-            # Salva byte in session_state
             st.session_state.uploaded_pdf_bytes = pdf_file.read()
             st.session_state.uploaded_images_bytes = [img.read() for img in image_files]
             st.session_state.images = image_files
@@ -121,11 +119,11 @@ with tabs[0]:
             st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # PDF prodotto
+                # PDF
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini prodotto
+                # Immagini
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
@@ -162,7 +160,7 @@ with tabs[1]:
         }
         st.session_state.validated_image = validated_img
 
-        # Validazione certificati
+        # Certificati
         if st.session_state.cert_data:
             st.subheader("Validazione certificati")
             validated_cert_list = []
@@ -190,13 +188,9 @@ with tabs[2]:
         if st.button("Pubblica Digital Product Passport"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
-            services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image)
+            services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image, st.session_state.validated_cert)
 
-            # Aggiungi certificati
-            if st.session_state.validated_cert:
-                passport["certificates"] = st.session_state.validated_cert
-
-            # Aggiungi immagini
+            # Immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
 
