@@ -336,8 +336,17 @@ def initialize_passport(product_id, product_type, fields):
         }
     return passport
 
-def merge_data(passport, pdf_data, image_data):
+# ======================================================
+# MERGE DATA (PDF, IMMAGINI, CERTIFICATI)
+# ======================================================
+def merge_data(passport, pdf_data, image_data, certificates=None):
+    """
+    Combina i dati estratti da PDF, immagini e certificati nel passport.
+    Ogni campo aggiornato viene valutato con confidenza e rating.
+    """
     all_data = {**pdf_data, **image_data}
+
+    # Merge PDF e Immagini
     for section in passport["sections"].values():
         for field_name, field in section["fields"].items():
             for k, v in all_data.items():
@@ -350,57 +359,83 @@ def merge_data(passport, pdf_data, image_data):
                     field["rating"] = compute_field_rating(field)
                     field["color"] = score_to_color(field["rating"])
                     field["explanation"] = generate_explanation(field)
+
+    # Aggiungi sezione certificati se presenti
+    if certificates:
+        passport.setdefault("certificates", [])
+        for cert in certificates:
+            cert_entry = {}
+            for k, v in cert.items():
+                cert_entry[k] = {
+                    "value": v.get("value"),
+                    "confidence": v.get("confidence", 0.0),
+                    "rating": compute_field_rating(v),
+                    "color": score_to_color(compute_field_rating(v)),
+                    "explanation": v.get("explanation", "")
+                }
+            passport["certificates"].append(cert_entry)
+
+    # Aggiorna overall rating includendo anche i certificati
     compute_overall(passport)
 
+# ======================================================
+# CALCOLO OVERALL RATING / ESPR INCLUSI CERTIFICATI
+# ======================================================
 def compute_overall(passport):
     """
-    Calcola l'overall ESPR e Reliability del passport
-    sulla base dei campi validati.
-    Aggiorna passport["overall_espr"] e passport["overall_rating"].
+    Calcola l'overall ESPR e Reliability del passport includendo PDF, Immagini e Certificati.
     """
     total_conf = 0
     total_fields = 0
 
-    # Cicla tutte le sezioni e campi
-    for section_name, section in passport["sections"].items():
+    # Cicla tutte le sezioni (PDF e Immagini)
+    for section in passport["sections"].values():
         section_conf_sum = 0
         field_count = 0
-        for fname, field in section["fields"].items():
-            conf = field.get("confidence", 0)
-            # Se confidence non è presente, default a 0
-            try:
-                conf = float(conf)
-            except:
-                conf = 0
+        for field in section["fields"].values():
+            conf = float(field.get("confidence", 0))
             section_conf_sum += conf
             field_count += 1
-
-        # Aggiorna rating se ci sono campi
         if field_count > 0:
             section["section_rating"] = section_conf_sum / field_count
         else:
             section["section_rating"] = 0
-
         total_conf += section_conf_sum
         total_fields += field_count
 
-    # Overall reliability
+    # Cicla i certificati se presenti
+    cert_conf_sum = 0
+    cert_count = 0
+    for cert in passport.get("certificates", []):
+        for field in cert.values():
+            conf = float(field.get("confidence", 0))
+            cert_conf_sum += conf
+            cert_count += 1
+
+    total_conf += cert_conf_sum
+    total_fields += cert_count
+
+    # Overall reliability (inclusi certificati)
     passport["overall_rating"] = (total_conf / total_fields) if total_fields > 0 else 0
 
-    # Calcolo ESPR: media dei valori dei campi qualitativi
-    # Se vuoi usare un criterio più avanzato, puoi mappare i valori testuali a punteggi numerici
+    # Calcolo ESPR: consideriamo "valore presente" = 1, assente o non rilevato = 0
     espr_sum = 0
     espr_count = 0
     for section in passport["sections"].values():
         for field in section["fields"].values():
             val = field.get("value")
-            # esempio semplificato: se il campo ha valore 'ok' = 1, altro = 0
             if val is not None:
                 espr_sum += 1 if str(val).lower() not in ["non rilevato", "missing", ""] else 0
                 espr_count += 1
-    passport["overall_espr"] = (espr_sum / espr_count) if espr_count > 0 else 0
 
-    return passport
+    for cert in passport.get("certificates", []):
+        for field in cert.values():
+            val = field.get("value")
+            if val is not None:
+                espr_sum += 1 if str(val).lower() not in ["non rilevato", "missing", ""] else 0
+                espr_count += 1
+
+    passport["overall_espr"] = (espr_sum / espr_count) if espr_count > 0 else 0
 
 # ======================================================
 # STORAGE FILE / ACCESS
@@ -492,6 +527,10 @@ def highlight_pdf_fields(pdf_file, extracted_data):
 # ======================================================
 # CREAZIONE ARCHIVO SU EXCEL
 # ======================================================
+
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO = st.secrets["GITHUB_REPO"] 
+GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "modify")
 EXCEL_FILE = os.path.join(PASSPORT_DIR, "archivio_passport.xlsx")
 os.makedirs(PASSPORT_DIR, exist_ok=True) 
 
@@ -554,3 +593,55 @@ def save_passport_to_excel_append(passport):
             df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow)
 
     return EXCEL_FILE
+
+
+
+def gpt_extract_cert_info(cert_file, client: OpenAI):
+    """
+    Estrae info strutturate da certificati (EPD, LCA, FSC, ecc.).
+    Ritorna dizionario: tipo_cert, numero, ente, validita, riferimenti.
+    """
+    # Step 1: Estrai testo se PDF
+    text = ""
+    try:
+        text = extract_text_from_pdf(cert_file)
+    except Exception:
+        # Se non PDF, possiamo tentare OCR o passare a GPT Vision
+        text = None
+
+    prompt = f"""
+Analizza il certificato allegato.
+Estrai le seguenti informazioni:
+- tipo_certificato
+- numero_certificato
+- ente_emittente
+- data_emissione
+- data_scadenza
+- riferimenti_LCA/EPD
+
+Rispondi solo con JSON valido. Usa null se il campo non è disponibile.
+Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        resp_text = response.choices[0].message.content
+        if resp_text.startswith("```"):
+            resp_text = "\n".join(resp_text.splitlines()[1:-1])
+        cert_info = json.loads(resp_text)
+        return cert_info
+    except Exception as e:
+        # fallback
+        return {
+            "tipo_certificato": None,
+            "numero_certificato": None,
+            "ente_emittente": None,
+            "data_emissione": None,
+            "data_scadenza": None,
+            "riferimenti": None,
+            "error": str(e)
+        }
