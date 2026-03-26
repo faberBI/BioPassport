@@ -129,19 +129,37 @@ with tabs[0]:
                 pdf_file,
                 st.session_state.pdf_data
             )
-            st.success("PDF evidenziato pronto!")            
-            pdf_bytes = highlighted_pdf_io.getvalue()
-            components.html(f"""<iframe 
-            src="data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}" 
-            width="100%" 
-            height="600px"
-            type="application/pdf">
-            </iframe>
-            """,
-            height=600)
+            st.success("PDF evidenziato pronto!")
+            # IMPORTANTISSIMO: reset file pointer
+            pdf_file.seek(0)
 
-            # Download
-            st.download_button("Scarica PDF evidenziato", pdf_bytes, file_name="highlighted.pdf", mime="application/pdf")
+            # genera PDF evidenziato UNA SOLA VOLTA
+            highlighted_pdf_io = services.highlight_pdf_fields(
+                pdf_file,
+                st.session_state.pdf_data)
+
+            pdf_bytes = highlighted_pdf_io.getvalue()
+
+            # mostra inline
+            components.html(
+                f"""
+                <iframe 
+                    src="data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}" 
+                    width="100%" 
+                    height="600px"
+                    type="application/pdf">
+                </iframe>
+                """,
+                height=600
+            )
+
+            # download
+            st.download_button(
+                "Scarica PDF evidenziato",
+                pdf_bytes,
+                file_name="highlighted.pdf",
+                mime="application/pdf"
+            )"application/pdf")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
