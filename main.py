@@ -122,44 +122,55 @@ with tabs[0]:
             st.success("Analisi completata ✅")
 
     # Evidenzia PDF e visualizza inline
-    if st.session_state.pdf_data and pdf_file:
-        if st.button("Evidenzia PDF"):
-            pdf_file.seek(0)
-            highlighted_pdf_io = services.highlight_pdf_fields(
-                pdf_file,
-                st.session_state.pdf_data
-            )
-            st.success("PDF evidenziato pronto!")
-            # IMPORTANTISSIMO: reset file pointer
-            pdf_file.seek(0)
+# Evidenzia PDF e visualizza inline
+if st.session_state.pdf_data and pdf_file:
+    if st.button("Evidenzia PDF"):
 
-            # genera PDF evidenziato UNA SOLA VOLTA
-            highlighted_pdf_io = services.highlight_pdf_fields(
-                pdf_file,
-                st.session_state.pdf_data)
+        import streamlit.components.v1 as components
+        import base64
 
-            pdf_bytes = highlighted_pdf_io.getvalue()
+        # reset file pointer
+        pdf_file.seek(0)
 
-            # mostra inline
-            components.html(
-                f"""
-                <iframe 
-                    src="data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode()}" 
-                    width="100%" 
-                    height="600px"
-                    type="application/pdf">
-                </iframe>
-                """,
-                height=600
-            )
+        # genera PDF evidenziato UNA SOLA VOLTA
+        highlighted_pdf_io = services.highlight_pdf_fields(
+            pdf_file,
+            st.session_state.pdf_data
+        )
 
-            # download
-            st.download_button(
-                "Scarica PDF evidenziato",
-                pdf_bytes,
-                file_name="highlighted.pdf",
-                mime="application/pdf"
-                "application/pdf")
+        st.success("PDF evidenziato pronto!")
+
+        pdf_bytes = highlighted_pdf_io.getvalue()
+        b64 = base64.b64encode(pdf_bytes).decode()
+
+        # viewer PDF (NO blocco Chrome)
+        components.html(f"""
+        <html>
+        <body>
+        <iframe id="pdfFrame" width="100%" height="600px"></iframe>
+
+        <script>
+        var pdfData = atob("{b64}");
+        var array = new Uint8Array(pdfData.length);
+        for (var i = 0; i < pdfData.length; i++) {{
+            array[i] = pdfData.charCodeAt(i);
+        }}
+        var blob = new Blob([array], {{type: "application/pdf"}});
+        var url = URL.createObjectURL(blob);
+        document.getElementById("pdfFrame").src = url;
+        </script>
+
+        </body>
+        </html>
+        """, height=600)
+
+        # download
+        st.download_button(
+            "Scarica PDF evidenziato",
+            data=pdf_bytes,
+            file_name="highlighted.pdf",
+            mime="application/pdf"
+        )
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
