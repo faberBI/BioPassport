@@ -339,14 +339,33 @@ def initialize_passport(product_id, product_type, fields):
 # ======================================================
 # MERGE DATA (PDF, IMMAGINI, CERTIFICATI)
 # ======================================================
-def merge_data(passport, pdf_data, image_data, certificates=None):
+# ======================================================
+# MERGE DATA + CERTIFICATI
+# ======================================================
+def merge_data(passport, pdf_data, image_data, certificate_data=None):
     """
-    Combina i dati estratti da PDF, immagini e certificati nel passport.
-    Ogni campo aggiornato viene valutato con confidenza e rating.
+    Unisce dati da PDF, immagini e certificati nel passport.
+    Aggiorna value, confidence, rating, color e explanation.
     """
     all_data = {**pdf_data, **image_data}
 
-    # Merge PDF e Immagini
+    # Inserisce certificati se presenti
+    passport["certificates"] = []
+    if certificate_data:
+        # ogni certificato è un dict di campi
+        for cert in certificate_data:
+            cert_dict = {}
+            for k, v in cert.items():
+                cert_dict[k] = {
+                    "value": v.get("value"),
+                    "confidence": v.get("confidence", 0.0),
+                    "rating": compute_field_rating(v),
+                    "color": score_to_color(compute_field_rating(v)),
+                    "explanation": v.get("explanation", "Dato da certificato")
+                }
+            passport["certificates"].append(cert_dict)
+
+    # Merge PDF + Immagini
     for section in passport["sections"].values():
         for field_name, field in section["fields"].items():
             for k, v in all_data.items():
@@ -360,35 +379,43 @@ def merge_data(passport, pdf_data, image_data, certificates=None):
                     field["color"] = score_to_color(field["rating"])
                     field["explanation"] = generate_explanation(field)
 
-    # Aggiungi sezione certificati se presenti
-    if certificates:
-        passport.setdefault("certificates", [])
-        for cert in certificates:
-            cert_entry = {}
-            for k, v in cert.items():
-                cert_entry[k] = {
-                    "value": v.get("value"),
-                    "confidence": v.get("confidence", 0.0),
-                    "rating": compute_field_rating(v),
-                    "color": score_to_color(compute_field_rating(v)),
-                    "explanation": v.get("explanation", "")
-                }
-            passport["certificates"].append(cert_entry)
-
-    # Aggiorna overall rating includendo anche i certificati
+    # Aggiorna punteggi generali
     compute_overall(passport)
 
+
+def compute_field_rating(field):
+    """
+    Calcola rating di un singolo campo.
+    Valuta sia confidence che eventuale peso per sostenibilità.
+    """
+    val = field.get("value")
+    if val in [None, "", "null"]:
+        return 0.0
+
+    conf = field.get("confidence", 0.0)
+    weight = field.get("eu_weight", 1.0)
+
+    # bonus se il campo indica sostenibilità
+    sustainability_bonus = 0.1 if "sostenibilita" in field.get("explanation", "").lower() or \
+        ("riciclato" in str(val).lower()) else 0.0
+
+    return round(min(conf * weight + sustainability_bonus, 1.0), 2)
+    
+
 # ======================================================
-# CALCOLO OVERALL RATING / ESPR INCLUSI CERTIFICATI
+# CALCOLO OVERALL + SUSTAINABILITY
 # ======================================================
 def compute_overall(passport):
     """
-    Calcola l'overall ESPR e Reliability del passport includendo PDF, Immagini e Certificati.
+    Calcola ESPR, Reliability e Sustainability score,
+    includendo PDF, Immagini e Certificati.
     """
     total_conf = 0
     total_fields = 0
+    sustainability_sum = 0
+    sustainability_count = 0
 
-    # Cicla tutte le sezioni (PDF e Immagini)
+    # PDF e immagini
     for section in passport["sections"].values():
         section_conf_sum = 0
         field_count = 0
@@ -396,46 +423,52 @@ def compute_overall(passport):
             conf = float(field.get("confidence", 0))
             section_conf_sum += conf
             field_count += 1
-        if field_count > 0:
-            section["section_rating"] = section_conf_sum / field_count
-        else:
-            section["section_rating"] = 0
+
+            # Se campo rilevante per sostenibilità
+            if field.get("value") not in [None, "", "non rilevato"]:
+                if "sostenibilita" in field.get("explanation", "").lower() or \
+                   "riciclato" in str(field.get("value")).lower():
+                    sustainability_sum += field.get("rating", 0)
+                    sustainability_count += 1
+
+        section["section_rating"] = (section_conf_sum / field_count) if field_count else 0
         total_conf += section_conf_sum
         total_fields += field_count
 
-    # Cicla i certificati se presenti
-    cert_conf_sum = 0
-    cert_count = 0
+    # Certificati
     for cert in passport.get("certificates", []):
         for field in cert.values():
             conf = float(field.get("confidence", 0))
-            cert_conf_sum += conf
-            cert_count += 1
+            total_conf += conf
+            total_fields += 1
 
-    total_conf += cert_conf_sum
-    total_fields += cert_count
+            if field.get("value") not in [None, "", "non rilevato"]:
+                if "sostenibilita" in field.get("explanation", "").lower() or \
+                   "riciclato" in str(field.get("value")).lower():
+                    sustainability_sum += field.get("rating", 0)
+                    sustainability_count += 1
 
-    # Overall reliability (inclusi certificati)
-    passport["overall_rating"] = (total_conf / total_fields) if total_fields > 0 else 0
+    # Overall reliability
+    passport["overall_rating"] = (total_conf / total_fields) if total_fields else 0
 
-    # Calcolo ESPR: consideriamo "valore presente" = 1, assente o non rilevato = 0
+    # ESPR (campo qualitativo)
     espr_sum = 0
     espr_count = 0
     for section in passport["sections"].values():
         for field in section["fields"].values():
             val = field.get("value")
-            if val is not None:
-                espr_sum += 1 if str(val).lower() not in ["non rilevato", "missing", ""] else 0
+            if val not in [None, "", "non rilevato"]:
+                espr_sum += 1
                 espr_count += 1
-
     for cert in passport.get("certificates", []):
         for field in cert.values():
             val = field.get("value")
-            if val is not None:
-                espr_sum += 1 if str(val).lower() not in ["non rilevato", "missing", ""] else 0
+            if val not in [None, "", "non rilevato"]:
+                espr_sum += 1
                 espr_count += 1
 
-    passport["overall_espr"] = (espr_sum / espr_count) if espr_count > 0 else 0
+    passport["overall_espr"] = (espr_sum / espr_count) if espr_count else 0
+    passport["sustainability_score"] = (sustainability_sum / sustainability_count) if sustainability_count else 0
 
 # ======================================================
 # STORAGE FILE / ACCESS
