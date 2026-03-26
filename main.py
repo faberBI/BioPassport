@@ -61,6 +61,7 @@ if passport_id:
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
 
+    # Sezioni tecniche e visuali
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
         for fname, f in sec["fields"].items():
@@ -71,6 +72,7 @@ if passport_id:
             if f.get("explanation"):
                 st.caption(f["explanation"])
 
+    # Certificati
     if "certificates" in passport and passport["certificates"]:
         st.subheader("Certificati")
         for cert in passport["certificates"]:
@@ -119,11 +121,11 @@ with tabs[0]:
             st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # PDF
+                # PDF prodotto
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini
+                # Immagini prodotto
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
@@ -133,8 +135,12 @@ with tabs[0]:
                 # Certificati
                 cert_data_list = []
                 for cert_bytes in st.session_state.uploaded_cert_bytes:
-                    res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
-                    cert_data_list.append(res)
+                    try:
+                        res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
+                        cert_data_list.append(res)
+                    except Exception as e:
+                        st.warning(f"Errore estrazione certificato: {e}")
+                        continue
                 st.session_state.cert_data = cert_data_list
 
             st.success("Analisi completata ✅")
@@ -160,7 +166,7 @@ with tabs[1]:
         }
         st.session_state.validated_image = validated_img
 
-        # Certificati
+        # Validazione certificati
         if st.session_state.cert_data:
             st.subheader("Validazione certificati")
             validated_cert_list = []
@@ -189,6 +195,9 @@ with tabs[2]:
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
             services.merge_data(passport, st.session_state.validated_pdf, st.session_state.validated_image, st.session_state.validated_cert)
+
+            # Calcolo punteggio sostenibilità
+            passport["sustainability_score"] = services.compute_sustainability_score(passport)
 
             # Immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
