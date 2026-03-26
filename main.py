@@ -121,8 +121,7 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-    # Evidenzia PDF e visualizza inline
-# Evidenzia PDF e visualizza inline
+# Evidenzia PDF e visualizza inline (pdf.js)
 if st.session_state.pdf_data and pdf_file:
     if st.button("Evidenzia PDF"):
 
@@ -143,28 +142,54 @@ if st.session_state.pdf_data and pdf_file:
         pdf_bytes = highlighted_pdf_io.getvalue()
         b64 = base64.b64encode(pdf_bytes).decode()
 
-        # viewer PDF (NO blocco Chrome)
+        # viewer PDF con pdf.js (NO blocchi Chrome)
         components.html(f"""
+        <!DOCTYPE html>
         <html>
+        <head>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+        </head>
         <body>
-        <iframe id="pdfFrame" width="100%" height="600px"></iframe>
+
+        <div id="pdf-container"></div>
 
         <script>
         var pdfData = atob("{b64}");
-        var array = new Uint8Array(pdfData.length);
-        for (var i = 0; i < pdfData.length; i++) {{
-            array[i] = pdfData.charCodeAt(i);
-        }}
-        var blob = new Blob([array], {{type: "application/pdf"}});
-        var url = URL.createObjectURL(blob);
-        document.getElementById("pdfFrame").src = url;
+
+        var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
+        loadingTask.promise.then(function(pdf) {{
+
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
+
+                pdf.getPage(pageNum).then(function(page) {{
+
+                    var scale = 1.2;
+                    var viewport = page.getViewport({{scale: scale}});
+
+                    var canvas = document.createElement("canvas");
+                    var context = canvas.getContext("2d");
+
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    document.getElementById("pdf-container").appendChild(canvas);
+
+                    page.render({{
+                        canvasContext: context,
+                        viewport: viewport
+                    }});
+
+                }});
+            }
+
+        }});
         </script>
 
         </body>
         </html>
-        """, height=600)
+        """, height=700)
 
-        # download
+        # download (fallback sempre utile)
         st.download_button(
             "Scarica PDF evidenziato",
             data=pdf_bytes,
