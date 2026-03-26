@@ -121,7 +121,6 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-# Evidenzia PDF e visualizza inline (pdf.js SAFE)
 if st.session_state.pdf_data and pdf_file:
     if st.button("Evidenzia PDF"):
 
@@ -197,6 +196,7 @@ if st.session_state.pdf_data and pdf_file:
             file_name="highlighted.pdf",
             mime="application/pdf"
         )
+
 # ======================================================
 # TAB 2 — VALIDAZIONE
 # ======================================================
