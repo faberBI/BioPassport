@@ -317,70 +317,185 @@ def initialize_passport(product_id, product_type, fields):
     passport = {
         "id": product_id,
         "product_type": product_type,
-        "metadata": {"created_at": datetime.utcnow().isoformat(), "version": "EU-DPP-2.0"},
-        "sections": {
-            "Technical": {"fields": {}, "section_rating": 0},
-            "Visual": {"fields": {}, "section_rating": 0}
+
+        # =========================
+        # METADATA
+        # =========================
+        "metadata": {
+            "created_at": datetime.utcnow().isoformat(),
+            "standard": "EU-DPP-2.0"
         },
+
+        # =========================
+        # VERSIONING
+        # =========================
+        "versioning": {
+            "version": 1,
+            "updated_at": datetime.utcnow().isoformat(),
+            "previous_hash": None,
+            "changes": []
+        },
+
+        # =========================
+        # ACCESS CONTROL
+        # =========================
+        "access_control": {
+            "level": "public",  # public / restricted / private
+            "roles": []
+        },
+
+        # =========================
+        # ECONOMIC OPERATOR
+        # =========================
+        "economic_operator": {
+            "name": None,
+            "vat": None,
+            "country": None,
+            "role": "manufacturer"
+        },
+
+        # =========================
+        # LIFECYCLE
+        # =========================
+        "lifecycle": {
+            "manufactured": None,
+            "events": []
+        },
+
+        # =========================
+        # SECTIONS
+        # =========================
+        "sections": {
+            "Technical": {
+                "fields": {},
+                "section_rating": 0
+            },
+            "Visual": {
+                "fields": {},
+                "section_rating": 0
+            }
+        },
+
+        # =========================
+        # GLOBAL METRICS
+        # =========================
         "overall_rating": 0.0,
         "overall_espr": "MISSING",
-        "images": []
+        "sustainability": {},
+        "images": [],
+        "certificates": []
     }
+
+    # =========================
+    # INIT CAMPI TECNICI
+    # =========================
     for f in fields:
         passport["sections"]["Technical"]["fields"][f] = {
             "value": None,
             "confidence": 0.0,
             "rating": 0.0,
             "color": "🔴",
-            "explanation": ""
+            "explanation": "",
+            "source": None
         }
+
     return passport
 
 # ======================================================
 # MERGE DATA (PDF, IMMAGINI, CERTIFICATI)
 # ======================================================
-# ======================================================
-# MERGE DATA + CERTIFICATI
-# ======================================================
 def merge_data(passport, pdf_data, image_data, certificate_data=None):
     """
     Unisce dati da PDF, immagini e certificati nel passport.
-    Aggiorna value, confidence, rating, color e explanation.
+    Include:
+    - provenance
+    - validazione certificati
+    - scoring
     """
+
     all_data = {**pdf_data, **image_data}
 
-    # Inserisce certificati se presenti
+    # =========================
+    # CERTIFICATI
+    # =========================
     passport["certificates"] = []
+
     if certificate_data:
-        # ogni certificato è un dict di campi
         for cert in certificate_data:
+            cert = validate_certificate(cert)
+
             cert_dict = {}
             for k, v in cert.items():
-                cert_dict[k] = {
-                    "value": v.get("value"),
-                    "confidence": v.get("confidence", 0.0),
-                    "rating": compute_field_rating(v),
-                    "color": score_to_color(compute_field_rating(v)),
-                    "explanation": v.get("explanation", "Dato da certificato")
+                if isinstance(v, dict):
+                    value = v.get("value")
+                    conf = v.get("confidence", 0.0)
+                else:
+                    value = v
+                    conf = 0.7 if v else 0.0
+
+                field_obj = {
+                    "value": value,
+                    "confidence": conf,
+                    "rating": compute_field_rating({
+                        "value": value,
+                        "confidence": conf
+                    }),
+                    "color": score_to_color(conf),
+                    "explanation": "Dato da certificato",
+                    "source": {
+                        "type": "certificate",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
                 }
+
+                cert_dict[k] = field_obj
+
+            cert_dict["is_valid"] = cert.get("is_valid", False)
             passport["certificates"].append(cert_dict)
 
-    # Merge PDF + Immagini
-    for section in passport["sections"].values():
+    # =========================
+    # MERGE PDF + IMMAGINI
+    # =========================
+    for section_name, section in passport["sections"].items():
         for field_name, field in section["fields"].items():
+
             for k, v in all_data.items():
                 matched = match_field(k, [field_name])
+
                 if matched == field_name:
+
+                    # =====================
+                    # VALORE
+                    # =====================
                     if isinstance(v, dict):
-                        field.update(v)
+                        field["value"] = v.get("value")
+                        field["confidence"] = v.get("confidence", 0.0)
                     else:
                         field["value"] = v
+                        field["confidence"] = 0.7 if v else 0.0
+
+                    # =====================
+                    # SCORING
+                    # =====================
                     field["rating"] = compute_field_rating(field)
                     field["color"] = score_to_color(field["rating"])
                     field["explanation"] = generate_explanation(field)
 
-    # Aggiorna punteggi generali
+                    # =====================
+                    # PROVENANCE
+                    # =====================
+                    field["source"] = {
+                        "type": "pdf" if k in pdf_data else "image",
+                        "extracted_by": "ai",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+
+    # =========================
+    # AGGIORNA METRICHE GLOBALI
+    # =========================
     compute_overall(passport)
+
+    return passport
 
 
 def compute_field_rating(field):
@@ -694,3 +809,134 @@ Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
             "riferimenti": None,
             "error": str(e)
         }
+
+import hashlib
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+
+def generate_hash(passport):
+    data = dict(passport)
+    data.pop("signature", None)
+    serialized = json.dumps(data, sort_keys=True).encode()
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def sign_passport(passport, private_key_pem):
+    private_key = serialization.load_pem_private_key(
+        private_key_pem.encode(),
+        password=None
+    )
+
+    hash_value = generate_hash(passport)
+
+    signature = private_key.sign(
+        hash_value.encode(),
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+
+    passport["signature"] = {
+        "hash": hash_value,
+        "signature": signature.hex(),
+        "algorithm": "SHA256-RSA",
+        "signed_at": datetime.utcnow().isoformat()
+    }
+
+    return passport
+
+def update_version(passport, changes):
+    prev_hash = passport.get("signature", {}).get("hash")
+
+    passport["versioning"]["version"] += 1
+    passport["versioning"]["updated_at"] = datetime.utcnow().isoformat()
+    passport["versioning"]["previous_hash"] = prev_hash
+    passport["versioning"]["changes"] = changes
+
+    return passport
+
+def compute_sustainability(passport):
+    fields = passport["sections"]["Technical"]["fields"]
+
+    breakdown = {
+        "carbon": 0,
+        "circularity": 0,
+        "durability": 0,
+        "materials": 0
+    }
+
+    # Carbon
+    gwp = fields.get("Impronta carbonio GWP", {}).get("value")
+    if gwp:
+        try:
+            val = float(gwp)
+            breakdown["carbon"] = max(0, min(1, 1 - val / 100))
+        except:
+            pass
+
+    # Circularity
+    riciclato = fields.get("% di contenuto riciclato", {}).get("value")
+    if riciclato:
+        try:
+            breakdown["circularity"] = float(riciclato) / 100
+        except:
+            pass
+
+    # Durability
+    if fields.get("Garanzia", {}).get("value"):
+        breakdown["durability"] += 0.5
+    if fields.get("Materiali", {}).get("value"):
+        breakdown["durability"] += 0.5
+
+    # Materials
+    if fields.get("Materiali/componenti utilizzati", {}).get("value"):
+        breakdown["materials"] = 1
+
+    overall = sum(breakdown.values()) / len(breakdown)
+
+    passport["sustainability"] = {
+        "score": round(overall, 2),
+        "breakdown": breakdown
+    }
+
+    return passport
+
+def validate_certificate(cert):
+    valid = True
+
+    if not cert.get("numero_certificato"):
+        valid = False
+
+    if cert.get("data_scadenza"):
+        try:
+            scad = datetime.fromisoformat(cert["data_scadenza"])
+            if scad < datetime.utcnow():
+                valid = False
+        except:
+            valid = False
+
+    cert["is_valid"] = valid
+    return cert
+
+def add_lifecycle_event(passport, event_type, details):
+    passport.setdefault("lifecycle", {}).setdefault("events", []).append({
+        "type": event_type,
+        "details": details,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+def can_access(passport, role):
+    if passport["access_control"]["level"] == "public":
+        return True
+    return role in passport["access_control"]["roles"]
+
+def to_jsonld(passport):
+    return {
+        "@context": "https://europa.eu/dpp/schema",
+        "@type": "DigitalProductPassport",
+        "id": passport["id"],
+        "productType": passport["product_type"],
+        "sustainability": passport.get("sustainability"),
+        "manufacturer": passport.get("economic_operator"),
+        "data": passport["sections"]
+    }
+
