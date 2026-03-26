@@ -120,28 +120,112 @@ with tabs[0]:
             st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # PDF
+                # ======================
+                # PDF prodotto
+                # ======================
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini
+                # ======================
+                # Immagini prodotto
+                # ======================
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
                     img_data.update(res)
                 st.session_state.image_data = img_data
 
+                # ======================
                 # Certificati
+                # ======================
                 cert_data_list = []
                 for cert_bytes in st.session_state.uploaded_cert_bytes:
-                    try:
-                        res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
-                        cert_data_list.append(res)
-                    except Exception as e:
-                        st.error(f"Errore nell'analisi del certificato: {e}")
+                    res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
+                    cert_data_list.append(res)
                 st.session_state.cert_data = cert_data_list
 
             st.success("Analisi completata ✅")
+
+    # ======================================================
+    # Mostra PDF prodotto evidenziato
+    # ======================================================
+    if st.session_state.pdf_data and st.session_state.uploaded_pdf_bytes:
+        st.subheader("PDF Prodotto evidenziato")
+        highlighted_pdf_io = services.highlight_pdf_fields(
+            BytesIO(st.session_state.uploaded_pdf_bytes),
+            st.session_state.pdf_data
+        )
+        pdf_bytes = highlighted_pdf_io.getvalue()
+        b64 = base64.b64encode(pdf_bytes).decode()
+        html_code = f"""
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+        <div id="pdf-container"></div>
+        <script>
+        var pdfData = atob("{b64}");
+        var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
+        loadingTask.promise.then(function(pdf) {{
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
+                pdf.getPage(pageNum).then(function(page) {{
+                    var scale = 1.2;
+                    var viewport = page.getViewport({{scale: scale}});
+                    var canvas = document.createElement("canvas");
+                    var context = canvas.getContext("2d");
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    document.getElementById("pdf-container").appendChild(canvas);
+                    page.render({{canvasContext: context, viewport: viewport}});
+                }});
+            }}
+        }});
+        </script>
+        """
+        components.html(html_code, height=700)
+        st.download_button(
+            "Scarica PDF Prodotto evidenziato",
+            data=pdf_bytes,
+            file_name="product_highlighted.pdf",
+            mime="application/pdf"
+        )
+
+    # ======================================================
+    # Mostra PDF certificati evidenziati
+    # ======================================================
+    if st.session_state.cert_data and st.session_state.uploaded_cert_bytes:
+        st.subheader("Certificati evidenziati")
+        for i, (cert_bytes, cert_fields) in enumerate(zip(st.session_state.uploaded_cert_bytes, st.session_state.cert_data)):
+            st.markdown(f"**Certificato {i+1}**")
+            highlighted_cert_io = services.highlight_pdf_fields(BytesIO(cert_bytes), cert_fields)
+            pdf_bytes = highlighted_cert_io.getvalue()
+            b64 = base64.b64encode(pdf_bytes).decode()
+            html_code = f"""
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+            <div id="pdf-container-cert-{i}"></div>
+            <script>
+            var pdfData = atob("{b64}");
+            var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
+            loadingTask.promise.then(function(pdf) {{
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
+                    pdf.getPage(pageNum).then(function(page) {{
+                        var scale = 1.2;
+                        var viewport = page.getViewport({{scale: scale}});
+                        var canvas = document.createElement("canvas");
+                        var context = canvas.getContext("2d");
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        document.getElementById("pdf-container-cert-{i}").appendChild(canvas);
+                        page.render({{canvasContext: context, viewport: viewport}});
+                    }} );
+                }}
+            }} );
+            </script>
+            """
+            components.html(html_code, height=700)
+            st.download_button(
+                f"Scarica Certificato {i+1} evidenziato",
+                data=pdf_bytes,
+                file_name=f"cert_{i+1}_highlighted.pdf",
+                mime="application/pdf"
+            )
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
@@ -205,14 +289,6 @@ with tabs[2]:
             services.save_passport_to_excel_append(passport)
 
             st.success("DPP pubblicato ✅")
-
-            # ========================
-            # VISUALIZZAZIONE PDF
-            # ========================
-            st.subheader("Anteprima PDF")
-            pdf_bytes_io = BytesIO(st.session_state.uploaded_pdf_bytes)
-            pdf_display_base64 = base64.b64encode(pdf_bytes_io.read()).decode("utf-8")
-            st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_display_base64}" width="700" height="800" type="application/pdf"></iframe>', unsafe_allow_html=True)
 
             # ========================
             # METRICHE
