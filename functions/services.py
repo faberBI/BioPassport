@@ -537,18 +537,34 @@ def render_espr_compliance(passport):
 # HIGHLIGHT PDF FIELDS
 # ======================================================
 def highlight_pdf_fields(pdf_file, extracted_data):
-    # Supporta UploadedFile o path
+    """
+    Evidenzia i campi estratti in un PDF.
+    
+    - pdf_file: percorso, UploadedFile o BytesIO
+    - extracted_data: dizionario con valori da evidenziare
+      Supporta sia:
+        {"campo": {"value": "valore", ...}}
+      sia:
+        {"campo": "valore"}
+    """
+    # Leggi i byte del PDF
     pdf_bytes = pdf_file.read() if hasattr(pdf_file, "read") else open(pdf_file, "rb").read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
     for page in doc:
         for field_name, field in extracted_data.items():
-            val = field.get("value")
+            # Gestione valori annidati o diretti
+            if isinstance(field, dict) and "value" in field:
+                val = field.get("value")
+            else:
+                val = field
             if val:
                 text_instances = page.search_for(str(val))
                 for inst in text_instances:
                     highlight = page.add_highlight_annot(inst)
                     highlight.set_colors(stroke=(1, 1, 0))  # giallo
                     highlight.update()
+
     out = BytesIO()
     doc.save(out)
     out.seek(0)
