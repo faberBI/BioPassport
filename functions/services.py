@@ -402,39 +402,68 @@ def initialize_passport(product_id, product_type, fields):
 
     return passport
 
-def merge_data(passport, pdf_data, image_data, certificate_data=None, user="system"):
+def merge_data(passport, pdf_data, image_data, certificate_data=None):
     """
     Unisce dati da PDF, immagini e certificati nel passport.
     Include:
-    - provenance
-    - validazione certificati
-    - scoring
-    - audit log
-    - sostenibilità quantitativa
+    - Provenance (PDF / immagini / certificati)
+    - Validazione certificati
+    - Scoring dei campi
+    - Aggiornamento metriche globali (Reliability, ESPR, Sustainability)
     """
+    from datetime import datetime
+
+    # Merge PDF + immagini
     all_data = {**pdf_data, **image_data}
+
+    for section_name, section in passport.get("sections", {}).items():
+        for field_name, field in section.get("fields", {}).items():
+            for k, v in all_data.items():
+                matched = match_field(k, [field_name])
+                if matched == field_name:
+                    # Valore e confidence
+                    if isinstance(v, dict):
+                        value = v.get("value")
+                        conf = float(v.get("confidence", 0))
+                    else:
+                        value = v
+                        conf = 0.7 if v else 0.0
+
+                    field["value"] = value
+                    field["confidence"] = conf
+                    field["rating"] = compute_field_rating(field)
+                    field["color"] = score_to_color(field["rating"])
+                    field["explanation"] = generate_explanation(field)
+                    field["source"] = {
+                        "type": "pdf" if k in pdf_data else "image",
+                        "extracted_by": "ai",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
 
     # =========================
     # CERTIFICATI
     # =========================
     passport["certificates"] = []
-
     if certificate_data:
         for cert in certificate_data:
-            cert_valid = verify_certificate(cert.get("cert_bytes", b""), trusted_issuers=[])
+            cert_validated = validate_certificate(cert)
             cert_dict = {}
-            for k, v in cert.items():
+
+            for k, v in cert_validated.items():
                 if isinstance(v, dict):
                     value = v.get("value")
-                    conf = v.get("confidence", 0.0)
+                    conf = float(v.get("confidence", 0))
                 else:
                     value = v
                     conf = 0.7 if v else 0.0
 
-                field_obj = {
+                cert_dict[k] = {
                     "value": value,
                     "confidence": conf,
-                    "rating": compute_field_rating({"value": value, "confidence": conf}),
+                    "rating": compute_field_rating({
+                        "value": value,
+                        "confidence": conf
+                    }),
                     "color": score_to_color(conf),
                     "explanation": "Dato da certificato",
                     "source": {
@@ -442,53 +471,12 @@ def merge_data(passport, pdf_data, image_data, certificate_data=None, user="syst
                         "timestamp": datetime.utcnow().isoformat()
                     }
                 }
-                cert_dict[k] = field_obj
 
-            cert_dict["is_valid"] = cert_valid
+            cert_dict["is_valid"] = cert_validated.get("is_valid", False)
             passport["certificates"].append(cert_dict)
 
     # =========================
-    # MERGE PDF + IMMAGINI
-    # =========================
-    for section_name, section in passport.get("sections", {}).items():
-        for field_name, field in section.get("fields", {}).items():
-            for k, v in all_data.items():
-                matched = match_field(k, [field_name])
-                if matched != field_name:
-                    continue
-
-                if isinstance(v, dict):
-                    field["value"] = v.get("value")
-                    field["confidence"] = v.get("confidence", 0.0)
-                else:
-                    field["value"] = v
-                    field["confidence"] = 0.7 if v else 0.0
-
-                field["rating"] = compute_field_rating(field)
-                field["color"] = score_to_color(field["rating"])
-                field["explanation"] = generate_explanation(field)
-                field["source"] = {
-                    "type": "pdf" if k in pdf_data else "image",
-                    "extracted_by": "ai",
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-
-    # =========================
-    # AUDIT LOG
-    # =========================
-    log_audit(passport, user, "merge_data",
-              f"PDF fields: {len(pdf_data)}, Images: {len(image_data)}, Certificates: {len(certificate_data) if certificate_data else 0}")
-
-    # =========================
-    # CALCOLO SOSTENIBILITÀ
-    # =========================
-    combined_fields = {**pdf_data, **image_data}
-    for cert in passport.get("certificates", []):
-        combined_fields.update(cert)
-    passport["sustainability_score"] = compute_sustainability_score(combined_fields)
-
-    # =========================
-    # METRICHE GLOBALI
+    # Calcolo metriche globali
     # =========================
     compute_overall(passport)
 
