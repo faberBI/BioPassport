@@ -10,5 +10,4 @@ reportlab
 fitz
 PyMuPDF
 openpyxl
-pyhanko[full]
 cryptography
