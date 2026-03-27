@@ -334,21 +334,37 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
 # EXCEL
 # ======================================================
 def save_passport_to_excel_append(passport):
+    sheets = ["passport", "fields", "images"]
+
     if os.path.exists(EXCEL_FILE):
         # Carica workbook esistente
         book = load_workbook(EXCEL_FILE)
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             writer.book = book
             writer.sheets = {ws.title: ws for ws in book.worksheets}
-            # Append dei dati al foglio passport
+
+            # Assicurati che ci sia almeno un foglio visibile
+            if not writer.sheets:
+                writer.book.create_sheet("passport")
+                writer.sheets = {ws.title: ws for ws in writer.book.worksheets}
+
+            # Appendi i dati passport
             df_passport = pd.DataFrame([passport])
-            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
+            if "passport" not in writer.sheets:
+                df_passport.to_excel(writer, sheet_name="passport", index=False)
+            else:
+                startrow = writer.sheets["passport"].max_row
+                df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
+
             writer.save()
     else:
-        # Se il file non esiste, crealo da zero
-        df_passport = pd.DataFrame([passport])
+        # Crea nuovo file con fogli base
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            # Passport
+            pd.DataFrame([passport]).to_excel(writer, sheet_name="passport", index=False)
+            # Fields e Images vuoti
+            pd.DataFrame(columns=["passport_id","field_name","value"]).to_excel(writer, sheet_name="fields", index=False)
+            pd.DataFrame(columns=["passport_id","file_base64","caption"]).to_excel(writer, sheet_name="images", index=False)
             writer.save()
 
 def add_product_image(passport: dict, img_file):
