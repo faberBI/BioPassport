@@ -9,8 +9,8 @@ from io import BytesIO
 from PIL import Image
 import pandas as pd
 import qrcode
-from pyhanko.sign import signers, fields, validation
-from pyhanko_certvalidator import ValidationContext, CertificateStore
+#from pyhanko.sign import signers, fields, validation
+#from pyhanko_certvalidator import ValidationContext, CertificateStore
 from openai import OpenAI
 
 # ======================================================
