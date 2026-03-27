@@ -370,3 +370,22 @@ def save_passport_to_excel_append(passport: dict):
             df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
             df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
             writer.save()
+
+def add_product_image(passport: dict, img_file):
+    """Aggiunge immagine prodotto al passport da BytesIO o file path"""
+    try:
+        # Se è BytesIO, apri direttamente
+        if isinstance(img_file, BytesIO):
+            image = Image.open(img_file)
+        else:
+            image = Image.open(img_file)
+        img_b64 = image_to_base64(image)
+        if "images" not in passport:
+            passport["images"] = []
+        passport["images"].append({
+            "file_base64": img_b64,
+            "caption": ""
+        })
+    except Exception as e:
+        print(f"Errore aggiungendo immagine: {e}")
+        raise
