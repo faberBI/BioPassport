@@ -392,15 +392,63 @@ def add_product_image(passport: dict, img_file):
 
 def render_espr_compliance(passport):
     """
-    Mostra un riepilogo rapido della compliance UE (REACH, Ecodesign, GDPR, ecc.)
+    Mostra un riepilogo completo della compliance e sostenibilità UE.
+    Include REACH, Ecodesign, GDPR, materiali, riciclo, catena di fornitura, energie e Ecolabel.
     """
-    st.subheader("Compliance UE / Espr")
-    compliance_fields = {
-        "REACH / sostanze pericolose": passport.get("sections", {}).get("Ecolabel_UE", {}).get("svhc_limitati", False),
-        "Ecodesign / direttive UE": passport.get("sections", {}).get("Ecolabel_UE", {}).get("produzione_basso_impatto", False),
-        "GDPR": passport.get("sections", {}).get("PDF", {}).get("Produttore", {}).get("value") is not None
-    }
+    st.subheader("🇪🇺 Compliance e Sostenibilità UE")
 
-    for field, status in compliance_fields.items():
+    # =======================
+    # REACH / Ecodesign / GDPR
+    # =======================
+    pdf_section = passport.get("sections", {}).get("PDF", {})
+    ecolabel_section = passport.get("sections", {}).get("Ecolabel_UE", {})
+    
+    reach_status = ecolabel_section.get("svhc_limitati", False)
+    ecodesign_status = ecolabel_section.get("produzione_basso_impatto", False)
+    gdpr_status = pdf_section.get("Produttore", {}).get("value") is not None
+
+    compliance_list = [
+        ("REACH / sostanze pericolose", reach_status),
+        ("Ecodesign / direttive UE", ecodesign_status),
+        ("GDPR", gdpr_status)
+    ]
+
+    st.markdown("### Normativa e Privacy")
+    for field, status in compliance_list:
         emoji = "✅" if status else "⚠️"
         st.write(f"{emoji} {field}")
+
+    # =======================
+    # Materiali / Dimensioni / Energia / Catena di fornitura
+    # =======================
+    st.markdown("### Materiali, Produzione e Riciclo")
+    materiali = pdf_section.get("Materiali/componenti utilizzati", {}).get("value", "non specificato")
+    peso = pdf_section.get("Peso", {}).get("value", "non specificato")
+    dimensioni = pdf_section.get("Dimensioni", {}).get("value", "non specificato")
+    energia = pdf_section.get("Energia", {}).get("value", "non specificato")
+    luogo = pdf_section.get("Luogo di Produzione", {}).get("value", "non specificato")
+    riciclo = ecolabel_section.get("facilmente_smortabile", False)
+    basso_impatto = ecolabel_section.get("produzione_basso_impatto", False)
+
+    st.write(f"**Materiali/componenti:** {materiali}")
+    st.write(f"**Peso:** {peso}")
+    st.write(f"**Dimensioni:** {dimensioni}")
+    st.write(f"**Energia consumata:** {energia}")
+    st.write(f"**Catena di fornitura / Luogo produzione:** {luogo}")
+    st.write(f"**Facilità di smaltimento / riciclo:** {'✅' if riciclo else '⚠️'}")
+    st.write(f"**Indicatori di basso impatto produzione:** {'✅' if basso_impatto else '⚠️'}")
+
+    # =======================
+    # Certificazioni
+    # =======================
+    if passport.get("certificates"):
+        st.markdown("### Certificazioni")
+        for i, cert in enumerate(passport["certificates"], 1):
+            tipo = cert.get("tipo_certificato", {}).get("value", "non disponibile")
+            ente = cert.get("ente_emittente", {}).get("value", "non disponibile")
+            numero = cert.get("numero_certificato", {}).get("value", "non disponibile")
+            data_em = cert.get("data_emissione", {}).get("value", "non disponibile")
+            data_sc = cert.get("data_scadenza", {}).get("value", "non disponibile")
+            st.write(f"**Certificato {i}: {tipo}**")
+            st.write(f"Ente: {ente} | Numero: {numero} | Emissione: {data_em} | Scadenza: {data_sc}")
+            st.write("---")
