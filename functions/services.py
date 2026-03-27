@@ -9,16 +9,18 @@ from io import BytesIO
 from PIL import Image
 import pandas as pd
 import qrcode
-#from pyhanko.sign import signers, fields, validation
-#from pyhanko_certvalidator import ValidationContext, CertificateStore
 from openai import OpenAI
-
+import hashlib
+from datetime import datetime
+from cryptography.fernet import Fernet
+from openpyxl import load_workbook
 
 # ======================================================
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
 EXCEL_FILE = os.path.join(PASSPORT_DIR, "passport_archive.xlsx")
+LOG_FILE = os.path.join(PASSPORT_DIR, "passport_log.jsonl")
 
 TRUSTED_ISSUERS = [
     "Chambersign","InfoCert","Aruba PEC","GlobalSign EU","D-Trust"
@@ -39,8 +41,10 @@ PRODUCT_FIELDS = {
             {"name":"Conformità tecnica", "required": True},
             {"name":"Prezzo in euro", "required": False},
             {"name":"Luogo di Produzione", "required": False},
-            {"name":"Data di produzione", "required": False}
-            
+            {"name":"Data di produzione", "required": False},
+            {"name":"Dimensioni", "required": False},
+            {"name":"Peso", "required": False},
+            {"name":"Energia consumata", "required": False}
         ],
         "image": [
             {"name":"Colore", "required": True},
@@ -48,6 +52,21 @@ PRODUCT_FIELDS = {
         ]
     }
 }
+
+ECOLABEL_FIELDS = [
+    "descrizione_prodotto",
+    "svhc_limitati",
+    "clp_conformita",
+    "legno_certificato",
+    "plastica_conforme",
+    "metallo_conforme",
+    "rivestimenti_ok",
+    "formaldeide_bassa",
+    "voc_bassi",
+    "facilmente_smortabile",
+    "produzione_basso_impatto",
+    "info_consumatore_ok"
+]
 
 # ======================================================
 # NORMALIZATION / MATCHING
@@ -80,7 +99,6 @@ def split_text(text, max_chars=3000, overlap=300):
     return chunks
 
 def extract_text_from_pdf(pdf_file):
-    """Estrae testo da PDF usando pdfplumber"""
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
@@ -88,7 +106,6 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 def image_to_base64(image: Image.Image) -> str:
-    """Converte PIL Image in base64, convertendo RGBA/P in RGB per JPEG."""
     if image.mode in ("RGBA", "P"):
         image = image.convert("RGB")
     buf = BytesIO()
@@ -104,21 +121,6 @@ def resize_image_for_vision(image_file, max_size=512):
     buf.name = "image.jpg"
     return buf
 
-def add_product_image(passport: dict, img_file):
-    """Aggiunge immagine prodotto al passport"""
-    try:
-        image = Image.open(img_file)
-        img_b64 = image_to_base64(image)
-        if "images" not in passport:
-            passport["images"] = []
-        passport["images"].append({
-            "file_base64": img_b64,
-            "caption": ""
-        })
-    except Exception as e:
-        print(f"Errore aggiungendo immagine: {e}")
-        raise
-        
 # ======================================================
 # CONFIDENCE
 # ======================================================
@@ -126,18 +128,27 @@ def compute_confidence(values):
     if not values:
         return 0.0
     most_common = max(set(values), key=values.count)
-    confidence = values.count(most_common)/len(values)
-    return confidence
+    return values.count(most_common)/len(values)
 
 # ======================================================
-# GPT FUNCTIONS (API REAL)
+# CRITTOGRAFIA DATI SENSIBILI
+# ======================================================
+def generate_key():
+    return Fernet.generate_key()
+
+def encrypt_sensitive_data(data: str, key: bytes) -> str:
+    f = Fernet(key)
+    return f.encrypt(data.encode()).decode()
+
+def decrypt_sensitive_data(data: str, key: bytes) -> str:
+    f = Fernet(key)
+    return f.decrypt(data.encode()).decode()
+
+# ======================================================
+# GPT FUNCTIONS
 # ======================================================
 def gpt_extract_cert_info(cert_file, client: OpenAI):
-    text = ""
-    try:
-        text = extract_text_from_pdf(cert_file)
-    except Exception:
-        text = None
+    text = extract_text_from_pdf(cert_file) if cert_file else None
     prompt = f"""
 Analizza il certificato allegato.
 Estrai le seguenti informazioni:
@@ -161,15 +172,7 @@ Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
             resp_text = "\n".join(resp_text.splitlines()[1:-1])
         return json.loads(resp_text)
     except Exception as e:
-        return {
-            "tipo_certificato": None,
-            "numero_certificato": None,
-            "ente_emittente": None,
-            "data_emissione": None,
-            "data_scadenza": None,
-            "riferimenti": None,
-            "error": str(e)
-        }
+        return {k: None for k in ["tipo_certificato","numero_certificato","ente_emittente","data_emissione","data_scadenza","riferimenti"]}
 
 def gpt_extract_from_pdf(text, client: OpenAI, tipo, fields):
     chunks = split_text(text)
@@ -241,27 +244,6 @@ def upload_image_to_openai(image_file, client: OpenAI):
     return uploaded.id
 
 # ======================================================
-# HIGHLIGHT PDF
-# ======================================================
-def highlight_pdf_fields(pdf_file, extracted_data):
-    pdf_bytes = pdf_file.read() if hasattr(pdf_file,"read") else open(pdf_file,"rb").read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    for page in doc:
-        for field_name, field in extracted_data.items():
-            val = field.get("value") if isinstance(field, dict) else field
-            if val:
-                text_instances = page.search_for(str(val))
-                for inst in text_instances:
-                    highlight = page.add_highlight_annot(inst)
-                    highlight.set_colors(stroke=(1,1,0))
-                    highlight.update()
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    doc.close()
-    return out
-
-# ======================================================
 # PASSPORT MANAGEMENT
 # ======================================================
 def initialize_passport(pid, tipo, fields):
@@ -270,7 +252,7 @@ def initialize_passport(pid, tipo, fields):
         passport["sections"].setdefault("PDF",{})[field] = {"value":None,"confidence":0,"explanation":""}
     return passport
 
-def merge_data(passport, pdf_data, image_data, cert_data=None):
+def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
     if pdf_data:
         passport["sections"]["PDF"].update(pdf_data)
     if image_data:
@@ -278,11 +260,7 @@ def merge_data(passport, pdf_data, image_data, cert_data=None):
     if cert_data:
         passport["certificates"] = cert_data
 
-def add_product_image(passport, img_file, caption=None):
-    b64 = image_to_base64(Image.open(img_file))
-    passport["images"].append({"file_base64":b64,"caption":caption})
-
-def save_passport_to_file(passport):
+def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
     path = os.path.join(PASSPORT_DIR,f"{passport['id']}.json")
     with open(path,"w") as f:
@@ -294,6 +272,20 @@ def load_passport_from_file(pid):
         return None
     with open(path,"r") as f:
         return json.load(f)
+
+def log_passport_version(passport: dict):
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
+    hash_data = hashlib.sha256(json.dumps(passport, sort_keys=True).encode()).hexdigest()
+    log_entry = {
+        "passport_id": passport["id"],
+        "timestamp": datetime.utcnow().isoformat(),
+        "hash": hash_data
+    }
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+def save_passport_to_json(passport: dict):
+    save_passport_to_file(passport)
 
 # ======================================================
 # QR CODE
@@ -309,46 +301,11 @@ def generate_qr_from_url(url):
     return buf
 
 # ======================================================
-# DIGITAL SIGNATURE & OPERATOR VALIDATION
+# ECOLABEL
 # ======================================================
-def sign_passport(passport_json_path, cert_file_path, cert_password):
-    # Firma PDF reale con certificato qualificato EU
-    with open(passport_json_path,"rb") as f:
-        pdf_bytes = f.read()
-    signer = signers.SimpleSigner.load_pkcs12(cert_file_path, cert_password.encode())
-    signed_pdf = signers.sign_pdf(BytesIO(pdf_bytes), signer=signer)
-    signed_path = passport_json_path.replace(".json","_signed.pdf")
-    with open(signed_path,"wb") as f:
-        f.write(signed_pdf.getbuffer())
-    return signed_path
-
-def verify_operator_signature(signed_pdf_path):
-    # Validazione firma operatore contro EU trusted issuers
-    store = CertificateStore.from_ca_list(TRUSTED_ISSUERS)
-    vc = ValidationContext(trust_roots=store)
-    status = validation.validate_pdf_signature(signed_pdf_path, validation_context=vc)
-    return status.trusted
-
-ECOLABEL_FIELDS = [
-    "descrizione_prodotto",
-    "svhc_limitati",
-    "clp_conformita",
-    "legno_certificato",
-    "plastica_conforme",
-    "metallo_conforme",
-    "rivestimenti_ok",
-    "formaldeide_bassa",
-    "voc_bassi",
-    "facilmente_smortabile",
-    "produzione_basso_impatto",
-    "info_consumatore_ok"
-]
-
 def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
-    """Estrae automaticamente i campi Ecolabel UE dai PDF del mobile."""
     text = extract_text_from_pdf(pdf_file)
     extracted_data = gpt_extract_from_pdf(text, client, tipo="mobile", fields=ECOLABEL_FIELDS)
-    
     mobile_data = {}
     for campo, info in extracted_data.items():
         val = info.get("value")
@@ -360,39 +317,30 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
             mobile_data[campo] = False
     return mobile_data
 
-def merge_data_with_ecolabel(passport, pdf_file, image_data=None, cert_data=None, client=None):
-    """Merge dati PDF, immagini, certificati e campi Ecolabel nel passport"""
-    ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
-    
+def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
+    ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client) if pdf_file else {}
+    if "sections" not in passport:
+        passport["sections"] = {}
+    passport["sections"]["Ecolabel_UE"] = ecolabel_data
     if pdf_file:
         pdf_text_data = gpt_extract_from_pdf(extract_text_from_pdf(pdf_file), client, "mobile", ECOLABEL_FIELDS)
-        if "sections" not in passport:
-            passport["sections"] = {}
         passport["sections"]["PDF"] = pdf_text_data
-    
     if image_data:
         passport["sections"]["Images"] = image_data
-    
     if cert_data:
         passport["certificates"] = cert_data
-    
-    passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
-from openpyxl import load_workbook
-
-EXCEL_FILE = "passport_archive.xlsx"
-
+# ======================================================
+# EXCEL
+# ======================================================
 def save_passport_to_excel_append(passport: dict):
-    """Salva o aggiorna il passport in un file Excel"""
-    # Preparazione dati generali
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
     df_passport = pd.DataFrame([{
         "id": passport["id"],
         "product_type": passport.get("product_type"),
         "overall_rating": passport.get("overall_rating", 0),
         "sustainability_score": passport.get("sustainability_score", 0)
     }])
-    
-    # Fields
     fields_data = []
     for section_name, section in passport.get("sections", {}).items():
         for field_name, field_info in section.items():
@@ -402,21 +350,12 @@ def save_passport_to_excel_append(passport: dict):
                     "section": section_name,
                     "field_name": field_name,
                     "value": field_info.get("value"),
-                    "confidence": field_info.get("confidence", 0)
+                    "confidence": field_info.get("confidence",0)
                 })
     df_fields = pd.DataFrame(fields_data)
-    
-    # Images
-    images_data = []
-    for img in passport.get("images", []):
-        images_data.append({
-            "passport_id": passport["id"],
-            "file_base64": img.get("file_base64"),
-            "caption": img.get("caption", "")
-        })
+    images_data = [{"passport_id": passport["id"], "file_base64": img.get("file_base64"), "caption": img.get("caption","")} for img in passport.get("images",[])]
     df_images = pd.DataFrame(images_data)
-    
-    # Scrive/appende su Excel
+
     if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
@@ -424,19 +363,10 @@ def save_passport_to_excel_append(passport: dict):
             df_images.to_excel(writer, sheet_name="images", index=False)
     else:
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
-            # append passport
-            try:
-                book = load_workbook(EXCEL_FILE)
-                writer.book = book
-                writer.sheets = {ws.title: ws for ws in book.worksheets}
-
-                # passport
-                df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
-                df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
-                df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
-
-                writer.save()
-            except Exception as e:
-                print(f"Errore salvando Excel: {e}")
-
-    
+            book = load_workbook(EXCEL_FILE)
+            writer.book = book
+            writer.sheets = {ws.title: ws for ws in book.worksheets}
+            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
+            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
+            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
+            writer.save()
