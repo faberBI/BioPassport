@@ -392,17 +392,18 @@ def add_product_image(passport: dict, img_file):
 
 def render_espr_compliance(passport):
     """
-    Mostra un riepilogo completo della compliance e sostenibilità UE.
-    Include REACH, Ecodesign, GDPR, materiali, riciclo, catena di fornitura, energie e Ecolabel.
+    Mostra un riepilogo completo della compliance UE e della sostenibilità.
+    Include normative, materiali, riciclo, certificazioni, prezzo, data produzione,
+    crittografia e versioning.
     """
     st.subheader("🇪🇺 Compliance e Sostenibilità UE")
 
-    # =======================
-    # REACH / Ecodesign / GDPR
-    # =======================
     pdf_section = passport.get("sections", {}).get("PDF", {})
     ecolabel_section = passport.get("sections", {}).get("Ecolabel_UE", {})
-    
+
+    # =======================
+    # Normativa / Privacy
+    # =======================
     reach_status = ecolabel_section.get("svhc_limitati", False)
     ecodesign_status = ecolabel_section.get("produzione_basso_impatto", False)
     gdpr_status = pdf_section.get("Produttore", {}).get("value") is not None
@@ -437,6 +438,24 @@ def render_espr_compliance(passport):
     st.write(f"**Catena di fornitura / Luogo produzione:** {luogo}")
     st.write(f"**Facilità di smaltimento / riciclo:** {'✅' if riciclo else '⚠️'}")
     st.write(f"**Indicatori di basso impatto produzione:** {'✅' if basso_impatto else '⚠️'}")
+
+    # =======================
+    # Prezzo e Data produzione
+    # =======================
+    prezzo = pdf_section.get("Prezzo in euro", {}).get("value", "non specificato")
+    data_prod = pdf_section.get("Data di produzione", {}).get("value", "non specificato")
+    st.markdown("### Prezzo e Produzione")
+    st.write(f"**Prezzo:** {prezzo} €")
+    st.write(f"**Data di produzione:** {data_prod}")
+
+    # =======================
+    # Crittografia e Versioning
+    # =======================
+    crittografia = passport.get("digital_signature") is not None
+    versioning = passport.get("versioning") is not None
+    st.markdown("### Sicurezza e Versioning")
+    st.write(f"**Crittografia dati sensibili:** {'✅' if crittografia else '⚠️'}")
+    st.write(f"**Log modifiche / versioning:** {'✅' if versioning else '⚠️'}")
 
     # =======================
     # Certificazioni
