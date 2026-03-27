@@ -195,12 +195,29 @@ with tabs[2]:
         if st.button("Pubblica Digital Product Passport"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
-            services.merge_data(passport,
-                                st.session_state.validated_pdf,
-                                st.session_state.validated_image,
-                                st.session_state.validated_cert)
+            
+            # Mobile: usa merge_data_with_ecolabel, altrimenti merge_data normale
+            if tipo == "mobile":
+                services.merge_data_with_ecolabel(
+                    passport,
+                    pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
+                    image_data=st.session_state.validated_image,
+                    cert_data=st.session_state.validated_cert,
+                    client=client
+                )
+            else:
+                services.merge_data(
+                    passport,
+                    st.session_state.validated_pdf,
+                    st.session_state.validated_image,
+                    st.session_state.validated_cert
+                )
+
+            # Aggiungi immagini al passport
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
+            
+            # Salva passport su file e Excel
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
@@ -211,6 +228,7 @@ with tabs[2]:
             st.metric("Affidabilità", f"{int(overall*100)}%")
             st.metric("Sostenibilità", f"{int(sustainability*100)}%")
 
+            # QR code
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
             st.image(qr)
@@ -218,7 +236,6 @@ with tabs[2]:
             st.code(url)
     else:
         st.info("Completa prima la validazione PDF e immagini")
-
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
