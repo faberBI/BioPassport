@@ -63,19 +63,18 @@ if passport_id:
 
     for sec_name, sec in passport["sections"].items():
         st.subheader(f"{sec_name} ({sec.get('section_rating',0)*100:.0f}%)")
-        for fname, f in sec["fields"].items():
+        for fname, f in sec.get("fields", {}).items():
             conf = f.get("confidence", 0)
-            st.write(f"**{fname}**: {f.get('value','')} {f.get('color','')} (conf: {conf})")
+            st.write(f"**{fname}**: {f.get('value','')} (conf: {conf})")
             if conf < 0.5:
                 st.caption("Bassa confidenza")
             if f.get("explanation"):
                 st.caption(f["explanation"])
 
-    # Certificati
-    if "certificates" in passport and passport["certificates"]:
+    if passport.get("certificates"):
         st.subheader("Certificati")
         for cert in passport["certificates"]:
-            st.write(f"**Nome:** {cert.get('nome_certificato', {}).get('value','')}")
+            st.write(f"**Nome:** {cert.get('tipo_certificato', {}).get('value','')}")
             st.write(f"**Ente:** {cert.get('ente_emittente', {}).get('value','')}")
             st.write(f"**Numero:** {cert.get('numero_certificato', {}).get('value','')}")
             st.write(f"**Emissione:** {cert.get('data_emissione', {}).get('value','')}")
@@ -120,29 +119,28 @@ with tabs[0]:
             st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
 
             with st.spinner("Analisi in corso..."):
-                # ======================
                 # PDF prodotto
-                # ======================
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # ======================
                 # Immagini prodotto
-                # ======================
                 img_data = {}
                 for img_bytes in st.session_state.uploaded_images_bytes:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
                     img_data.update(res)
                 st.session_state.image_data = img_data
 
-                # ======================
                 # Certificati
-                # ======================
                 cert_data_list = []
                 for cert_bytes in st.session_state.uploaded_cert_bytes:
                     res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
                     cert_data_list.append(res)
                 st.session_state.cert_data = cert_data_list
+
+                # Ecolabel UE (solo mobile)
+                if tipo=="mobile":
+                    ecolabel_data = services.extract_ecolabel_fields_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes), client)
+                    st.session_state.pdf_data.update({"Ecolabel_UE": ecolabel_data})
 
             st.success("Analisi completata ✅")
 
@@ -189,66 +187,37 @@ with tabs[1]:
     else:
         st.info("Esegui prima l’analisi PDF e immagini")
 
-# =======================================
+# ======================================================
 # TAB 3 — PUBBLICA
-# =======================================
+# ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
         if st.button("Pubblica Digital Product Passport"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
-
-            # ========================
-            # Merge dati + Ecolabel UE (solo mobili)
-            # ========================
-            pdf_io = BytesIO(st.session_state.uploaded_pdf_bytes)
-            if tipo == "mobile":
-                services.merge_data_with_ecolabel(
-                    passport,
-                    pdf_io,
-                    st.session_state.validated_image,
-                    st.session_state.validated_cert,
-                    client
-                )
-            else:
-                services.merge_data(
-                    passport,
-                    st.session_state.validated_pdf,
-                    st.session_state.validated_image,
-                    st.session_state.validated_cert
-                )
-
-            # ========================
-            # Aggiungi immagini prodotto
-            # ========================
+            services.merge_data(passport,
+                                st.session_state.validated_pdf,
+                                st.session_state.validated_image,
+                                st.session_state.validated_cert)
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
-
-            # ========================
-            # Salvataggi
-            # ========================
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
             st.success("DPP pubblicato ✅")
-
-            # ========================
-            # Metriche passport
-            # ========================
             st.subheader("Metriche")
             overall = passport.get("overall_rating", 0)
             sustainability = passport.get("sustainability_score", 0)
             st.metric("Affidabilità", f"{int(overall*100)}%")
             st.metric("Sostenibilità", f"{int(sustainability*100)}%")
 
-            # ========================
-            # Genera QR code pubblico
-            # ========================
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
             st.image(qr)
             st.download_button("Scarica QR code", data=qr.getvalue(), file_name=f"{pid}_qr.png", mime="image/png")
             st.code(url)
+    else:
+        st.info("Completa prima la validazione PDF e immagini")
 
 # ======================================================
 # TAB 4 — ARCHIVIO
