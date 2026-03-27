@@ -310,3 +310,63 @@ def verify_operator_signature(signed_pdf_path):
     vc = ValidationContext(trust_roots=store)
     status = validation.validate_pdf_signature(signed_pdf_path, validation_context=vc)
     return status.trusted
+
+ECOLABEL_FIELDS = [
+    "descrizione_prodotto",
+    "svhc_limitati",
+    "clp_conformita",
+    "legno_certificato",
+    "plastica_conforme",
+    "metallo_conforme",
+    "rivestimenti_ok",
+    "formaldeide_bassa",
+    "voc_bassi",
+    "facilmente_smortabile",
+    "produzione_basso_impatto",
+    "info_consumatore_ok"
+]
+
+def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
+    """
+    Estrae automaticamente i campi Ecolabel UE dai PDF del mobile.
+    Restituisce un dizionario {campo: True/False}.
+    """
+    # Estrai testo dal PDF
+    text = extract_text_from_pdf(pdf_file)
+    
+    # Chiama GPT per estrazione
+    extracted_data = gpt_extract_from_pdf(text, client, tipo="mobile", fields=ECOLABEL_FIELDS)
+    
+    # Converti i valori estratti in True/False
+    mobile_data = {}
+    for campo, info in extracted_data.items():
+        val = info.get("value")
+        if isinstance(val, bool):
+            mobile_data[campo] = val
+        elif isinstance(val, str):
+            # Considera True se il testo contiene "sì", "true", "conforme", ecc.
+            mobile_data[campo] = val.strip().lower() in ["sì","si","true","yes","conforme"]
+        else:
+            mobile_data[campo] = False
+    return mobile_data
+
+def merge_data_with_ecolabel(passport, pdf_file, image_data=None, cert_data=None, client=None):
+    # Estrazione automatica dei dati Ecolabel dal PDF
+    ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
+    
+    # Aggiorna la sezione PDF
+    if pdf_file:
+        pdf_text_data = gpt_extract_from_pdf(extract_text_from_pdf(pdf_file), client, "mobile", PRODUCT_FIELDS["mobile"]["pdf"])
+        passport["sections"]["PDF"].update(pdf_text_data)
+    
+    # Aggiorna immagini
+    if image_data:
+        passport["sections"]["Images"] = image_data
+    
+    # Aggiorna certificati
+    if cert_data:
+        passport["certificates"] = cert_data
+    
+    # Aggiungi valutazione Ecolabel UE
+    passport["sections"]["Ecolabel_UE"] = verifica_ecolabel_ue(ecolabel_data)
+    
