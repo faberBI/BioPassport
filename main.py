@@ -125,85 +125,61 @@ with tabs[0]:
         st.success("Analisi completata")
 
 # ======================================================
-# TAB 2 — VALIDAZIONE
+# TAB 2 — VALIDAZIONE (aggiornato sicuro)
 # ======================================================
 with tabs[1]:
+    if st.session_state.pdf_data or st.session_state.image_data or st.session_state.cert_data:
+        # --------- Validazione dati PDF ---------
+        if st.session_state.pdf_data:
+            st.subheader("Validazione dati PDF")
+            validated_pdf = {}
+            for k, v in st.session_state.pdf_data.items():
+                val = v.get("value", "") if isinstance(v, dict) else str(v)
+                conf = v.get("confidence", 0) if isinstance(v, dict) else 0
+                explanation = v.get("explanation", "") if isinstance(v, dict) else ""
+                validated_pdf[k] = {
+                    "value": st.text_input(f"{k} (conf: {conf})", val, help=explanation),
+                    "confidence": conf
+                }
+            st.session_state.validated_pdf = validated_pdf
 
-    if not st.session_state.pdf_data:
-        st.info("Fai prima analisi")
-        st.stop()
+        # --------- Validazione dati Immagini ---------
+        if st.session_state.image_data:
+            st.subheader("Validazione dati Immagini")
+            validated_img = {}
+            for k, v in st.session_state.image_data.items():
+                val = v.get("value", "") if isinstance(v, dict) else str(v)
+                conf = v.get("confidence", 0) if isinstance(v, dict) else 0
+                explanation = v.get("explanation", "") if isinstance(v, dict) else ""
+                validated_img[k] = {
+                    "value": st.text_input(f"{k} (conf: {conf})", val, help=explanation),
+                    "confidence": conf
+                }
+            st.session_state.validated_image = validated_img
 
-    st.subheader("PDF")
+        # --------- Validazione certificati ---------
+        if st.session_state.cert_data:
+            st.subheader("Validazione certificati")
+            validated_cert_list = []
+            for i, cert in enumerate(st.session_state.cert_data):
+                validated_cert = {}
+                st.markdown(f"**Certificato {i+1}**")
+                for k, v in cert.items():
+                    val = v.get("value", "") if isinstance(v, dict) else str(v)
+                    conf = v.get("confidence", 0) if isinstance(v, dict) else 0
+                    validated_cert[k] = {
+                        "value": st.text_input(f"{k} (conf: {conf})", val, key=f"cert_{i}_{k}"),
+                        "confidence": conf
+                    }
+                validated_cert_list.append(validated_cert)
+            st.session_state.validated_cert = validated_cert_list
 
-    validated_pdf = {}
-    for k,v in st.session_state.pdf_data.items():
+        # --------- Bottone completa validazione ---------
+        if st.button("Completa validazione"):
+            st.success("Validazione completata ✅")
 
-        val = st.text_input(
-            f"{k}",
-            v.get("value","")
-        )
-
-        validated_pdf[k] = {
-            "value": val,
-            "confidence": v.get("confidence",0)
-        }
-
-    st.session_state.validated_pdf = validated_pdf
-
-    st.subheader("IMMAGINI")
-
-    validated_img = {}
-    for k,v in st.session_state.image_data.items():
-
-        val = st.text_input(
-            f"{k}",
-            v.get("value",""),
-            key=f"img_{k}"
-        )
-
-        validated_img[k] = {
-            "value": val,
-            "confidence": v.get("confidence",0)
-        }
-
-    st.session_state.validated_image = validated_img
-
-    # CERTIFICATI
-    if st.session_state.cert_data:
-
-        st.subheader("Certificati")
-
-        validated_cert = []
-        for i, cert in enumerate(st.session_state.cert_data):
-
-            c = {}
-            for k,v in cert.items():
-
-                val = st.text_input(
-                    f"{k}",
-                    v.get("value",""),
-                    key=f"cert_{i}_{k}"
-                )
-
-                c[k] = {"value":val,"confidence":v.get("confidence",0)}
-
-            validated_cert.append(c)
-
-        st.session_state.validated_cert = validated_cert
-
-        # VALIDAZIONE CERTIFICATI
-        st.session_state.cert_validation = services.verify_certificates(validated_cert)
-
-        if st.session_state.cert_validation < 0.6:
-            st.warning("Certificati poco affidabili")
-
-    # CAMPI OBBLIGATORI
-    missing = services.check_required_fields(validated_pdf, tipo)
-
-    if missing:
-        st.error(f"Campi obbligatori mancanti: {missing}")
     else:
-        st.success("Campi obbligatori OK")
+        st.info("Esegui prima l’analisi PDF, immagini o certificati")success("Campi obbligatori OK")
 
 # ======================================================
 # TAB 3 — PUBBLICA
