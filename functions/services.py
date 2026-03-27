@@ -389,3 +389,18 @@ def add_product_image(passport: dict, img_file):
     except Exception as e:
         print(f"Errore aggiungendo immagine: {e}")
         raise
+
+def render_espr_compliance(passport):
+    """
+    Mostra un riepilogo rapido della compliance UE (REACH, Ecodesign, GDPR, ecc.)
+    """
+    st.subheader("Compliance UE / Espr")
+    compliance_fields = {
+        "REACH / sostanze pericolose": passport.get("sections", {}).get("Ecolabel_UE", {}).get("svhc_limitati", False),
+        "Ecodesign / direttive UE": passport.get("sections", {}).get("Ecolabel_UE", {}).get("produzione_basso_impatto", False),
+        "GDPR": passport.get("sections", {}).get("PDF", {}).get("Produttore", {}).get("value") is not None
+    }
+
+    for field, status in compliance_fields.items():
+        emoji = "✅" if status else "⚠️"
+        st.write(f"{emoji} {field}")
