@@ -5,9 +5,7 @@ from functions import services
 from PIL import Image
 import os
 import pandas as pd
-import base64
 from io import BytesIO
-import streamlit.components.v1 as components
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -62,14 +60,16 @@ if passport_id:
     st.write(f"**Tipo:** {passport['product_type']}")
 
     for sec_name, sec in passport["sections"].items():
-        st.subheader(f"{sec_name} ({sec.get('section_rating',0)*100:.0f}%)")
-        for fname, f in sec.get("fields", {}).items():
-            conf = f.get("confidence", 0)
-            st.write(f"**{fname}**: {f.get('value','')} (conf: {conf})")
+        st.subheader(f"{sec_name}")
+        for fname, f in sec.items():
+            val = f.get("value") if isinstance(f, dict) else f
+            conf = f.get("confidence", 0) if isinstance(f, dict) else 0
+            explanation = f.get("explanation", "") if isinstance(f, dict) else ""
+            st.write(f"**{fname}**: {val} (conf: {conf})")
             if conf < 0.5:
                 st.caption("Bassa confidenza")
-            if f.get("explanation"):
-                st.caption(f["explanation"])
+            if explanation:
+                st.caption(explanation)
 
     if passport.get("certificates"):
         st.subheader("Certificati")
@@ -151,7 +151,7 @@ with tabs[1]:
     if st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione dati PDF")
         validated_pdf = {
-            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")), 
+            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")),
                 "confidence": v.get("confidence",0)}
             for k,v in st.session_state.pdf_data.items()
         }
@@ -195,8 +195,8 @@ with tabs[2]:
         if st.button("Pubblica Digital Product Passport"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
-            
-            # Mobile: usa merge_data_with_ecolabel, altrimenti merge_data normale
+
+            # Mobile: merge con Ecolabel, altrimenti normale
             if tipo == "mobile":
                 services.merge_data_with_ecolabel(
                     passport,
@@ -213,11 +213,11 @@ with tabs[2]:
                     st.session_state.validated_cert
                 )
 
-            # Aggiungi immagini al passport
+            # Aggiungi immagini
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
-            
-            # Salva passport su file e Excel
+
+            # Salva passport
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
@@ -236,13 +236,15 @@ with tabs[2]:
             st.code(url)
     else:
         st.info("Completa prima la validazione PDF e immagini")
+
 # ======================================================
-# TAB 4 — ARCHIVIO
+# TAB 4 — ARCHIVIO con filtri
 # ======================================================
 with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
         try:
+            # Leggi fogli Excel
             df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").pipe(lambda df: df.rename(columns=str.strip))
             df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").pipe(lambda df: df.rename(columns=str.strip))
             df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images").pipe(lambda df: df.rename(columns=str.strip))
@@ -250,20 +252,23 @@ with tabs[3]:
             if df_passport.empty:
                 st.info("Nessun passport disponibile")
             else:
-                df_full = df_passport.merge(
-                    df_fields.pivot_table(index="passport_id", columns="field_name", values="value", aggfunc="first").reset_index(),
-                    left_on="id", right_on="passport_id", how="left"
-                )
+                # Pivot dei fields per unire con passport
+                df_fields_pivot = df_fields.pivot_table(index="passport_id", columns="field_name", values="value", aggfunc="first").reset_index()
+                df_full = df_passport.merge(df_fields_pivot, left_on="id", right_on="passport_id", how="left")
 
-                # Filtri interattivi
+                # Filtro interattivo
+                st.subheader("Filtri")
                 nome = st.text_input("Nome prodotto")
                 luogo = st.text_input("Luogo produzione")
                 prezzo_min, prezzo_max = st.number_input("Prezzo minimo", 0), st.number_input("Prezzo massimo", 10000)
                 data_min, data_max = st.date_input("Data da"), st.date_input("Data a")
 
                 df_filtered = df_full.copy()
-                if nome: df_filtered = df_filtered[df_filtered["Nome prodotto"].astype(str).str.contains(nome, case=False, na=False)]
-                if luogo: df_filtered = df_filtered[df_filtered["Luogo di produzione"].astype(str).str.contains(luogo, case=False, na=False)]
+
+                if nome:
+                    df_filtered = df_filtered[df_filtered["Nome prodotto"].astype(str).str.contains(nome, case=False, na=False)]
+                if luogo:
+                    df_filtered = df_filtered[df_filtered["Luogo di produzione"].astype(str).str.contains(luogo, case=False, na=False)]
                 if "Prezzo" in df_filtered.columns:
                     df_filtered["Prezzo_num"] = pd.to_numeric(df_filtered["Prezzo"].astype(str).str.replace("€","").str.replace(",","."), errors='coerce')
                     df_filtered = df_filtered[(df_filtered["Prezzo_num"] >= prezzo_min) & (df_filtered["Prezzo_num"] <= prezzo_max)]
@@ -274,12 +279,15 @@ with tabs[3]:
                 st.subheader("Risultati filtrati")
                 st.dataframe(df_filtered)
 
+                # Seleziona passport da dettagliare
                 selected_id = st.selectbox("Seleziona Passport", df_filtered["id"]) if not df_filtered.empty else None
                 if selected_id:
-                    st.subheader("Dettaglio")
+                    st.subheader("Dettaglio Passport")
                     st.dataframe(df_passport[df_passport["id"]==selected_id])
-                    st.subheader("Fields")
+                    
+                    st.subheader("Campi del Passport")
                     st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
+                    
                     st.subheader("Immagini")
                     for _, row in df_images[df_images["passport_id"]==selected_id].iterrows():
                         st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
