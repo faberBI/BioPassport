@@ -179,7 +179,8 @@ with tabs[1]:
             st.success("Validazione completata ✅")
 
     else:
-        st.info("Esegui prima l’analisi PDF, immagini o certificati")success("Campi obbligatori OK")
+        st.info("Esegui prima l’analisi PDF, immagini o certificati")
+
 
 # ======================================================
 # TAB 3 — PUBBLICA
