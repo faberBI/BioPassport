@@ -1,53 +1,83 @@
-# COMPLETE ENTERPRISE PIPELINE (WITH SECURITY + COMPLIANCE)
-
+import os
 import json
 import base64
+import fitz  # PyMuPDF
+import pdfplumber
 import unicodedata
-import hashlib
 from difflib import get_close_matches
 from io import BytesIO
-from datetime import datetime
-
-import pdfplumber
 from PIL import Image
+import pandas as pd
+import qrcode
+from pyhanko.sign import signers, fields, validation
+from pyhanko_certvalidator import ValidationContext, CertificateStore
 from openai import OpenAI
-
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.backends import default_backend
 
 # ======================================================
 # CONFIG
 # ======================================================
-SOURCE_PRIORITY = {
-    "certificate": 1.0,
-    "pdf": 0.8,
-    "image": 0.6
+PASSPORT_DIR = "passports"
+EXCEL_FILE = os.path.join(PASSPORT_DIR, "passport_archive.xlsx")
+
+TRUSTED_ISSUERS = [
+    "Chambersign","InfoCert","Aruba PEC","GlobalSign EU","D-Trust"
+]
+
+PRODUCT_FIELDS = {
+    "mobile": {
+        "pdf": [
+            {"name":"Nome prodotto", "required": True},
+            {"name":"Numero di modello", "required": True},
+            {"name":"Produttore", "required": True},
+            {"name":"Materiali", "required": True},
+            {"name":"Certificazione di sicurezza", "required": True},
+            {"name":"Certificazione di sostenibilita", "required": True},
+            {"name":"Materiali/componenti utilizzati", "required": True},
+            {"name":"% di contenuto riciclato", "required": True},
+            {"name":"Sostanze preoccupanti", "required": True},
+            {"name":"Conformità tecnica", "required": True},
+            {"name":"Prezzo in euro", "required": False},
+            {"name":"Luogo di Produzione", "required": False},
+            {"name":"Data di produzione", "required": False}
+            
+        ],
+        "image": [
+            {"name":"Colore", "required": True},
+            {"name":"Condizioni", "required": True}
+        ]
+    }
 }
 
 # ======================================================
-# NORMALIZATION
+# NORMALIZATION / MATCHING
 # ======================================================
 def normalize(text):
     text = text.lower().strip()
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return text.replace(" ", "_")
-
+    text = unicodedata.normalize("NFKD", text).encode("ascii","ignore").decode()
+    return text.replace(" ","_")
 
 def match_field(input_key, field_names):
     norm_input = normalize(input_key)
     norm_fields = {normalize(f): f for f in field_names}
-
     if norm_input in norm_fields:
         return norm_fields[norm_input]
-
-    matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.7)
-    return norm_fields[matches[0]] if matches else None
+    matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.8)
+    if matches:
+        return norm_fields[matches[0]]
+    return None
 
 # ======================================================
-# PDF
+# PDF / IMAGE UTILITIES
 # ======================================================
+def split_text(text, max_chars=3000, overlap=300):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + max_chars
+        chunks.append(text[start:end])
+        start += max_chars - overlap
+    return chunks
+
 def extract_text_from_pdf(pdf_file):
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
@@ -55,239 +85,228 @@ def extract_text_from_pdf(pdf_file):
             text += page.extract_text() or ""
     return text
 
-# ======================================================
-# GPT SAFE PARSE
-# ======================================================
-def safe_json_parse(text):
-    if text.startswith("```"):
-        text = "\n".join(text.splitlines()[1:-1])
-    first, last = text.find("{"), text.rfind("}")
-    return json.loads(text[first:last + 1])
-
-# ======================================================
-# EXTRACTION
-# ======================================================
-def gpt_extract_from_pdf(text, client, fields):
-    prompt = f"Extract fields {fields}. JSON only. Text: {text[:4000]}"
-
-    r = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    data = safe_json_parse(r.choices[0].message.content)
-
-    return {k: {"value": v, "confidence": 0.8 if v else 0, "source": "pdf"} for k, v in data.items()}
-
-
-def gpt_analyze_image(image_file, client):
-    img = Image.open(image_file).convert("RGB")
+def image_to_base64(image_file):
+    if hasattr(image_file,"getvalue"):
+        return base64.b64encode(image_file.getvalue()).decode()
     buf = BytesIO()
-    img.save(buf, format="JPEG")
+    image_file.save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+def resize_image_for_vision(image_file, max_size=512):
+    img = Image.open(image_file).convert("RGB")
+    img.thumbnail((max_size, max_size))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
     buf.seek(0)
-
-    file = client.files.create(file=buf, purpose="vision")
-
-    resp = client.responses.create(
-        model="gpt-4o",
-        input=[{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "Extract color, condition, material JSON"},
-                {"type": "input_image", "file_id": file.id}
-            ]
-        }]
-    )
-
-    data = safe_json_parse(resp.output_text)
-
-    return {k: {"value": v, "confidence": 0.6 if v else 0, "source": "image"} for k, v in data.items()}
-
-
-def gpt_extract_cert(cert_file, client):
-    text = extract_text_from_pdf(cert_file)
-
-    prompt = f"Extract certificate info JSON: issuer, expiry, id. Text: {text[:3000]}"
-
-    r = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    data = safe_json_parse(r.choices[0].message.content)
-
-    return {k: {"value": v, "confidence": 0.9 if v else 0, "source": "certificate"} for k, v in data.items()}
+    buf.name = "image.jpg"
+    return buf
 
 # ======================================================
-# TRUSTED CERTIFICATE VALIDATION
+# CONFIDENCE
 # ======================================================
-def verify_certificate(cert_bytes, trusted_issuers):
+def compute_confidence(values):
+    if not values:
+        return 0.0
+    most_common = max(set(values), key=values.count)
+    confidence = values.count(most_common)/len(values)
+    return confidence
+
+# ======================================================
+# GPT FUNCTIONS (API REAL)
+# ======================================================
+def gpt_extract_cert_info(cert_file, client: OpenAI):
+    text = ""
     try:
-        cert = load_pem_x509_certificate(cert_bytes, default_backend())
-        issuer = cert.issuer.rfc4514_string()
-
-        if issuer not in trusted_issuers:
-            return False
-
-        now = datetime.utcnow()
-        if cert.not_valid_before > now or cert.not_valid_after < now:
-            return False
-
-        return True
+        text = extract_text_from_pdf(cert_file)
     except Exception:
-        return False
+        text = None
+    prompt = f"""
+Analizza il certificato allegato.
+Estrai le seguenti informazioni:
+- tipo_certificato
+- numero_certificato
+- ente_emittente
+- data_emissione
+- data_scadenza
+- riferimenti_LCA/EPD
+Rispondi solo con JSON valido. Usa null se il campo non è disponibile.
+Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role":"user","content":prompt}],
+            temperature=0
+        )
+        resp_text = response.choices[0].message.content
+        if resp_text.startswith("```"):
+            resp_text = "\n".join(resp_text.splitlines()[1:-1])
+        return json.loads(resp_text)
+    except Exception as e:
+        return {
+            "tipo_certificato": None,
+            "numero_certificato": None,
+            "ente_emittente": None,
+            "data_emissione": None,
+            "data_scadenza": None,
+            "riferimenti": None,
+            "error": str(e)
+        }
+
+def gpt_extract_from_pdf(text, client: OpenAI, tipo, fields):
+    chunks = split_text(text)
+    results = []
+    for chunk in chunks:
+        prompt = f"""
+Estrai dati tecnici del prodotto ({tipo}).
+Rispondi SOLO con JSON valido. Usa null se non presente.
+Campi: {json.dumps(fields)}
+Testo: {chunk}
+"""
+        try:
+            r = client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[{"role":"user","content":prompt}],
+                temperature=0
+            )
+            resp_text = r.choices[0].message.content
+            if resp_text.startswith("```"):
+                resp_text = "\n".join(resp_text.splitlines()[1:-1])
+            results.append(json.loads(resp_text))
+        except Exception:
+            continue
+    final = {}
+    for campo in fields:
+        values = [r.get(campo) for r in results if r.get(campo)]
+        final[campo] = {
+            "value": values[0] if values else None,
+            "confidence": compute_confidence(values),
+            "explanation": "Dato estratto da PDF" if values else "Dato non trovato nel PDF"
+        }
+    return final
+
+def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
+    prompt = f"""
+Analizza immagine prodotto {tipo}.
+Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
+Rispondi con JSON valido.
+Usa null se non determinabile.
+"""
+    def safe_json_parse(text):
+        if text.startswith("```"):
+            text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
+        first,last = text.find("{"), text.rfind("}")
+        return json.loads(text[first:last+1])
+    try:
+        file_id = upload_image_to_openai(image_file, client)
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
+        )
+        data_raw = safe_json_parse(resp.output_text.strip())
+        result = {}
+        for c in campi:
+            val = data_raw.get(c, None)
+            result[c.capitalize()] = {
+                "value": val if val not in [None,"","null"] else "non rilevato",
+                "confidence": 0.7 if val not in [None,"","null"] else 0.0,
+                "explanation": "Dato estratto da immagine" if val not in [None,"","null"] else "Non rilevabile"
+            }
+        return result
+    except Exception:
+        return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
+
+def upload_image_to_openai(image_file, client: OpenAI):
+    resized = resize_image_for_vision(image_file)
+    uploaded = client.files.create(file=resized, purpose="vision")
+    return uploaded.id
 
 # ======================================================
-# MERGE
+# HIGHLIGHT PDF
 # ======================================================
-def merge_data(fields, *sources):
-    for source in sources:
-        for key, value in source.items():
-            matched = match_field(key, fields.keys())
-            if not matched:
-                continue
-
-            existing = fields[matched]
-
-            new_score = value["confidence"] * SOURCE_PRIORITY[value["source"]]
-            old_score = existing["confidence"] * SOURCE_PRIORITY.get(existing.get("source"), 0.5)
-
-            if new_score > old_score:
-                fields[matched] = value
-
-    return fields
-
-# ======================================================
-# VALIDATION
-# ======================================================
-def validate_required(fields, required_fields):
-    return [f for f in required_fields if not fields.get(f) or not fields[f].get("value")]
-
-
-def validate_operator(operator):
-    if not operator.get("name") or not operator.get("vat"):
-        return False
-    return True
+def highlight_pdf_fields(pdf_file, extracted_data):
+    pdf_bytes = pdf_file.read() if hasattr(pdf_file,"read") else open(pdf_file,"rb").read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for page in doc:
+        for field_name, field in extracted_data.items():
+            val = field.get("value") if isinstance(field, dict) else field
+            if val:
+                text_instances = page.search_for(str(val))
+                for inst in text_instances:
+                    highlight = page.add_highlight_annot(inst)
+                    highlight.set_colors(stroke=(1,1,0))
+                    highlight.update()
+    out = BytesIO()
+    doc.save(out)
+    out.seek(0)
+    doc.close()
+    return out
 
 # ======================================================
-# SCORING
+# PASSPORT MANAGEMENT
 # ======================================================
-def compute_scores(fields, required_fields):
-    filled = [f for f in fields.values() if f.get("value")]
-    reliability = sum(f["confidence"] for f in filled) / len(filled) if filled else 0
-
-    required_filled = [f for f in required_fields if fields.get(f, {}).get("value")]
-    espr = len(required_filled) / len(required_fields) if required_fields else 0
-
-    return reliability, espr
-
-# ======================================================
-# SUSTAINABILITY
-# ======================================================
-def compute_sustainability(fields):
-    score = 0
-    count = 0
-
-    for k, v in fields.items():
-        if "riciclato" in k.lower() and v.get("value"):
-            try:
-                score += float(v["value"]) / 100
-                count += 1
-            except:
-                pass
-
-    return score / count if count else 0
-
-# ======================================================
-# SIGNATURE
-# ======================================================
-def generate_hash(passport):
-    data = dict(passport)
-    data.pop("signature", None)
-    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
-
-
-def sign_passport(passport, private_key_pem):
-    private_key = serialization.load_pem_private_key(private_key_pem.encode(), password=None)
-
-    hash_value = generate_hash(passport)
-
-    signature = private_key.sign(
-        hash_value.encode(),
-        padding.PKCS1v15(),
-        hashes.SHA256()
-    )
-
-    passport["signature"] = {
-        "hash": hash_value,
-        "signature": signature.hex(),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
+def initialize_passport(pid, tipo, fields):
+    passport = {"id":pid,"product_type":tipo,"sections":{},"certificates":[],"images":[],"overall_rating":0,"sustainability_score":0,"validated_by_operator":False,"digital_signature":None}
+    for field in fields:
+        passport["sections"].setdefault("PDF",{})[field] = {"value":None,"confidence":0,"explanation":""}
     return passport
 
-# ======================================================
-# VERSIONING
-# ======================================================
-def update_version(passport, changes):
-    passport.setdefault("version", 1)
-    passport["version"] += 1
-    passport["updated_at"] = datetime.utcnow().isoformat()
-    passport.setdefault("changes", []).append(changes)
-    return passport
+def merge_data(passport, pdf_data, image_data, cert_data=None):
+    if pdf_data:
+        passport["sections"]["PDF"].update(pdf_data)
+    if image_data:
+        passport["sections"]["Images"] = image_data
+    if cert_data:
+        passport["certificates"] = cert_data
+
+def add_product_image(passport, img_file, caption=None):
+    b64 = image_to_base64(Image.open(img_file))
+    passport["images"].append({"file_base64":b64,"caption":caption})
+
+def save_passport_to_file(passport):
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
+    path = os.path.join(PASSPORT_DIR,f"{passport['id']}.json")
+    with open(path,"w") as f:
+        json.dump(passport,f,indent=2)
+
+def load_passport_from_file(pid):
+    path = os.path.join(PASSPORT_DIR,f"{pid}.json")
+    if not os.path.exists(path):
+        return None
+    with open(path,"r") as f:
+        return json.load(f)
 
 # ======================================================
-# PIPELINE
+# QR CODE
 # ======================================================
-def process_passport(pdf_file, image_files, cert_files, fields, required_fields, client, private_key, operator, trusted_issuers):
+def generate_qr_from_url(url):
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
-    passport = {
-        "id": f"PROD-{datetime.utcnow().timestamp()}",
-        "created_at": datetime.utcnow().isoformat(),
-        "fields": {f: {"value": None, "confidence": 0, "source": None} for f in fields},
-        "operator": operator
-    }
+# ======================================================
+# DIGITAL SIGNATURE & OPERATOR VALIDATION
+# ======================================================
+def sign_passport(passport_json_path, cert_file_path, cert_password):
+    # Firma PDF reale con certificato qualificato EU
+    with open(passport_json_path,"rb") as f:
+        pdf_bytes = f.read()
+    signer = signers.SimpleSigner.load_pkcs12(cert_file_path, cert_password.encode())
+    signed_pdf = signers.sign_pdf(BytesIO(pdf_bytes), signer=signer)
+    signed_path = passport_json_path.replace(".json","_signed.pdf")
+    with open(signed_path,"wb") as f:
+        f.write(signed_pdf.getbuffer())
+    return signed_path
 
-    # 1. VALIDATE OPERATOR
-    if not validate_operator(operator):
-        raise Exception("Invalid operator")
-
-    # 2. PDF
-    pdf_text = extract_text_from_pdf(pdf_file)
-    pdf_data = gpt_extract_from_pdf(pdf_text, client, fields)
-
-    # 3. IMAGES
-    image_data = {}
-    for img in image_files:
-        image_data.update(gpt_analyze_image(img, client))
-
-    # 4. CERTIFICATES
-    cert_data = {}
-    for cert in cert_files:
-        if verify_certificate(cert.read(), trusted_issuers):
-            cert.seek(0)
-            cert_data.update(gpt_extract_cert(cert, client))
-
-    # 5. MERGE
-    passport["fields"] = merge_data(passport["fields"], pdf_data, image_data, cert_data)
-
-    # 6. VALIDATION
-    passport["missing_fields"] = validate_required(passport["fields"], required_fields)
-
-    # 7. SCORING
-    reliability, espr = compute_scores(passport["fields"], required_fields)
-    passport["reliability"] = reliability
-    passport["espr"] = espr
-
-    # 8. SUSTAINABILITY
-    passport["sustainability"] = compute_sustainability(passport["fields"])
-
-    # 9. VERSION
-    passport = update_version(passport, "initial creation")
-
-    # 10. SIGN
-    passport = sign_passport(passport, private_key)
-
-    return passport
+def verify_operator_signature(signed_pdf_path):
+    # Validazione firma operatore contro EU trusted issuers
+    store = CertificateStore.from_ca_list(TRUSTED_ISSUERS)
+    vc = ValidationContext(trust_roots=store)
+    status = validation.validate_pdf_signature(signed_pdf_path, validation_context=vc)
+    return status.trusted
