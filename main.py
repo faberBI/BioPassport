@@ -62,7 +62,7 @@ if passport_id:
     st.write(f"**Tipo:** {passport['product_type']}")
 
     for sec_name, sec in passport["sections"].items():
-        st.subheader(f"{sec_name} ({sec['section_rating']*100:.0f}%)")
+        st.subheader(f"{sec_name} ({sec.get('section_rating',0)*100:.0f}%)")
         for fname, f in sec["fields"].items():
             conf = f.get("confidence", 0)
             st.write(f"**{fname}**: {f.get('value','')} {f.get('color','')} (conf: {conf})")
@@ -146,87 +146,6 @@ with tabs[0]:
 
             st.success("Analisi completata ✅")
 
-    # ======================================================
-    # Mostra PDF prodotto evidenziato
-    # ======================================================
-    if st.session_state.pdf_data and st.session_state.uploaded_pdf_bytes:
-        st.subheader("PDF Prodotto evidenziato")
-        highlighted_pdf_io = services.highlight_pdf_fields(
-            BytesIO(st.session_state.uploaded_pdf_bytes),
-            st.session_state.pdf_data
-        )
-        pdf_bytes = highlighted_pdf_io.getvalue()
-        b64 = base64.b64encode(pdf_bytes).decode()
-        html_code = f"""
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-        <div id="pdf-container"></div>
-        <script>
-        var pdfData = atob("{b64}");
-        var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
-        loadingTask.promise.then(function(pdf) {{
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
-                pdf.getPage(pageNum).then(function(page) {{
-                    var scale = 1.2;
-                    var viewport = page.getViewport({{scale: scale}});
-                    var canvas = document.createElement("canvas");
-                    var context = canvas.getContext("2d");
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    document.getElementById("pdf-container").appendChild(canvas);
-                    page.render({{canvasContext: context, viewport: viewport}});
-                }});
-            }}
-        }});
-        </script>
-        """
-        components.html(html_code, height=700)
-        st.download_button(
-            "Scarica PDF Prodotto evidenziato",
-            data=pdf_bytes,
-            file_name="product_highlighted.pdf",
-            mime="application/pdf"
-        )
-
-    # ======================================================
-    # Mostra PDF certificati evidenziati
-    # ======================================================
-    if st.session_state.cert_data and st.session_state.uploaded_cert_bytes:
-        st.subheader("Certificati evidenziati")
-        for i, (cert_bytes, cert_fields) in enumerate(zip(st.session_state.uploaded_cert_bytes, st.session_state.cert_data)):
-            st.markdown(f"**Certificato {i+1}**")
-            highlighted_cert_io = services.highlight_pdf_fields(BytesIO(cert_bytes), cert_fields)
-            pdf_bytes = highlighted_cert_io.getvalue()
-            b64 = base64.b64encode(pdf_bytes).decode()
-            html_code = f"""
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-            <div id="pdf-container-cert-{i}"></div>
-            <script>
-            var pdfData = atob("{b64}");
-            var loadingTask = pdfjsLib.getDocument({{data: pdfData}});
-            loadingTask.promise.then(function(pdf) {{
-                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
-                    pdf.getPage(pageNum).then(function(page) {{
-                        var scale = 1.2;
-                        var viewport = page.getViewport({{scale: scale}});
-                        var canvas = document.createElement("canvas");
-                        var context = canvas.getContext("2d");
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        document.getElementById("pdf-container-cert-{i}").appendChild(canvas);
-                        page.render({{canvasContext: context, viewport: viewport}});
-                    }} );
-                }}
-            }} );
-            </script>
-            """
-            components.html(html_code, height=700)
-            st.download_button(
-                f"Scarica Certificato {i+1} evidenziato",
-                data=pdf_bytes,
-                file_name=f"cert_{i+1}_highlighted.pdf",
-                mime="application/pdf"
-            )
-
 # ======================================================
 # TAB 2 — VALIDAZIONE
 # ======================================================
@@ -271,39 +190,42 @@ with tabs[1]:
         st.info("Esegui prima l’analisi PDF e immagini")
 
 # =======================================
-# TAB 3 — PUBBLICA (aggiornato)
+# TAB 3 — PUBBLICA
 # =======================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
         if st.button("Pubblica Digital Product Passport"):
-            # ========================
-            # GENERA ID UNIVOCO
-            # ========================
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
-
-            # ========================
-            # INIZIALIZZA PASSPORT
-            # ========================
             passport = services.initialize_passport(pid, tipo, fields)
 
             # ========================
-            # MERGE DATI VALIDATI
+            # Merge dati + Ecolabel UE (solo mobili)
             # ========================
-            services.merge_data(
-                passport,
-                st.session_state.validated_pdf,
-                st.session_state.validated_image,
-                st.session_state.validated_cert
-            )
+            pdf_io = BytesIO(st.session_state.uploaded_pdf_bytes)
+            if tipo == "mobile":
+                services.merge_data_with_ecolabel(
+                    passport,
+                    pdf_io,
+                    st.session_state.validated_image,
+                    st.session_state.validated_cert,
+                    client
+                )
+            else:
+                services.merge_data(
+                    passport,
+                    st.session_state.validated_pdf,
+                    st.session_state.validated_image,
+                    st.session_state.validated_cert
+                )
 
             # ========================
-            # AGGIUNGI IMMAGINI PRODOTTO
+            # Aggiungi immagini prodotto
             # ========================
             for img_bytes in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(img_bytes))
 
             # ========================
-            # SALVATAGGI
+            # Salvataggi
             # ========================
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
@@ -311,7 +233,7 @@ with tabs[2]:
             st.success("DPP pubblicato ✅")
 
             # ========================
-            # METRICHE PASSPORT
+            # Metriche passport
             # ========================
             st.subheader("Metriche")
             overall = passport.get("overall_rating", 0)
@@ -320,15 +242,13 @@ with tabs[2]:
             st.metric("Sostenibilità", f"{int(sustainability*100)}%")
 
             # ========================
-            # GENERA QR CODE PUBBLICO
+            # Genera QR code pubblico
             # ========================
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             qr = services.generate_qr_from_url(url)
             st.image(qr)
             st.download_button("Scarica QR code", data=qr.getvalue(), file_name=f"{pid}_qr.png", mime="image/png")
             st.code(url)
-    else:
-        st.info("Completa prima la validazione PDF e immagini")
 
 # ======================================================
 # TAB 4 — ARCHIVIO
