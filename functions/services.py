@@ -378,5 +378,65 @@ def merge_data_with_ecolabel(passport, pdf_file, image_data=None, cert_data=None
     
     passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
+from openpyxl import load_workbook
+
+EXCEL_FILE = "passport_archive.xlsx"
+
+def save_passport_to_excel_append(passport: dict):
+    """Salva o aggiorna il passport in un file Excel"""
+    # Preparazione dati generali
+    df_passport = pd.DataFrame([{
+        "id": passport["id"],
+        "product_type": passport.get("product_type"),
+        "overall_rating": passport.get("overall_rating", 0),
+        "sustainability_score": passport.get("sustainability_score", 0)
+    }])
+    
+    # Fields
+    fields_data = []
+    for section_name, section in passport.get("sections", {}).items():
+        for field_name, field_info in section.items():
+            if isinstance(field_info, dict):
+                fields_data.append({
+                    "passport_id": passport["id"],
+                    "section": section_name,
+                    "field_name": field_name,
+                    "value": field_info.get("value"),
+                    "confidence": field_info.get("confidence", 0)
+                })
+    df_fields = pd.DataFrame(fields_data)
+    
+    # Images
+    images_data = []
+    for img in passport.get("images", []):
+        images_data.append({
+            "passport_id": passport["id"],
+            "file_base64": img.get("file_base64"),
+            "caption": img.get("caption", "")
+        })
+    df_images = pd.DataFrame(images_data)
+    
+    # Scrive/appende su Excel
+    if not os.path.exists(EXCEL_FILE):
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            df_fields.to_excel(writer, sheet_name="fields", index=False)
+            df_images.to_excel(writer, sheet_name="images", index=False)
+    else:
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            # append passport
+            try:
+                book = load_workbook(EXCEL_FILE)
+                writer.book = book
+                writer.sheets = {ws.title: ws for ws in book.worksheets}
+
+                # passport
+                df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
+                df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
+                df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
+
+                writer.save()
+            except Exception as e:
+                print(f"Errore salvando Excel: {e}")
 
     
