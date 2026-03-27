@@ -13,6 +13,7 @@ import qrcode
 #from pyhanko_certvalidator import ValidationContext, CertificateStore
 from openai import OpenAI
 
+
 # ======================================================
 # CONFIG
 # ======================================================
@@ -79,17 +80,19 @@ def split_text(text, max_chars=3000, overlap=300):
     return chunks
 
 def extract_text_from_pdf(pdf_file):
+    """Estrae testo da PDF usando pdfplumber"""
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            text += page.extract_text() or ""
+            text += page.extract_text() + "\n"
     return text
 
-def image_to_base64(image_file):
-    if hasattr(image_file,"getvalue"):
-        return base64.b64encode(image_file.getvalue()).decode()
+def image_to_base64(image: Image.Image) -> str:
+    """Converte PIL Image in base64, convertendo RGBA/P in RGB per JPEG."""
+    if image.mode in ("RGBA", "P"):
+        image = image.convert("RGB")
     buf = BytesIO()
-    image_file.save(buf, format="JPEG")
+    image.save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode()
 
 def resize_image_for_vision(image_file, max_size=512):
@@ -101,6 +104,21 @@ def resize_image_for_vision(image_file, max_size=512):
     buf.name = "image.jpg"
     return buf
 
+def add_product_image(passport: dict, img_file):
+    """Aggiunge immagine prodotto al passport"""
+    try:
+        image = Image.open(img_file)
+        img_b64 = image_to_base64(image)
+        if "images" not in passport:
+            passport["images"] = []
+        passport["images"].append({
+            "file_base64": img_b64,
+            "caption": ""
+        })
+    except Exception as e:
+        print(f"Errore aggiungendo immagine: {e}")
+        raise
+        
 # ======================================================
 # CONFIDENCE
 # ======================================================
@@ -327,46 +345,38 @@ ECOLABEL_FIELDS = [
 ]
 
 def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
-    """
-    Estrae automaticamente i campi Ecolabel UE dai PDF del mobile.
-    Restituisce un dizionario {campo: True/False}.
-    """
-    # Estrai testo dal PDF
+    """Estrae automaticamente i campi Ecolabel UE dai PDF del mobile."""
     text = extract_text_from_pdf(pdf_file)
-    
-    # Chiama GPT per estrazione
     extracted_data = gpt_extract_from_pdf(text, client, tipo="mobile", fields=ECOLABEL_FIELDS)
     
-    # Converti i valori estratti in True/False
     mobile_data = {}
     for campo, info in extracted_data.items():
         val = info.get("value")
         if isinstance(val, bool):
             mobile_data[campo] = val
         elif isinstance(val, str):
-            # Considera True se il testo contiene "sì", "true", "conforme", ecc.
             mobile_data[campo] = val.strip().lower() in ["sì","si","true","yes","conforme"]
         else:
             mobile_data[campo] = False
     return mobile_data
 
 def merge_data_with_ecolabel(passport, pdf_file, image_data=None, cert_data=None, client=None):
-    # Estrazione automatica dei dati Ecolabel dal PDF
+    """Merge dati PDF, immagini, certificati e campi Ecolabel nel passport"""
     ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
     
-    # Aggiorna la sezione PDF
     if pdf_file:
-        pdf_text_data = gpt_extract_from_pdf(extract_text_from_pdf(pdf_file), client, "mobile", PRODUCT_FIELDS["mobile"]["pdf"])
-        passport["sections"]["PDF"].update(pdf_text_data)
+        pdf_text_data = gpt_extract_from_pdf(extract_text_from_pdf(pdf_file), client, "mobile", ECOLABEL_FIELDS)
+        if "sections" not in passport:
+            passport["sections"] = {}
+        passport["sections"]["PDF"] = pdf_text_data
     
-    # Aggiorna immagini
     if image_data:
         passport["sections"]["Images"] = image_data
     
-    # Aggiorna certificati
     if cert_data:
         passport["certificates"] = cert_data
     
-    # Aggiungi valutazione Ecolabel UE
-    passport["sections"]["Ecolabel_UE"] = verifica_ecolabel_ue(ecolabel_data)
+    passport["sections"]["Ecolabel_UE"] = ecolabel_data
+
+
     
