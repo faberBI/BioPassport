@@ -333,42 +333,22 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
 # ======================================================
 # EXCEL
 # ======================================================
-def save_passport_to_excel_append(passport: dict):
-    os.makedirs(PASSPORT_DIR, exist_ok=True)
-    df_passport = pd.DataFrame([{
-        "id": passport["id"],
-        "product_type": passport.get("product_type"),
-        "overall_rating": passport.get("overall_rating", 0),
-        "sustainability_score": passport.get("sustainability_score", 0)
-    }])
-    fields_data = []
-    for section_name, section in passport.get("sections", {}).items():
-        for field_name, field_info in section.items():
-            if isinstance(field_info, dict):
-                fields_data.append({
-                    "passport_id": passport["id"],
-                    "section": section_name,
-                    "field_name": field_name,
-                    "value": field_info.get("value"),
-                    "confidence": field_info.get("confidence",0)
-                })
-    df_fields = pd.DataFrame(fields_data)
-    images_data = [{"passport_id": passport["id"], "file_base64": img.get("file_base64"), "caption": img.get("caption","")} for img in passport.get("images",[])]
-    df_images = pd.DataFrame(images_data)
-
-    if not os.path.exists(EXCEL_FILE):
+def save_passport_to_excel_append(passport):
+    if os.path.exists(EXCEL_FILE):
+        # Carica workbook esistente
+        book = load_workbook(EXCEL_FILE)
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            df_passport.to_excel(writer, sheet_name="passport", index=False)
-            df_fields.to_excel(writer, sheet_name="fields", index=False)
-            df_images.to_excel(writer, sheet_name="images", index=False)
-    else:
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
-            book = load_workbook(EXCEL_FILE)
             writer.book = book
             writer.sheets = {ws.title: ws for ws in book.worksheets}
+            # Append dei dati al foglio passport
+            df_passport = pd.DataFrame([passport])
             df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=writer.sheets["passport"].max_row)
-            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=writer.sheets["fields"].max_row)
-            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=writer.sheets["images"].max_row)
+            writer.save()
+    else:
+        # Se il file non esiste, crealo da zero
+        df_passport = pd.DataFrame([passport])
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
             writer.save()
 
 def add_product_image(passport: dict, img_file):
