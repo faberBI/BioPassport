@@ -125,39 +125,63 @@ with tabs[0]:
         st.success("Analisi completata")
 
 # ======================================================
-# TAB 2 — VALIDAZIONE (aggiornato sicuro)
+# TAB 2 — VALIDAZIONE SICURA
 # ======================================================
 with tabs[1]:
-    if st.session_state.pdf_data or st.session_state.image_data or st.session_state.cert_data:
-        # --------- Validazione dati PDF ---------
+    # Controlla se ci sono dati da validare
+    if (st.session_state.pdf_data and isinstance(st.session_state.pdf_data, dict)) or \
+       (st.session_state.image_data and isinstance(st.session_state.image_data, dict)) or \
+       (st.session_state.cert_data and isinstance(st.session_state.cert_data, list)):
+
+        # ------------------------------
+        # Validazione PDF
+        # ------------------------------
         if st.session_state.pdf_data:
             st.subheader("Validazione dati PDF")
             validated_pdf = {}
             for k, v in st.session_state.pdf_data.items():
-                val = v.get("value", "") if isinstance(v, dict) else str(v)
-                conf = v.get("confidence", 0) if isinstance(v, dict) else 0
+                value = v.get("value", "") if isinstance(v, dict) else str(v)
+                confidence = v.get("confidence", 0) if isinstance(v, dict) else 0
                 explanation = v.get("explanation", "") if isinstance(v, dict) else ""
                 validated_pdf[k] = {
-                    "value": st.text_input(f"{k} (conf: {conf})", val, help=explanation),
-                    "confidence": conf
+                    "value": st.text_input(f"{k} (conf: {confidence})", value, help=explanation),
+                    "confidence": confidence
                 }
             st.session_state.validated_pdf = validated_pdf
 
-        # --------- Validazione dati Immagini ---------
+            # ------------------------------
+            # Controllo campi obbligatori PDF
+            # ------------------------------
+            missing_pdf = services.check_required_fields(st.session_state.validated_pdf, tipo)
+            if missing_pdf:
+                st.warning(f"Campi obbligatori PDF mancanti: {', '.join(missing_pdf)}")
+
+        # ------------------------------
+        # Validazione Immagini
+        # ------------------------------
         if st.session_state.image_data:
             st.subheader("Validazione dati Immagini")
             validated_img = {}
             for k, v in st.session_state.image_data.items():
-                val = v.get("value", "") if isinstance(v, dict) else str(v)
-                conf = v.get("confidence", 0) if isinstance(v, dict) else 0
+                value = v.get("value", "") if isinstance(v, dict) else str(v)
+                confidence = v.get("confidence", 0) if isinstance(v, dict) else 0
                 explanation = v.get("explanation", "") if isinstance(v, dict) else ""
                 validated_img[k] = {
-                    "value": st.text_input(f"{k} (conf: {conf})", val, help=explanation),
-                    "confidence": conf
+                    "value": st.text_input(f"{k} (conf: {confidence})", value, help=explanation),
+                    "confidence": confidence
                 }
             st.session_state.validated_image = validated_img
 
-        # --------- Validazione certificati ---------
+            # ------------------------------
+            # Controllo campi obbligatori immagini
+            # ------------------------------
+            missing_img = services.check_required_fields(st.session_state.validated_image, tipo, section="image")
+            if missing_img:
+                st.warning(f"Campi obbligatori immagini mancanti: {', '.join(missing_img)}")
+
+        # ------------------------------
+        # Validazione Certificati
+        # ------------------------------
         if st.session_state.cert_data:
             st.subheader("Validazione certificati")
             validated_cert_list = []
@@ -174,12 +198,21 @@ with tabs[1]:
                 validated_cert_list.append(validated_cert)
             st.session_state.validated_cert = validated_cert_list
 
-        # --------- Bottone completa validazione ---------
+            # ------------------------------
+            # Controllo campi obbligatori certificati
+            # ------------------------------
+            missing_cert = services.check_required_cert_fields(st.session_state.validated_cert)
+            if missing_cert:
+                st.warning(f"Campi obbligatori certificati mancanti: {', '.join(missing_cert)}")
+
+        # ------------------------------
+        # Bottone conferma validazione
+        # ------------------------------
         if st.button("Completa validazione"):
             st.success("Validazione completata ✅")
 
     else:
-        st.info("Esegui prima l’analisi PDF, immagini o certificati")
+        st.info("Esegui prima l’analisi PDF, immagini e certificati")
 
 
 # ======================================================
