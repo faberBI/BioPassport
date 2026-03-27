@@ -8,6 +8,17 @@ import pandas as pd
 from io import BytesIO
 
 # ======================================================
+# FUNZIONE UTILE: assicura struttura passport
+# ======================================================
+def ensure_passport_structure(passport):
+    passport.setdefault("sections", {})
+    passport.setdefault("images", [])
+    passport.setdefault("certificates", [])
+    passport.setdefault("digital_signature", None)
+    passport.setdefault("versioning", None)
+    return passport
+
+# ======================================================
 # CONFIG STREAMLIT
 # ======================================================
 st.set_page_config(
@@ -55,6 +66,8 @@ if passport_id:
         st.error("Passport non trovato")
         st.stop()
 
+    passport = ensure_passport_structure(passport)
+
     st.title("🇪🇺 Digital Product Passport")
     st.write(f"**ID:** {passport['id']}")
     st.write(f"**Tipo:** {passport['product_type']}")
@@ -81,7 +94,9 @@ if passport_id:
             st.write(f"**Scadenza:** {cert.get('data_scadenza', {}).get('value','')}")
             st.write("---")
 
-    services.render_espr_compliance(passport)
+    if passport:
+        services.render_espr_compliance(passport)
+
     st.progress(passport.get("overall_rating", 0))
     st.metric("Reliability", f"{int(passport.get('overall_rating', 0)*100)}%")
     st.metric("Sustainability", f"{int(passport.get('sustainability_score', 0)*100)}%")
@@ -125,14 +140,14 @@ with tabs[0]:
 
                 # Immagini prodotto
                 img_data = {}
-                for img_bytes in st.session_state.uploaded_images_bytes:
+                for img_bytes in st.session_state.uploaded_images_bytes or []:
                     res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
                     img_data.update(res)
                 st.session_state.image_data = img_data
 
                 # Certificati
                 cert_data_list = []
-                for cert_bytes in st.session_state.uploaded_cert_bytes:
+                for cert_bytes in st.session_state.uploaded_cert_bytes or []:
                     res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
                     cert_data_list.append(res)
                 st.session_state.cert_data = cert_data_list
@@ -195,6 +210,7 @@ with tabs[2]:
         if st.button("Pubblica Digital Product Passport"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
+            passport = ensure_passport_structure(passport)
 
             # Mobile: merge con Ecolabel, altrimenti normale
             if tipo == "mobile":
@@ -213,9 +229,10 @@ with tabs[2]:
                     st.session_state.validated_cert
                 )
 
-            # Aggiungi immagini
-            for img_bytes in st.session_state.uploaded_images_bytes:
-                services.add_product_image(passport, BytesIO(img_bytes))
+            # Aggiungi immagini in sicurezza
+            for img_bytes in st.session_state.uploaded_images_bytes or []:
+                if img_bytes:
+                    services.add_product_image(passport, BytesIO(img_bytes))
 
             # Salva passport
             services.save_passport_to_file(passport)
@@ -244,7 +261,6 @@ with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
         try:
-            # Leggi fogli Excel
             df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").pipe(lambda df: df.rename(columns=str.strip))
             df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").pipe(lambda df: df.rename(columns=str.strip))
             df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images").pipe(lambda df: df.rename(columns=str.strip))
@@ -252,11 +268,9 @@ with tabs[3]:
             if df_passport.empty:
                 st.info("Nessun passport disponibile")
             else:
-                # Pivot dei fields per unire con passport
                 df_fields_pivot = df_fields.pivot_table(index="passport_id", columns="field_name", values="value", aggfunc="first").reset_index()
                 df_full = df_passport.merge(df_fields_pivot, left_on="id", right_on="passport_id", how="left")
 
-                # Filtro interattivo
                 st.subheader("Filtri")
                 nome = st.text_input("Nome prodotto")
                 luogo = st.text_input("Luogo produzione")
@@ -264,7 +278,6 @@ with tabs[3]:
                 data_min, data_max = st.date_input("Data da"), st.date_input("Data a")
 
                 df_filtered = df_full.copy()
-
                 if nome:
                     df_filtered = df_filtered[df_filtered["Nome prodotto"].astype(str).str.contains(nome, case=False, na=False)]
                 if luogo:
@@ -279,15 +292,12 @@ with tabs[3]:
                 st.subheader("Risultati filtrati")
                 st.dataframe(df_filtered)
 
-                # Seleziona passport da dettagliare
                 selected_id = st.selectbox("Seleziona Passport", df_filtered["id"]) if not df_filtered.empty else None
                 if selected_id:
                     st.subheader("Dettaglio Passport")
                     st.dataframe(df_passport[df_passport["id"]==selected_id])
-                    
                     st.subheader("Campi del Passport")
                     st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
-                    
                     st.subheader("Immagini")
                     for _, row in df_images[df_images["passport_id"]==selected_id].iterrows():
                         st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
