@@ -10,6 +10,5 @@ reportlab
 fitz
 PyMuPDF
 openpyxl
-cryptography>=41.0.0
 pyhanko[full]
-pyhanko-certvalidator
+cryptography
