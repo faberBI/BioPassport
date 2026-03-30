@@ -337,44 +337,42 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
 # ======================================================
 # EXCEL
 # ======================================================
+
 def save_passport_to_excel_append(passport):
     # 1) Se il file non esiste: crealo con i 3 fogli
     if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             pd.DataFrame([passport]).to_excel(writer, sheet_name="passport", index=False)
-            pd.DataFrame(columns=["passport_id","field_name","value"]).to_excel(writer, sheet_name="fields", index=False)
-            pd.DataFrame(columns=["passport_id","file_base64","caption"]).to_excel(writer, sheet_name="images", index=False)
-        # niente writer.save(): il with salva/chiude automaticamente [1](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.ExcelWriter.html)
-        return
+            pd.DataFrame(columns=["passport_id", "field_name", "value"]).to_excel(writer, sheet_name="fields", index=False)
+            pd.DataFrame(columns=["passport_id", "file_base64", "caption"]).to_excel(writer, sheet_name="images", index=False)
+        return  # il with salva/chiude automaticamente [1](https://discuss.streamlit.io/t/attributeerror-this-app-has-encountered-an-error-the-original-error-message-is-redacted-to-prevent-data-leaks-using-st-gsheets-connection/60970)
 
-    # 2) Se il file esiste: append sul foglio "passport"
+    # 2) File esiste: calcolo la startrow con openpyxl
     book = load_workbook(EXCEL_FILE)
+    if "passport" in book.sheetnames:
+        startrow = book["passport"].max_row
+        header = False
+    else:
+        startrow = 0
+        header = True
 
-    # mode='a' + if_sheet_exists='overlay' = scrivo senza distruggere il file
-    # (parametri previsti da pandas.ExcelWriter) [1](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.ExcelWriter.html)
+    df_passport = pd.DataFrame([passport])
+
+    # 3) Append supportato da pandas: mode='a' + if_sheet_exists='overlay'
     with pd.ExcelWriter(
         EXCEL_FILE,
         engine="openpyxl",
         mode="a",
         if_sheet_exists="overlay"
     ) as writer:
-        # collega il workbook già caricato
-        writer.book = book
-        writer.sheets = {ws.title: ws for ws in book.worksheets}
+        df_passport.to_excel(
+            writer,
+            sheet_name="passport",
+            index=False,
+            header=header,
+            startrow=startrow
+        )
 
-        df_passport = pd.DataFrame([passport])
-
-        if "passport" not in writer.sheets:
-            df_passport.to_excel(writer, sheet_name="passport", index=False)
-        else:
-            startrow = writer.sheets["passport"].max_row
-            df_passport.to_excel(
-                writer,
-                sheet_name="passport",
-                index=False,
-                header=False,
-                startrow=startrow
-            )
 
 # ======================================================
 # IMAGE MANAGEMENT
