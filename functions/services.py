@@ -877,7 +877,7 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
     - salva metadati in passport["qualified_signature"]
     - (opzionale) scarica e allega PDF firmato in passport["signed_pdf"] (base64)
     """
-    tok = openapi_create_token(scopes=["EU-QES_automatic"], ttl_seconds=3600)
+    tok = openapi_create_token(scopes=["*:*.*/*"], ttl_seconds=3600)
     bearer_token = _bearer(tok)
 
     pdf_bytes = generate_passport_pdf(passport)
@@ -972,7 +972,9 @@ def openapi_create_token(scopes=None, ttl_seconds: int = 3600) -> dict:
     }
     payload = {"scopes": scopes, "ttl": ttl_seconds}
     r = requests.post(url, json=payload, headers=headers, timeout=30)
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"OAUTH ERROR {r.status_code}: {r.text}")
+
     return r.json()
 
 def _bearer(token_resp: dict) -> str:
