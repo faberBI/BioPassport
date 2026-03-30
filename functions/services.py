@@ -827,169 +827,7 @@ def render_espr_compliance(passport, st=None):
         for i, cert in enumerate(passport["certificates"],1):
             tipo = cert.get("tipo_certificato", {}).get("value","non disponibile")
 
-
-
-import base64, requests, json
-
-def openapi_create_token(scopes=("EU-QES_automatic",), ttl_seconds=3600):
-    base = st.secrets["OPENAPI_OAUTH_BASE_URL"].rstrip("/")
-    url = f"{base}/token"
-
-    raw = f'{st.secrets["OPENAPI_EMAIL"]}:{st.secrets["OPENAPI_APIKEY"]}'.encode("utf-8")
-    basic = "Basic " + base64.b64encode(raw).decode("utf-8")
-
-    payload = {"scopes": list(scopes), "ttl": ttl_seconds}
-    r = requests.post(url, json=payload, headers={"Authorization": basic, "Accept": "application/json"})
-    r.raise_for_status()
-    return r.json()  
-    
-def openapi_qes_automatic_sign(bearer_token: str, input_documents: list, signature_type="cades"):
-    base = st.secrets["OPENAPI_ESIGN_BASE_URL"].rstrip("/")
-    url = f"{base}/EU-QES_automatic"
-
-    payload = {
-        "inputDocuments": input_documents,
-        "certificateUsername": st.secrets["OPENAPI_CERT_USERNAME"],
-        "certificatePassword": st.secrets["OPENAPI_CERT_PASSWORD"],
-        "title": "DPP Qualified Signature",
-        "description": "Firma QES automatica del Digital Product Passport",
-        "signatureType": signature_type
-    }
-
-    r = requests.post(url, json=payload, headers={
-        "Authorization": f"Bearer {bearer_token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }, timeout=60)
-    r.raise_for_status()
-    return r.json()  
-
-def sign_passport_on_publish(passport: dict):
-    # A) token
-    tok = openapi_create_token()
-    bearer = tok.get("token") 
-
-    # B) DPP -> base64
-    raw = json.dumps(passport, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    b64 = base64.b64encode(raw).decode("utf-8")
-
-    # C) firma
-    resp = openapi_qes_automatic_sign(
-        bearer_token=bearer,
-        input_documents=[{"sourceType": "base64", "payload": b64}],
-        signature_type="cades"
-    )
-
-    # D) salva dentro il DPP
-    passport["qualified_signature"] = {
-        "provider": "OpenAPI eSignature",
-        "service": "EU-QES_automatic",
-        "signature_id": (resp.get("data") or {}).get("id"),
-        "state": (resp.get("data") or {}).get("state"),
-        "response": resp
-    }
-    return passport
-
-def sign_passport_qes_openapi(passport: dict):
-    """
-    Firma il passport JSON con OpenAPI QES automatico
-    e salva i metadati dentro passport["qualified_signature"]
-    """
-
-    # === 1) TOKEN OAUTH ===
-    token_resp = openapi_create_token(scopes=["EU-QES_automatic"])
-    bearer = token_resp["token"]
-
-    # === 2) JSON canonico ===
-    tmp = dict(passport)
-    tmp.pop("qualified_signature", None)
-
-    raw = json.dumps(tmp, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    b64 = base64.b64encode(raw).decode("utf-8")
-
-    # === 3) FIRMA ===
-    resp = openapi_qes_automatic_sign(
-        bearer_token=bearer,
-        input_documents=[{
-            "sourceType": "base64",
-            "payload": b64
-        }],
-        signature_type="cades"
-    )
-
-    data = resp.get("data", {})
-
-    passport["qualified_signature"] = {
-        "provider": "OpenAPI",
-        "service": "EU-QES_automatic",
-        "signature_id": data.get("id"),
-        "state": data.get("state"),
-        "signed_at": datetime.utcnow().isoformat(),
-        "raw_response": resp
-    }
-
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from io import BytesIO
-
-def generate_passport_pdf(passport: dict) -> bytes:
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    w, h = A4
-
-    y = h - 40
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(40, y, "Digital Product Passport")
-    y -= 30
-
-    c.setFont("Helvetica", 10)
-    for k, v in passport.items():
-        if isinstance(v, (dict, list)):
-            continue
-        c.drawString(40, y, f"{k}: {v}")
-        y -= 14
-        if y < 40:
-            c.showPage()
-            y = h - 40
-
-    c.showPage()
-    c.save()
-    return buffer.getvalue()
-
-import requests
-import streamlit as st
-
-def download_signed_pdf(signature_id: str) -> bytes:
-    base = st.secrets["OPENAPI_ESIGN_BASE_URL"].rstrip("/")
-    url = f"{base}/signatures/{signature_id}/signedDocument"
-
-    tok = openapi_create_token(scopes=["EU-QES_automatic"])
-    bearer = tok["token"]
-
-    r = requests.get(url, headers={
-        "Authorization": f"Bearer {bearer}",
-        "Accept": "application/pdf"
-    })
-    r.raise_for_status()
-    return r.content
-    
-# ======================================================.Canvas(buf, pagesize=A4)
-    w, h = A4
-    y = h - 40
-
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(40, y, "Digital Product Passport")
-    y -= 25
-
-    c.setFont("Helvetica", 10)
-    head = [
-        ("ID", passport.get("id")),
-        ("Tipo", passport.get("product_type")),
-        ("Versione", passport.get("version")),
-        ("Issuer", (passport.get("issuer") or {}).get("legal_name")),
-        ("Hash", (passport.get("digital_signature") or {}).get("hash")),
-    ]
-    for k, v in head:
+# ====================================================== v in header:
         c.drawString(40, y, f"{k}: {v}")
         y -= 14
 
@@ -997,10 +835,9 @@ def download_signed_pdf(signature_id: str) -> bytes:
     c.setFont("Helvetica-Bold", 11)
     c.drawString(40, y, "Sezioni")
     y -= 18
-
     c.setFont("Helvetica", 9)
-    sections = passport.get("sections", {}) or {}
-    for sec_name, sec in sections.items():
+
+    for sec_name, sec in (passport.get("sections") or {}).items():
         c.setFont("Helvetica-Bold", 10)
         c.drawString(40, y, f"[{sec_name}]")
         y -= 14
@@ -1009,8 +846,8 @@ def download_signed_pdf(signature_id: str) -> bytes:
         if isinstance(sec, dict):
             for fname, f in sec.items():
                 val = f.get("value", "") if isinstance(f, dict) else f
-                txt = f"{fname}: {val}"
-                for chunk in [txt[i:i+110] for i in range(0, len(txt), 110)]:
+                line = f"{fname}: {val}"
+                for chunk in [line[i:i+110] for i in range(0, len(line), 110)]:
                     c.drawString(50, y, chunk)
                     y -= 12
                     if y < 50:
@@ -1029,24 +866,25 @@ def download_signed_pdf(signature_id: str) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
+# ---------- FUNZIONE PRINCIPALE: quella che chiami dal main ----------
 def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True) -> dict:
     """
-    ✅ QUESTA È LA FUNZIONE CHE CHIAMI DAL MAIN:
-    services.sign_passport_pdf_qes_openapi(passport)
+    ✅ Questa deve ESISTERE come attributo di services:
+       services.sign_passport_pdf_qes_openapi(passport)
 
     - genera PDF del passport
     - firma via OpenAPI EU-QES_automatic in PAdES (PDF)
     - salva metadati in passport["qualified_signature"]
-    - (opzionale) scarica e allega il PDF firmato in passport["signed_pdf"] (base64)
+    - (opzionale) scarica e allega PDF firmato in passport["signed_pdf"] (base64)
     """
     tok = openapi_create_token(scopes=["EU-QES_automatic"], ttl_seconds=3600)
-    bearer = _extract_bearer_token(tok)
+    bearer_token = _bearer(tok)
 
     pdf_bytes = generate_passport_pdf(passport)
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
     resp = openapi_qes_automatic_sign(
-        bearer_token=bearer,
+        bearer_token=bearer_token,
         input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
         signature_type="pades",
         title=f"DPP {passport.get('id')} QES",
@@ -1065,52 +903,63 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
         "raw_response": resp
     }
 
-    # Allego PDF firmato (se disponibile subito)
-    # Se state = WAIT_VALIDATION potrebbe non essere ancora pronto: in quel caso il download può fallire.
+    # Provo a scaricare e allegare il PDF firmato:
+    # se state = WAIT_VALIDATION può non essere pronto, quindi non blocco.
     if attach_signed_pdf and passport["qualified_signature"].get("signature_id"):
         try:
-            signed_bytes = openapi_get_signed_document(bearer, passport["qualified_signature"]["signature_id"])
+            signed_bytes = openapi_get_signed_document(
+                bearer_token,
+                passport["qualified_signature"]["signature_id"]
+            )
             passport["signed_pdf"] = base64.b64encode(signed_bytes).decode("utf-8")
         except Exception:
-            # Non bloccare la pubblicazione: il PDF può essere scaricato più tardi
             passport["signed_pdf"] = None
 
     return passport["qualified_signature"]
 ``
 # OPENAPI QES (OAuth + eSignature) + PDF firmato
 # ======================================================
+import os
+import base64
 import requests
+from io import BytesIO
+from datetime import datetime, timezone
 
-def _get_secret(name: str, default: str = "") -> str:
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def _sec(name: str, default: str = "") -> str:
     """
-    Legge prima da Streamlit secrets (se disponibili), altrimenti da env var.
-    Così services.py funziona sia in Streamlit che in locale.
+    Legge da Streamlit secrets se disponibili, altrimenti da env var.
+    Così services.py funziona sia su Streamlit Cloud che in locale.
     """
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and name in st.secrets:
+        if name in st.secrets:
             return str(st.secrets[name])
     except Exception:
         pass
     return str(os.getenv(name, default))
 
+# ---------- OAuth: Basic Auth -> token ----------
 def _openapi_basic_auth_header() -> str:
-    email = _get_secret("OPENAPI_EMAIL")
-    apikey = _get_secret("OPENAPI_APIKEY")
+    email = _sec("OPENAPI_EMAIL")
+    apikey = _sec("OPENAPI_APIKEY")
     if not email or not apikey:
         raise RuntimeError("Mancano OPENAPI_EMAIL / OPENAPI_APIKEY nei secrets/env")
+
     raw = f"{email}:{apikey}".encode("utf-8")
-    token = base64.b64encode(raw).decode("utf-8")
-    return f"Basic {token}"
+    return "Basic " + base64.b64encode(raw).decode("utf-8")
 
 def openapi_create_token(scopes=None, ttl_seconds: int = 3600) -> dict:
     """
-    POST /token (OAuth). Ritorna JSON con token/expire (tipicamente top-level).
+    POST /token (OAuth) - restituisce token/expire (in genere top-level).
+    (Questo endpoint è quello che hai nella doc OAuth) [2](https://fiberc.sharepoint.com/sites/CertificazioneISO45001-analisidocumentazione/Shared%20Documents/General/CODICE%20PROGETTO%20CELAZTEPT25W00896602/MI.RA/DOCUMENTAZIONE%20MI.RA/MEZZI/FK459LV/CERT.pdf?web=1)
     """
     if scopes is None:
         scopes = ["EU-QES_automatic"]
 
-    base = _get_secret("OPENAPI_OAUTH_BASE_URL").rstrip("/")
+    base = _sec("OPENAPI_OAUTH_BASE_URL").rstrip("/")
     if not base:
         raise RuntimeError("Manca OPENAPI_OAUTH_BASE_URL nei secrets/env")
 
@@ -1125,15 +974,16 @@ def openapi_create_token(scopes=None, ttl_seconds: int = 3600) -> dict:
     r.raise_for_status()
     return r.json()
 
-def _extract_bearer_token(token_resp: dict) -> str:
+def _bearer(token_resp: dict) -> str:
     """
-    Alcune API rispondono con token top-level, altre con data.token.
+    Supporta sia token_resp['token'] sia token_resp['data']['token'].
     """
-    bearer = token_resp.get("token") or (token_resp.get("data") or {}).get("token")
-    if not bearer:
+    b = token_resp.get("token") or (token_resp.get("data") or {}).get("token")
+    if not b:
         raise RuntimeError(f"Token OpenAPI non trovato nella risposta: {token_resp}")
-    return bearer
+    return b
 
+# ---------- eSignature: firma QES ----------
 def openapi_qes_automatic_sign(
     bearer_token: str,
     input_documents: list,
@@ -1143,14 +993,14 @@ def openapi_qes_automatic_sign(
 ) -> dict:
     """
     POST /EU-QES_automatic (eSignature).
-    Usa certificateUsername/password del certificato (sandbox o produzione).
+    (Endpoint dichiarato nella doc eSignature) [3](https://runebook.dev/en/docs/pandas/reference/api/pandas.excelwriter)
     """
-    base = _get_secret("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
     if not base:
         raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
 
-    cert_user = _get_secret("OPENAPI_CERT_USERNAME")
-    cert_pass = _get_secret("OPENAPI_CERT_PASSWORD")
+    cert_user = _sec("OPENAPI_CERT_USERNAME")
+    cert_pass = _sec("OPENAPI_CERT_PASSWORD")
     if not cert_user or not cert_pass:
         raise RuntimeError("Mancano OPENAPI_CERT_USERNAME / OPENAPI_CERT_PASSWORD nei secrets/env")
 
@@ -1160,26 +1010,26 @@ def openapi_qes_automatic_sign(
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-
     payload = {
         "inputDocuments": input_documents,
         "certificateUsername": cert_user,
         "certificatePassword": cert_pass,
         "title": title,
         "description": description,
-        "signatureType": signature_type  # "cades" | "pades" | "xades" | "pkcs1"
+        "signatureType": signature_type,  # pades|cades|xades|pkcs1
     }
 
     r = requests.post(url, json=payload, headers=headers, timeout=60)
     r.raise_for_status()
     return r.json()
 
+# ---------- download firmato ----------
 def openapi_get_signed_document(bearer_token: str, signature_id: str) -> bytes:
     """
-    GET /signatures/{id}/signedDocument
-    Ritorna bytes del documento firmato (PDF se PAdES, p7m/zip se CAdES, ecc.).
+    GET /signatures/{id}/signedDocument (scarica il documento firmato)
+    (Endpoint dichiarato nella doc eSignature) [3](https://runebook.dev/en/docs/pandas/reference/api/pandas.excelwriter)
     """
-    base = _get_secret("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
     if not base:
         raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
 
@@ -1189,11 +1039,29 @@ def openapi_get_signed_document(bearer_token: str, signature_id: str) -> bytes:
     r.raise_for_status()
     return r.content
 
+# ---------- PDF del DPP (minimo firmabile) ----------
 def generate_passport_pdf(passport: dict) -> bytes:
     """
-    PDF minimale firmabile (PAdES). Richiede reportlab.
+    Genera un PDF minimale del passport (firmabile in PAdES).
+    Richiede reportlab.
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
 
     buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 40
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(40, y, "Digital Product Passport")
+    y -= 22
+
+    c.setFont("Helvetica", 10)
+    header = [
+        ("ID", passport.get("id")),
+        ("Tipo", passport.get("product_type")),
+        ("Versione", passport.get("version")),
+        ("Issuer", (passport.get("issuer") or {}).get("legal_name")),
+        ("Hash", (passport.get("digital_signature") or {}).get("hash")),
+    ]
