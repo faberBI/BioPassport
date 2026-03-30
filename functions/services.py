@@ -158,6 +158,62 @@ def _norm_payload(payload):
     return {"raw": _norm_field(payload)}
 
 
+def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
+    """
+    Estrae campi dal testo PDF e ritorna SEMPRE un dict:
+    {field: {value, confidence, explanation}}
+    """
+    if not pdf_text:
+        return {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
+
+    # template output
+    template = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
+
+    system = (
+        "You are a strict information extraction engine.\n"
+        "Return ONLY JSON, no markdown, no commentary.\n"
+        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
+        "If a field is unknown, leave value empty and confidence 0.\n"
+    )
+
+    user = (
+        f"Extract product passport fields for product_type={tipo}.\n"
+        "Use the following JSON template and populate fields from the text.\n"
+        "Return ONLY JSON.\n\n"
+        f"TEMPLATE:\n{json.dumps(template, ensure_ascii=False)}\n\n"
+        f"PDF_TEXT:\n{pdf_text[:20000]}"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        content = resp.choices[0].message.content or "{}"
+
+        # parse JSON robusto
+        try:
+            data = json.loads(content)
+        except Exception:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(content[start:end+1])
+            else:
+                data = {}
+
+        return _norm_payload(data, fields)
+
+    except Exception as e:
+        # fallback senza crash
+        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
+
+
 
 # ======================================================
 # PDF / IMAGE UTILITIES
