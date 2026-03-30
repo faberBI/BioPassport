@@ -15,6 +15,9 @@ from openpyxl import load_workbook
 import qrcode
 from datetime import timezone, datetime
 
+from typing import Optional, Dict, Any, List
+from urllib.parse import quote
+
 
 # ======================================================
 # CONFIG
@@ -46,6 +49,103 @@ ECOLABEL_FIELDS = [
 # ======================================================
 # NORMALIZATION / MATCHING
 # ======================================================
+
+from typing import Optional
+from urllib.parse import quote
+import uuid
+
+def sha256_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+def make_document_id(prefix: str = "DOC") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:10]}"
+
+def ensure_documents_container(passport: dict) -> None:
+    passport.setdefault("documents", {})  # {doc_id: meta}
+
+def register_document(passport: dict, raw_bytes: bytes, doc_type: str,
+                      filename: str = "", issuer: str = "") -> dict:
+    """
+    Registra un documento (PDF/cert/immagine) e salva hash SHA256.
+    Restituisce metadati: document_id, sha256, type, filename, issuer, created_at.
+    """
+    ensure_documents_container(passport)
+    doc_id = make_document_id(prefix=doc_type.upper())
+    meta = {
+        "document_id": doc_id,
+        "type": doc_type,
+        "filename": filename,
+        "issuer": issuer,
+        "sha256": sha256_bytes(raw_bytes),
+        "created_at": _utc_now_iso(),
+    }
+    passport["documents"][doc_id] = meta
+    return meta
+
+def attach_evidence(field_obj: dict, evidence_item: dict) -> dict:
+    """
+    Garantisce formato campo + aggiunge evidence[].
+    Campo standard: {"value","confidence","explanation","evidence":[...]}
+    """
+    if not isinstance(field_obj, dict):
+        field_obj = {"value": field_obj, "confidence": 0.0, "explanation": ""}
+    field_obj.setdefault("evidence", [])
+    field_obj["evidence"].append(evidence_item)
+    return field_obj
+
+def add_evidence_to_section(section_data: dict, doc_meta: dict, source: str,
+                            locator: str = "") -> dict:
+    """
+    Applica evidence (doc_id+sha256) a TUTTI i campi di una sezione (PDF/Images ecc.).
+    """
+    out = {}
+    for k, v in (section_data or {}).items():
+        base = v if (isinstance(v, dict) and "value" in v and "confidence" in v) else _norm_field(v)
+        ev = {
+            "source": source,  # es: product_pdf | certificate | product_images
+            "document_id": doc_meta.get("document_id"),
+            "document_sha256": doc_meta.get("sha256"),
+            "type": doc_meta.get("type"),
+            "filename": doc_meta.get("filename"),
+            "issuer": doc_meta.get("issuer"),
+        }
+        if locator:
+            ev["locator"] = locator  # es: "page:2"
+        out[k] = attach_evidence(base, ev)
+    return out
+
+def export_passport_jsonld(passport: dict,
+                           context_url: str = "https://ec.europa.eu/dpp/context/v1") -> dict:
+    """
+    Wrapper JSON-LD (base) per interoperabilità.
+    Il contesto ufficiale UE può evolvere: questo è un placeholder pratico.
+    """
+    return {
+        "@context": context_url,
+        "@type": "DigitalProductPassport",
+        "id": passport.get("id"),
+        "product_type": passport.get("product_type"),
+        "version": passport.get("version"),
+        "issuer": passport.get("issuer"),
+        "identifiers": passport.get("identifiers", {}),
+        "documents": passport.get("documents", {}),
+        "sections": passport.get("sections", {}),
+        "certificates": passport.get("certificates", []),
+        "images": passport.get("images", []),
+        "digital_signature": passport.get("digital_signature"),
+        "change_log": passport.get("change_log", [])
+    }
+
+def make_gs1_digital_link(gtin: str, dpp_url: str) -> str:
+    """
+    Pattern GS1 Digital Link: https://id.gs1.org/01/{GTIN}?dpp={urlencoded}
+    Se GTIN non c'è, ritorna l'URL standard del DPP.
+    """
+    gtin_clean = "".join([c for c in (gtin or "") if c.isdigit()])
+    if not gtin_clean:
+        return dpp_url
+    return f"https://id.gs1.org/01/{gtin_clean}?dpp={quote(dpp_url, safe='')}"
+
 def normalize(text):
     text = text.lower().strip()
     text = unicodedata.normalize("NFKD", text).encode("ascii","ignore").decode()
@@ -460,7 +560,7 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
                 data = {}
 
         # ---------- 6) normalizza output SEMPRE ----------
-        normalized = _norm_payload_cert(data)(data)
+        normalized = _norm_payload_cert(data)
 
         # Garantisco che ci siano almeno i campi dello schema (mancanti -> vuoti)
         for k in schema_hint.keys():
@@ -526,18 +626,22 @@ def initialize_passport(pid, tipo, fields):
         "sustainability_score": 0,
         "validated_by_operator": False,
 
-        # nuovi campi lifecycle/audit
+        # lifecycle/audit
         "created_at": None,
         "last_updated_at": None,
         "change_log": [],
 
-        # firma / issuer
+        # issuer/attestation/firma
         "issuer": None,
         "attestation": None,
         "digital_signature": None,
 
         # versioning
-        "version": 0
+        "version": 0,
+
+        # NEW: interoperabilità + evidence registry
+        "identifiers": {},   # es. {"gtin": "...", "batch": "...", "serial": "..."}
+        "documents": {},     # doc registry per evidence
     }
 
     # inizializza campi PDF attesi
@@ -548,7 +652,7 @@ def initialize_passport(pid, tipo, fields):
             "explanation": ""
         }
 
-    # prima timbratura ESPR (creazione)
+    # timbro iniziale
     espr_stamp(
         passport,
         actor="manufacturer",
@@ -559,11 +663,16 @@ def initialize_passport(pid, tipo, fields):
     return passport
 
 
-def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
+def merge_data(passport, pdf_data=None, image_data=None, cert_data=None,
+               pdf_doc_meta: Optional[dict] = None,
+               cert_doc_meta_list: Optional[list] = None):
     changed = False
 
     if pdf_data:
-        passport["sections"].setdefault("PDF", {}).update(pdf_data)
+        section = pdf_data
+        if pdf_doc_meta:
+            section = add_evidence_to_section(pdf_data, pdf_doc_meta, source="product_pdf")
+        passport["sections"].setdefault("PDF", {}).update(section)
         changed = True
 
     if image_data:
@@ -571,19 +680,49 @@ def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
         changed = True
 
     if cert_data is not None:
-        passport["certificates"] = cert_data  # ✅ NO virgola
+        # cert_data: lista di dict
+        if cert_doc_meta_list and isinstance(cert_data, list):
+            enriched = []
+            for idx, cert in enumerate(cert_data):
+                meta = cert_doc_meta_list[idx] if idx < len(cert_doc_meta_list) else None
+                if meta and isinstance(cert, dict):
+                    cert2 = {}
+                    for k, v in cert.items():
+                        base = v if (isinstance(v, dict) and "value" in v and "confidence" in v) else _norm_field(v)
+                        cert2[k] = attach_evidence(base, {
+                            "source": "certificate",
+                            "document_id": meta.get("document_id"),
+                            "document_sha256": meta.get("sha256"),
+                            "type": meta.get("type"),
+                            "filename": meta.get("filename"),
+                            "issuer": meta.get("issuer"),
+                        })
+                    enriched.append(cert2)
+                else:
+                    enriched.append(cert)
+            passport["certificates"] = enriched
+        else:
+            passport["certificates"] = cert_data
         changed = True
 
     if changed:
-        espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data")
+        espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data + evidence")
 
     return passport
 
 def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
+
+    # JSON standard
     path = os.path.join(PASSPORT_DIR, f"{passport['id']}.json")
-    with open(path,"w",encoding="utf-8") as f:
-        json.dump(passport,f,indent=2)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(passport, f, indent=2, ensure_ascii=False)
+
+    # JSON-LD (interoperabilità)
+    jsonld = export_passport_jsonld(passport)
+    path_ld = os.path.join(PASSPORT_DIR, f"{passport['id']}.jsonld")
+    with open(path_ld, "w", encoding="utf-8") as f:
+        json.dump(jsonld, f, indent=2, ensure_ascii=False)
 
 def load_passport_from_file(pid):
     path = os.path.join(PASSPORT_DIR, f"{pid}.json")
@@ -637,12 +776,14 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
     changed = False
 
     if pdf_file:
+        # 1) Ecolabel (boolean) separato
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
         passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
+        # 2) Estrazione PDF "prodotto" con campi corretti del prodotto
         pdf_text = extract_text_from_pdf(pdf_file)
-        pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
-        passport["sections"]["PDF"] = pdf_text_data
+        product_fields = PRODUCT_FIELDS.get(passport.get("product_type"), {}).get("pdf", [])
+        passport["sections"]["PDF"] = gpt_extract_from_pdf(pdf_text, client, passport.get("product_type"), product_fields)
 
         changed = True
 
@@ -819,7 +960,7 @@ def render_espr_compliance(passport, st=None):
     materiali = pdf_section.get("Materiali/componenti utilizzati", {}).get("value", "non specificato")
     peso = pdf_section.get("Peso", {}).get("value", "non specificato")
     dimensioni = pdf_section.get("Dimensioni", {}).get("value", "non specificato")
-    energia = pdf_section.get("Energia", {}).get("value", "non specificato")
+    energia = pdf_section.get("Energia consumata", {}).get("value", "non specificato")
     luogo = pdf_section.get("Luogo di Produzione", {}).get("value", "non specificato")
     riciclo = ecolabel_section.get("facilmente_smortabile", False)
     basso_impatto = ecolabel_section.get("produzione_basso_impatto", False)
