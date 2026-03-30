@@ -6,6 +6,7 @@ from PIL import Image
 import os
 import pandas as pd
 from io import BytesIO
+import json
 
 # ======================================================
 # CONFIG STREAMLIT
@@ -41,14 +42,17 @@ client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 # ======================================================
 DEFAULT_STATE = {
     "uploaded_pdf_bytes": None,
+    "uploaded_pdf_name": "",
     "uploaded_images_bytes": None,
     "uploaded_cert_bytes": None,
+    "uploaded_cert_names": [],
     "pdf_data": None,
     "image_data": None,
     "cert_data": None,
     "validated_pdf": None,
     "validated_image": None,
     "validated_cert": None,
+    "gtin": ""
 }
 
 for k, v in DEFAULT_STATE.items():
@@ -86,6 +90,11 @@ if passport_id:
             if exp:
                 st.caption(exp)
 
+            if isinstance(f, dict) and f.get("evidence"):
+                with st.expander("📎 Evidenze"):
+                    for ev in f["evidence"]:
+                        st.json(ev)
+
     if passport.get("certificates"):
         st.subheader("Certificati")
         for cert in passport["certificates"]:
@@ -102,6 +111,15 @@ if passport_id:
     for img in passport.get("images", []):
         st.image(f"data:image/jpeg;base64,{img['file_base64']}", caption=img.get("caption",""))
 
+    # JSON-LD download
+    jsonld = services.export_passport_jsonld(passport)
+    st.download_button(
+        "⬇️ Scarica JSON-LD",
+        data=json.dumps(jsonld, indent=2, ensure_ascii=False),
+        file_name=f"{passport['id']}.jsonld",
+        mime="application/ld+json"
+    )
+
     st.stop()
 
 # ======================================================
@@ -113,7 +131,7 @@ fields = list(services.PRODUCT_FIELDS.get(tipo, {}).get("pdf", []))
 tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "📚 Archivio"])
 
 # ======================================================
-# TAB 1 — UPLOAD & AI
+# TAB 1 — UPLOAD & ANALISI AI
 # ======================================================
 with tabs[0]:
     pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
@@ -125,8 +143,10 @@ with tabs[0]:
             st.warning("Carica PDF e almeno un'immagine")
         else:
             st.session_state.uploaded_pdf_bytes = pdf_file.read()
+            st.session_state.uploaded_pdf_name = pdf_file.name
             st.session_state.uploaded_images_bytes = [i.read() for i in image_files]
             st.session_state.uploaded_cert_bytes = [c.read() for c in (cert_files or [])]
+            st.session_state.uploaded_cert_names = [c.name for c in (cert_files or [])]
 
             with st.spinner("Analisi in corso..."):
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
@@ -175,7 +195,10 @@ with tabs[1]:
                 row = {}
                 for k, v in cert.items():
                     val = v.get("value","") if isinstance(v,dict) else v
-                    row[k] = {"value": st.text_input(k, val, key=f"c{i}_{k}"), "confidence": v.get("confidence",0)}
+                    row[k] = {
+                        "value": st.text_input(k, val, key=f"c{i}_{k}"),
+                        "confidence": v.get("confidence",0)
+                    }
                 validated.append(row)
             st.session_state.validated_cert = validated
 
@@ -184,14 +207,49 @@ with tabs[1]:
         st.info("Esegui prima l’analisi")
 
 # ======================================================
-# TAB 3 — PUBBLICA
+# TAB 3 — PUBBLICA (Evidence + GS1 + JSON-LD)
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
+
+        st.subheader("Interoperabilità")
+        st.session_state.gtin = st.text_input(
+            "GTIN (opzionale – per GS1 Digital Link)",
+            st.session_state.gtin
+        )
+
         if st.button("Pubblica DPP"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
+            # Identificatori
+            if st.session_state.gtin.strip():
+                passport["identifiers"]["gtin"] = st.session_state.gtin.strip()
+
+            # Register PDF as document (Evidence)
+            pdf_meta = services.register_document(
+                passport,
+                st.session_state.uploaded_pdf_bytes,
+                doc_type="product_pdf",
+                filename=st.session_state.uploaded_pdf_name,
+                issuer=(passport.get("issuer") or {}).get("legal_name","")
+            )
+
+            # Register certificates
+            cert_metas = []
+            for i, b in enumerate(st.session_state.uploaded_cert_bytes or []):
+                fname = st.session_state.uploaded_cert_names[i] if i < len(st.session_state.uploaded_cert_names) else ""
+                cert_metas.append(
+                    services.register_document(
+                        passport,
+                        b,
+                        doc_type="certificate",
+                        filename=fname,
+                        issuer=""
+                    )
+                )
+
+            # Merge data
             if tipo == "mobile":
                 services.merge_data_with_ecolabel(
                     passport,
@@ -200,28 +258,47 @@ with tabs[2]:
                     cert_data=st.session_state.validated_cert,
                     client=client
                 )
+                passport["sections"]["PDF"] = services.add_evidence_to_section(
+                    passport["sections"].get("PDF", {}),
+                    pdf_meta,
+                    source="product_pdf"
+                )
             else:
                 services.merge_data(
                     passport,
-                    st.session_state.validated_pdf,
-                    st.session_state.validated_image,
-                    st.session_state.validated_cert
+                    pdf_data=st.session_state.validated_pdf,
+                    image_data=st.session_state.validated_image,
+                    cert_data=st.session_state.validated_cert,
+                    pdf_doc_meta=pdf_meta,
+                    cert_doc_meta_list=cert_metas
                 )
 
+            # Images
             for b in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(b))
 
+            # Finalize
             services.espr_stamp(passport, actor="manufacturer", action="finalize", reason="Final publication")
 
+            # Save
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
             st.success("✅ Digital Product Passport pubblicato")
 
-            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
-            st.code(url)
-            qr = services.generate_qr_from_url(url)
+            # URLs
+            dpp_url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+            gs1_url = services.make_gs1_digital_link(
+                passport.get("identifiers", {}).get("gtin",""),
+                dpp_url
+            )
+
+            st.code(dpp_url)
+            st.code(gs1_url)
+
+            qr = services.generate_qr_from_url(gs1_url)
             st.image(qr)
+
     else:
         st.info("Completa prima la validazione")
 
@@ -240,17 +317,14 @@ with tabs[3]:
             if df_passport.empty:
                 st.info("Nessun passport disponibile")
             else:
-                # 1) Tieni SOLO l’ultima versione per ogni id
                 df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
                 df_latest = df_passport.sort_values(["id", "version"]).groupby("id", as_index=False).tail(1)
 
-                # 2) Crea una chiave unica per pivot: section__field_name
                 if "section" in df_fields.columns:
                     df_fields["field_key"] = df_fields["section"].astype(str) + "__" + df_fields["field_name"].astype(str)
                 else:
                     df_fields["field_key"] = df_fields["field_name"].astype(str)
 
-                # 3) Pivot "safe"
                 df_pivot = df_fields.pivot_table(
                     index="passport_id",
                     columns="field_key",
@@ -258,13 +332,11 @@ with tabs[3]:
                     aggfunc="first"
                 ).reset_index()
 
-                # 4) Merge con i meta
                 df_full = df_latest.merge(df_pivot, left_on="id", right_on="passport_id", how="left")
 
                 st.subheader("Risultati")
                 st.dataframe(df_full, use_container_width=True)
 
-                # Dettaglio
                 selected_id = st.selectbox("Seleziona Passport", df_full["id"]) if not df_full.empty else None
                 if selected_id:
                     st.subheader("Dettaglio Passport (meta)")
