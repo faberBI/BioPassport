@@ -133,6 +133,32 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dic
     return passport
 
 
+def _norm_field(x, default_conf=0.0):
+    """
+    Converte x in un dict standard:
+    {"value": str, "confidence": float [0..1], "explanation": str}
+    """
+    if isinstance(x, dict):
+        return {
+            "value": "" if x.get("value") is None else str(x.get("value")),
+            "confidence": float(x.get("confidence", default_conf) or 0.0),
+            "explanation": "" if x.get("explanation") is None else str(x.get("explanation"))
+        }
+    # se è un valore semplice
+    return {"value": "" if x is None else str(x), "confidence": float(default_conf), "explanation": ""}
+
+def _norm_payload(payload):
+    """
+    Normalizza l'intero payload:
+    - se payload è dict: normalizza ogni campo
+    - se payload è lista/altro: incapsula in "raw"
+    """
+    if isinstance(payload, dict):
+        return {k: _norm_field(v) for k, v in payload.items()}
+    return {"raw": _norm_field(payload)}
+
+
+
 # ======================================================
 # PDF / IMAGE UTILITIES
 # ======================================================
@@ -219,64 +245,147 @@ def verify_passport_signature(passport: dict, key: bytes):
 # ======================================================
 # GPT FUNCTIONS
 # ======================================================
-def gpt_extract_cert_info(cert_file, client: OpenAI):
-    text = extract_text_from_pdf(cert_file) if cert_file else None
-    prompt = f"""
-Analizza il certificato allegato.
-Estrai le seguenti informazioni:
-- tipo_certificato
-- numero_certificato
-- ente_emittente
-- data_emissione
-- data_scadenza
-- riferimenti_LCA/EPD
-Rispondi solo con JSON valido. Usa null se il campo non è disponibile.
-Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
-"""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role":"user","content":prompt}],
-            temperature=0
-        )
-        resp_text = response.choices[0].message.content
-        if resp_text.startswith("```"):
-            resp_text = "\n".join(resp_text.splitlines()[1:-1])
-        return json.loads(resp_text)
-    except Exception:
-        return {k: None for k in ["tipo_certificato","numero_certificato","ente_emittente","data_emissione","data_scadenza","riferimenti"]}
 
-def gpt_extract_from_pdf(text, client: OpenAI, tipo, fields):
-    chunks = split_text(text)
-    results = []
-    for chunk in chunks:
-        prompt = f"""
-Estrai dati tecnici del prodotto ({tipo}).
-Rispondi SOLO con JSON valido. Usa null se non presente.
-Campi: {json.dumps(fields)}
-Testo: {chunk}
-"""
+def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
+    """
+    Estrae info da certificati (PDF o immagine) e restituisce SEMPRE
+    un dict normalizzato: {campo: {value, confidence, explanation}}
+    """
+
+    # ---------- 1) capisco se è PDF o immagine ----------
+    # Streamlit file_uploader -> UploadedFile, BytesIO o bytes: gestiamo tutto
+    if hasattr(file_like, "read"):
+        raw = file_like.read()
+    else:
+        raw = file_like
+
+    if raw is None:
+        return {}
+
+    # ripristina BytesIO per usi successivi
+    bio = BytesIO(raw)
+
+    is_pdf = raw[:4] == b"%PDF"
+
+    # ---------- 2) preparo contenuto per GPT ----------
+    if is_pdf:
+        # Testo estratto dal PDF
         try:
-            r = client.chat.completions.create(
-                model="gpt-4.1",
-                messages=[{"role":"user","content":prompt}],
-                temperature=0
+            text = extract_text_from_pdf(BytesIO(raw))
+        except Exception as e:
+            # fallback: testo vuoto ma non crashare
+            text = ""
+        input_block = {
+            "type": "text",
+            "text": (
+                "You are extracting structured fields from a certificate document.\n"
+                "Return ONLY valid JSON.\n\n"
+                f"CERTIFICATE_TEXT:\n{text[:20000]}"
             )
-            resp_text = r.choices[0].message.content
-            if resp_text.startswith("```"):
-                resp_text = "\n".join(resp_text.splitlines()[1:-1])
-            results.append(json.loads(resp_text))
-        except Exception:
-            continue
-    final = {}
-    for campo in fields:
-        values = [r.get(campo) for r in results if r.get(campo)]
-        final[campo] = {
-            "value": values[0] if values else None,
-            "confidence": compute_confidence(values),
-            "explanation": "Dato estratto da PDF" if values else "Dato non trovato nel PDF"
         }
-    return final
+    else:
+        # Immagine -> base64
+        try:
+            img = Image.open(bio)
+            img_b64 = image_to_base64(img)
+        except Exception:
+            # se non è apribile come immagine, prova comunque come testo (fallback)
+            img_b64 = None
+
+        if img_b64:
+            # usiamo multimodale: testo + immagine
+            input_block = [
+                {
+                    "type": "text",
+                    "text": (
+                        "You are extracting structured fields from a certificate image.\n"
+                        "Return ONLY valid JSON.\n"
+                    )
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                }
+            ]
+        else:
+            input_block = {
+                "type": "text",
+                "text": (
+                    "You are extracting structured fields from a certificate.\n"
+                    "The file could not be parsed as image. Return ONLY valid JSON.\n"
+                    "If you cannot extract fields, return {}."
+                )
+            }
+
+    # ---------- 3) prompt + schema di output ----------
+    # Campi “core” tipici certificati (adattabile, ma già utile)
+    schema_hint = {
+        "tipo_certificato": {"value": "", "confidence": 0.0, "explanation": ""},
+        "ente_emittente": {"value": "", "confidence": 0.0, "explanation": ""},
+        "numero_certificato": {"value": "", "confidence": 0.0, "explanation": ""},
+        "data_emissione": {"value": "", "confidence": 0.0, "explanation": ""},
+        "data_scadenza": {"value": "", "confidence": 0.0, "explanation": ""},
+        "norma_riferimento": {"value": "", "confidence": 0.0, "explanation": ""},
+        "prodotto_modello": {"value": "", "confidence": 0.0, "explanation": ""},
+        "ambito_scopo": {"value": "", "confidence": 0.0, "explanation": ""},
+        "note": {"value": "", "confidence": 0.0, "explanation": ""}
+    }
+
+    system = (
+        "You are a strict information extraction engine.\n"
+        "Return ONLY JSON, no markdown, no commentary.\n"
+        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
+        "If a field is unknown, leave value empty and confidence 0.\n"
+    )
+
+    user = (
+        "Extract certificate information. Use this JSON structure as output template:\n"
+        f"{json.dumps(schema_hint, ensure_ascii=False)}\n"
+        "Populate what you can from the document.\n"
+        "IMPORTANT: return ONLY JSON.\n"
+    )
+
+    # ---------- 4) chiamata OpenAI ----------
+    try:
+        # Nota: questo usa l'SDK OpenAI "nuovo" style chat.completions
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [ {"type": "text", "text": user} ] if isinstance(input_block, dict) else [ {"type": "text", "text": user} ] },
+                {"role": "user", "content": [input_block] if isinstance(input_block, dict) else input_block},
+            ],
+        )
+
+        content = resp.choices[0].message.content or "{}"
+
+        # ---------- 5) parse JSON robusto ----------
+        try:
+            data = json.loads(content)
+        except Exception:
+            # Prova a “ripulire” se GPT mette testo extra (capita raramente)
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(content[start:end+1])
+            else:
+                data = {}
+
+        # ---------- 6) normalizza output SEMPRE ----------
+        normalized = _norm_payload(data)
+
+        # Garantisco che ci siano almeno i campi dello schema (mancanti -> vuoti)
+        for k in schema_hint.keys():
+            normalized.setdefault(k, {"value": "", "confidence": 0.0, "explanation": ""})
+
+        return normalized
+
+    except Exception as e:
+        # Non far crashare l'app: ritorna struttura vuota standard
+        fallback = {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in schema_hint.keys()}
+        return fallback
+
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
