@@ -214,6 +214,37 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
 
 
+ef passport_meta_row(passport: dict) -> dict:
+    """
+    Estrae una riga 'piatta' (Excel-friendly) dal passport.
+    Serve per scrivere il foglio 'passport' senza annidamenti (sections, liste, ecc.).
+    """
+    issuer = passport.get("issuer") or {}
+    sig = passport.get("digital_signature") or {}
+    att = passport.get("attestation") or {}
+
+    return {
+        "id": passport.get("id"),
+        "product_type": passport.get("product_type"),
+        "version": passport.get("version"),
+        "created_at": passport.get("created_at"),
+        "last_updated_at": passport.get("last_updated_at"),
+        "overall_rating": passport.get("overall_rating"),
+        "sustainability_score": passport.get("sustainability_score"),
+
+        "issuer_legal_name": issuer.get("legal_name"),
+        "issuer_vat": issuer.get("vat"),
+        "issuer_role": issuer.get("role"),
+        "issuer_country": issuer.get("country"),
+
+        "attestation_timestamp": att.get("timestamp"),
+
+        "signature_algorithm": sig.get("algorithm"),
+        "signature_hash": sig.get("hash"),
+        "signature_signed_at": sig.get("signed_at"),
+        "signature_signed_by": sig.get("signed_by"),
+    }
+
 
 # ======================================================
 # PDF / IMAGE UTILITIES
