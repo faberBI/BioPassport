@@ -230,54 +230,26 @@ with tabs[2]:
 # ======================================================
 with tabs[3]:
     st.header("Archivio Passport")
-
     if os.path.exists(services.EXCEL_FILE):
         try:
-            df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").pipe(lambda df: df.rename(columns=str.strip))
-            df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").pipe(lambda df: df.rename(columns=str.strip))
-            df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images").pipe(lambda df: df.rename(columns=str.strip))
+            df_p = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
+            df_f = pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
+            df_i = pd.read_excel(services.EXCEL_FILE, sheet_name="images")
 
-            if df_passport.empty:
-                st.info("Nessun passport disponibile")
+            if df_p.empty:
+                st.info("Nessun passport presente")
             else:
-                # 1) Tieni SOLO l’ultima versione per ogni id
-                df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
-                df_latest = df_passport.sort_values(["id", "version"]).groupby("id", as_index=False).tail(1)
-
-                # 2) Crea una chiave unica per pivot: section__field_name
-                if "section" in df_fields.columns:
-                    df_fields["field_key"] = df_fields["section"].astype(str) + "__" + df_fields["field_name"].astype(str)
-                else:
-                    df_fields["field_key"] = df_fields["field_name"].astype(str)
-
-                # 3) Pivot "safe"
-                df_pivot = df_fields.pivot_table(
+                pivot = df_f.pivot_table(
                     index="passport_id",
-                    columns="field_key",
+                    columns="field_name",
                     values="value",
                     aggfunc="first"
                 ).reset_index()
 
-                # 4) Merge con i meta
-                df_full = df_latest.merge(df_pivot, left_on="id", right_on="passport_id", how="left")
-
-                st.subheader("Risultati")
-                st.dataframe(df_full, use_container_width=True)
-
-                # Dettaglio
-                selected_id = st.selectbox("Seleziona Passport", df_full["id"]) if not df_full.empty else None
-                if selected_id:
-                    st.subheader("Dettaglio Passport (meta)")
-                    st.dataframe(df_latest[df_latest["id"] == selected_id])
-
-                    st.subheader("Campi (tutte le sezioni)")
-                    st.dataframe(df_fields[df_fields["passport_id"] == selected_id])
-
-                    st.subheader("Immagini")
-                    for _, row in df_images[df_images["passport_id"] == selected_id].iterrows():
-                        st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption", ""))
+                df = df_p.merge(pivot, left_on="id", right_on="passport_id", how="left")
+                st.dataframe(df)
 
         except Exception as e:
             st.error(f"Errore archivio: {e}")
     else:
-        st.info("Nessun file Excel trovato")
+        st.info("Nessun archivio Excel trovato")
