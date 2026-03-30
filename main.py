@@ -8,17 +8,6 @@ import pandas as pd
 from io import BytesIO
 
 # ======================================================
-# UTILITY: assicurare struttura passport
-# ======================================================
-def ensure_passport_structure(passport):
-    passport.setdefault("sections", {})
-    passport.setdefault("images", [])
-    passport.setdefault("certificates", [])
-    passport.setdefault("digital_signature", None)
-    passport.setdefault("version", 0)
-    return passport
-
-# ======================================================
 # CONFIG STREAMLIT
 # ======================================================
 st.set_page_config(
@@ -48,17 +37,25 @@ body {{background-color:#f5f1ed; color:#3a2607; font-family:Nunito Sans;}}
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
 
 # ======================================================
-# SESSION STATE INIZIALIZZAZIONE
+# SESSION STATE INIT
 # ======================================================
-for key in ["uploaded_pdf_bytes", "uploaded_images_bytes", "uploaded_cert_bytes",
-            "pdf_data", "image_data", "cert_data",
-            "validated_pdf", "validated_image", "validated_cert",
-            "images", "cert_files"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
+DEFAULT_STATE = {
+    "uploaded_pdf_bytes": None,
+    "uploaded_images_bytes": None,
+    "uploaded_cert_bytes": None,
+    "pdf_data": None,
+    "image_data": None,
+    "cert_data": None,
+    "validated_pdf": None,
+    "validated_image": None,
+    "validated_cert": None,
+}
+
+for k, v in DEFAULT_STATE.items():
+    st.session_state.setdefault(k, v)
 
 # ======================================================
-# PUBLIC VIEW tramite passport_id
+# PUBLIC VIEW (?passport_id=...)
 # ======================================================
 passport_id = st.query_params.get("passport_id")
 if passport_id:
@@ -66,33 +63,35 @@ if passport_id:
     if not passport:
         st.error("Passport non trovato")
         st.stop()
-    passport = ensure_passport_structure(passport)
 
     st.title("🇪🇺 Digital Product Passport")
-    st.write(f"**ID:** {passport['id']}")
-    st.write(f"**Tipo:** {passport['product_type']}")
 
-    for sec_name, sec in passport["sections"].items():
-        st.subheader(f"{sec_name}")
+    st.markdown(f"""
+**ID:** {passport.get("id")}  
+**Tipo:** {passport.get("product_type")}  
+**Versione:** {passport.get("version")}  
+**Issuer:** {(passport.get("issuer") or {}).get("legal_name")}  
+**Firma hash:** `{(passport.get("digital_signature") or {}).get("hash","")[:16]}…`
+""")
+
+    for sec_name, sec in passport.get("sections", {}).items():
+        st.subheader(sec_name)
         for fname, f in sec.items():
             val = f.get("value") if isinstance(f, dict) else f
-            conf = f.get("confidence",0) if isinstance(f, dict) else 0
-            explanation = f.get("explanation","") if isinstance(f, dict) else ""
+            conf = f.get("confidence", 0) if isinstance(f, dict) else 0
+            exp = f.get("explanation", "") if isinstance(f, dict) else ""
             st.write(f"**{fname}**: {val} (conf: {conf})")
             if conf < 0.5:
-                st.caption("Bassa confidenza")
-            if explanation:
-                st.caption(explanation)
+                st.caption("⚠️ Bassa confidenza")
+            if exp:
+                st.caption(exp)
 
     if passport.get("certificates"):
         st.subheader("Certificati")
         for cert in passport["certificates"]:
-            st.write(f"**Nome:** {cert.get('tipo_certificato', {}).get('value','')}")
-            st.write(f"**Ente:** {cert.get('ente_emittente', {}).get('value','')}")
-            st.write(f"**Numero:** {cert.get('numero_certificato', {}).get('value','')}")
-            st.write(f"**Emissione:** {cert.get('data_emissione', {}).get('value','')}")
-            st.write(f"**Scadenza:** {cert.get('data_scadenza', {}).get('value','')}")
-            st.write("---")
+            for k, v in cert.items():
+                st.write(f"**{k}**: {v.get('value','') if isinstance(v,dict) else v}")
+            st.divider()
 
     services.render_espr_compliance(passport)
 
@@ -100,114 +99,100 @@ if passport_id:
     st.metric("Reliability", f"{int(passport.get('overall_rating',0)*100)}%")
     st.metric("Sustainability", f"{int(passport.get('sustainability_score',0)*100)}%")
 
-    if passport.get("images"):
-        for img in passport["images"]:
-            st.image(f"data:image/jpeg;base64,{img['file_base64']}")
+    for img in passport.get("images", []):
+        st.image(f"data:image/jpeg;base64,{img['file_base64']}", caption=img.get("caption",""))
 
     st.stop()
 
 # ======================================================
 # SELEZIONE TIPO PRODOTTO
 # ======================================================
-tipo = st.selectbox("Tipo prodotto", ["mobile","lampada","bicicletta"])
+tipo = st.selectbox("Tipo prodotto", ["mobile", "lampada", "bicicletta"])
 fields = list(services.PRODUCT_FIELDS.get(tipo, {}).get("pdf", []))
 
 tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🔗 Pubblica", "📚 Archivio"])
 
 # ======================================================
-# TAB 1: UPLOAD + AI
+# TAB 1 — UPLOAD & AI
 # ======================================================
 with tabs[0]:
     pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
-    image_files = st.file_uploader("Immagini prodotto", type=["jpg","png"], accept_multiple_files=True)
-    cert_files = st.file_uploader("Certificati (PDF/immagini)", type=["pdf","jpg","png"], accept_multiple_files=True)
+    image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
+    cert_files = st.file_uploader("Certificati", type=["pdf", "jpg", "png"], accept_multiple_files=True)
 
     if st.button("Analizza"):
         if not pdf_file or not image_files:
             st.warning("Carica PDF e almeno un'immagine")
         else:
             st.session_state.uploaded_pdf_bytes = pdf_file.read()
-            st.session_state.uploaded_images_bytes = [img.read() for img in image_files]
-            st.session_state.images = image_files
-            st.session_state.cert_files = cert_files or []
-            st.session_state.uploaded_cert_bytes = [c.read() for c in st.session_state.cert_files] if cert_files else []
+            st.session_state.uploaded_images_bytes = [i.read() for i in image_files]
+            st.session_state.uploaded_cert_bytes = [c.read() for c in (cert_files or [])]
 
             with st.spinner("Analisi in corso..."):
-                # PDF prodotto
                 pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
                 st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
-                # Immagini prodotto
                 img_data = {}
-                for img_bytes in st.session_state.uploaded_images_bytes or []:
-                    res = services.gpt_analyze_image(BytesIO(img_bytes), client, tipo)
-                    img_data.update(res)
+                for b in st.session_state.uploaded_images_bytes:
+                    img_data.update(services.gpt_analyze_image(BytesIO(b), client, tipo))
                 st.session_state.image_data = img_data
 
-                # Certificati
-                cert_data_list = []
-                for cert_bytes in st.session_state.uploaded_cert_bytes or []:
-                    res = services.gpt_extract_cert_info(BytesIO(cert_bytes), client)
-                    cert_data_list.append(res)
-                st.session_state.cert_data = cert_data_list
-
-                # Ecolabel UE (solo mobile)
-                if tipo=="mobile":
-                    ecolabel_data = services.extract_ecolabel_fields_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes), client)
-                    st.session_state.pdf_data.update({"Ecolabel_UE": ecolabel_data})
+                cert_list = []
+                for b in st.session_state.uploaded_cert_bytes:
+                    cert_list.append(services.gpt_extract_cert_info(BytesIO(b), client))
+                st.session_state.cert_data = cert_list
 
             st.success("Analisi completata ✅")
 
 # ======================================================
-# TAB 2: VALIDAZIONE
+# TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
     if st.session_state.pdf_data and st.session_state.image_data:
-        st.subheader("Validazione dati PDF")
-        validated_pdf = {
-            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")),
-                "confidence": v.get("confidence",0)}
-            for k,v in st.session_state.pdf_data.items()
+        st.subheader("Validazione PDF")
+        st.session_state.validated_pdf = {
+            k: {
+                "value": st.text_input(k, v.get("value",""), help=v.get("explanation","")),
+                "confidence": v.get("confidence",0)
+            }
+            for k, v in st.session_state.pdf_data.items()
         }
-        st.session_state.validated_pdf = validated_pdf
 
-        st.subheader("Validazione dati Immagini")
-        validated_img = {
-            k: {"value": st.text_input(f"{k} (conf: {v.get('confidence',0)})", v.get("value",""), help=v.get("explanation","")),
-                "confidence": v.get("confidence",0)}
-            for k,v in st.session_state.image_data.items()
+        st.subheader("Validazione Immagini")
+        st.session_state.validated_image = {
+            k: {
+                "value": st.text_input(k, v.get("value",""), help=v.get("explanation","")),
+                "confidence": v.get("confidence",0)
+            }
+            for k, v in st.session_state.image_data.items()
         }
-        st.session_state.validated_image = validated_img
 
         if st.session_state.cert_data:
-            st.subheader("Validazione certificati")
-            validated_cert_list = []
+            st.subheader("Certificati")
+            validated = []
             for i, cert in enumerate(st.session_state.cert_data):
-                validated_cert = {}
                 st.markdown(f"**Certificato {i+1}**")
-                for k,v in cert.items():
-                    val = v.get("value","") if isinstance(v, dict) else str(v)
-                    conf = v.get("confidence",0) if isinstance(v, dict) else 0
-                    validated_cert[k] = {"value": st.text_input(f"{k} (conf: {conf})", val, key=f"cert_{i}_{k}"), "confidence": conf}
-                validated_cert_list.append(validated_cert)
-            st.session_state.validated_cert = validated_cert_list
+                row = {}
+                for k, v in cert.items():
+                    val = v.get("value","") if isinstance(v,dict) else v
+                    row[k] = {"value": st.text_input(k, val, key=f"c{i}_{k}"), "confidence": v.get("confidence",0)}
+                validated.append(row)
+            st.session_state.validated_cert = validated
 
-        if st.button("Completa validazione"):
-            st.success("Validazione completata ✅")
+        st.success("Validazione pronta ✅")
     else:
-        st.info("Esegui prima l’analisi PDF e immagini")
+        st.info("Esegui prima l’analisi")
 
 # ======================================================
-# TAB 3: PUBBLICA
+# TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
     if st.session_state.validated_pdf and st.session_state.validated_image:
-        if st.button("Pubblica Digital Product Passport"):
+        if st.button("Pubblica DPP"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
-            passport = ensure_passport_structure(passport)
 
-            if tipo=="mobile":
+            if tipo == "mobile":
                 services.merge_data_with_ecolabel(
                     passport,
                     pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
@@ -223,75 +208,48 @@ with tabs[2]:
                     st.session_state.validated_cert
                 )
 
-            # Aggiungi immagini
-            for img_bytes in st.session_state.uploaded_images_bytes or []:
-                services.add_product_image(passport, BytesIO(img_bytes))
+            for b in st.session_state.uploaded_images_bytes:
+                services.add_product_image(passport, BytesIO(b))
 
-            # Salvataggio
+            services.espr_stamp(passport, actor="manufacturer", action="finalize", reason="Final publication")
+
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            st.success("DPP pubblicato ✅")
-            st.metric("Affidabilità", f"{int(passport.get('overall_rating',0)*100)}%")
-            st.metric("Sostenibilità", f"{int(passport.get('sustainability_score',0)*100)}%")
+            st.success("✅ Digital Product Passport pubblicato")
 
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+            st.code(url)
             qr = services.generate_qr_from_url(url)
             st.image(qr)
-            st.download_button("Scarica QR code", data=qr.getvalue(), file_name=f"{pid}_qr.png", mime="image/png")
-            st.code(url)
     else:
-        st.info("Completa prima la validazione PDF e immagini")
+        st.info("Completa prima la validazione")
 
 # ======================================================
-# TAB 4: ARCHIVIO
+# TAB 4 — ARCHIVIO
 # ======================================================
 with tabs[3]:
     st.header("Archivio Passport")
     if os.path.exists(services.EXCEL_FILE):
         try:
-            df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").pipe(lambda df: df.rename(columns=str.strip))
-            df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").pipe(lambda df: df.rename(columns=str.strip))
-            df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images").pipe(lambda df: df.rename(columns=str.strip))
+            df_p = pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
+            df_f = pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
+            df_i = pd.read_excel(services.EXCEL_FILE, sheet_name="images")
 
-            if df_passport.empty:
-                st.info("Nessun passport disponibile")
+            if df_p.empty:
+                st.info("Nessun passport presente")
             else:
-                df_fields_pivot = df_fields.pivot_table(index="passport_id", columns="field_name", values="value", aggfunc="first").reset_index()
-                df_full = df_passport.merge(df_fields_pivot, left_on="id", right_on="passport_id", how="left")
+                pivot = df_f.pivot_table(
+                    index="passport_id",
+                    columns="field_name",
+                    values="value",
+                    aggfunc="first"
+                ).reset_index()
 
-                st.subheader("Filtri")
-                nome = st.text_input("Nome prodotto")
-                luogo = st.text_input("Luogo produzione")
-                prezzo_min, prezzo_max = st.number_input("Prezzo minimo",0), st.number_input("Prezzo massimo",10000)
-                data_min, data_max = st.date_input("Data da"), st.date_input("Data a")
+                df = df_p.merge(pivot, left_on="id", right_on="passport_id", how="left")
+                st.dataframe(df)
 
-                df_filtered = df_full.copy()
-                if nome:
-                    df_filtered = df_filtered[df_filtered["Nome prodotto"].astype(str).str.contains(nome, case=False, na=False)]
-                if luogo:
-                    df_filtered = df_filtered[df_filtered["Luogo di produzione"].astype(str).str.contains(luogo, case=False, na=False)]
-                if "Prezzo" in df_filtered.columns:
-                    df_filtered["Prezzo_num"] = pd.to_numeric(df_filtered["Prezzo"].astype(str).str.replace("€","").str.replace(",","."),
-                                                              errors='coerce')
-                    df_filtered = df_filtered[(df_filtered["Prezzo_num"]>=prezzo_min)&(df_filtered["Prezzo_num"]<=prezzo_max)]
-                if "created_at" in df_filtered.columns:
-                    df_filtered["created_at"] = pd.to_datetime(df_filtered["created_at"], errors='coerce')
-                    df_filtered = df_filtered[(df_filtered["created_at"].dt.date>=data_min)&(df_filtered["created_at"].dt.date<=data_max)]
-
-                st.subheader("Risultati filtrati")
-                st.dataframe(df_filtered)
-
-                selected_id = st.selectbox("Seleziona Passport", df_filtered["id"]) if not df_filtered.empty else None
-                if selected_id:
-                    st.subheader("Dettaglio Passport")
-                    st.dataframe(df_passport[df_passport["id"]==selected_id])
-                    st.subheader("Campi del Passport")
-                    st.dataframe(df_fields[df_fields["passport_id"]==selected_id])
-                    st.subheader("Immagini")
-                    for _, row in df_images[df_images["passport_id"]==selected_id].iterrows():
-                        st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption",""))
         except Exception as e:
             st.error(f"Errore archivio: {e}")
     else:
-        st.info("Nessun file Excel trovato")
+        st.info("Nessun archivio Excel trovato")
