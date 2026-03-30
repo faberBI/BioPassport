@@ -1,94 +1,155 @@
-import pdfplumber
+import os
 import json
 import base64
-import qrcode
-import os
+import fitz  # PyMuPDF
+import pdfplumber
 import unicodedata
 from difflib import get_close_matches
 from io import BytesIO
-from openai import OpenAI
-import streamlit as st
 from PIL import Image
-from datetime import datetime
-import pyodbc
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.colors import yellow
-import fitz 
 import pandas as pd
-import openpyxl
+from openai import OpenAI
+import hashlib
+from cryptography.fernet import Fernet
 from openpyxl import load_workbook
+import qrcode
+from datetime import timezone, datetime
+
+from typing import Optional, Dict, Any, List
+from urllib.parse import quote
+
+
 # ======================================================
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
+EXCEL_FILE = os.path.join(PASSPORT_DIR, "passport_archive.xlsx")
+LOG_FILE = os.path.join(PASSPORT_DIR, "passport_log.jsonl")
+
+TRUSTED_ISSUERS = ["Chambersign","InfoCert","Aruba PEC","GlobalSign EU","D-Trust"]
+
 PRODUCT_FIELDS = {
     "mobile": {
         "pdf": [
-            {"name":"Nome prodotto", "required": True},
-            {"name":"Numero di modello", "required": True},
-            {"name":"Produttore", "required": True},
-            {"name":"Materiali", "required": True},
-            {"name":"Dimensioni", "required": False},
-            {"name":"Lotto di produzione", "required": False},
-            {"name":"Anno di produzione", "required": False},
-            {"name":"Certificazione di sicurezza", "required": True},
-            {"name":"Certificazione di sostenibilita", "required": True},
-            {"name":"Descrizione prodotto", "required": False},
-            {"name":"Luogo di produzione", "required": False},
-            {"name":"Manutenzione e cura", "required": False},
-            {"name":"Materiali/componenti utilizzati", "required": True},
-            {"name":"Specie legnosa", "required": False},
-            {"name":"% di contenuto riciclato", "required": True},
-            {"name":"Sostanze preoccupanti", "required": True},
-            {"name":"Finitura superficiale", "required": False},
-            {"name":"Marchio", "required": False},
-            {"name":"Garanzia", "required": False},
-            {"name":"Certificazioni materiale", "required": False},
-            {"name":"Impronta carbonio GWP", "required": False},
-            {"name":"Prezzo", "required": False},
-            {"name":"Identificativo operatore", "required": False},
-            {"name":"Conformità tecnica", "required": True},
-            {"name":"Gestione fine vita (codice CER)", "required": True}
+            "Nome prodotto","Numero di modello","Produttore","Materiali/componenti utilizzati",
+            "% di contenuto riciclato","Sostanze preoccupanti","Conformità tecnica",
+            "Prezzo in euro","Luogo di Produzione","Data di produzione","Dimensioni",
+            "Peso","Energia consumata"
         ],
-        "image": [
-            {"name":"Colore", "required": True},
-            {"name":"Condizioni", "required": True}
-        ]
-    },
-    "lampada": {
-        "pdf": [
-            {"name":"nome_prodotto", "required": True},
-            {"name":"produttore", "required": True},
-            {"name":"materiale", "required": True},
-            {"name":"wattaggio", "required": True}
-        ],
-        "image": [
-            {"name":"tipologia_prodotto", "required": True},
-            {"name":"colore", "required": True},
-            {"name":"stile", "required": False}
-        ]
-    },
-    "bicicletta": {
-        "pdf": [
-            {"name":"nome_prodotto", "required": True},
-            {"name":"produttore", "required": True},
-            {"name":"modello", "required": True},
-            {"name":"anno_produzione", "required": False}
-        ],
-        "image": [
-            {"name":"colore_telaio", "required": True},
-            {"name":"condizioni", "required": True}
-        ]
+        "image": ["Colore","Condizioni"]
     }
 }
+
+ECOLABEL_FIELDS = [
+    "descrizione_prodotto","svhc_limitati","clp_conformita","legno_certificato",
+    "plastica_conforme","metallo_conforme","rivestimenti_ok","formaldeide_bassa",
+    "voc_bassi","facilmente_smortabile","produzione_basso_impatto","info_consumatore_ok"
+]
+
 # ======================================================
 # NORMALIZATION / MATCHING
 # ======================================================
+
+from typing import Optional
+from urllib.parse import quote
+import uuid
+
+def sha256_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+def make_document_id(prefix: str = "DOC") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:10]}"
+
+def ensure_documents_container(passport: dict) -> None:
+    passport.setdefault("documents", {})  # {doc_id: meta}
+
+def register_document(passport: dict, raw_bytes: bytes, doc_type: str,
+                      filename: str = "", issuer: str = "") -> dict:
+    """
+    Registra un documento (PDF/cert/immagine) e salva hash SHA256.
+    Restituisce metadati: document_id, sha256, type, filename, issuer, created_at.
+    """
+    ensure_documents_container(passport)
+    doc_id = make_document_id(prefix=doc_type.upper())
+    meta = {
+        "document_id": doc_id,
+        "type": doc_type,
+        "filename": filename,
+        "issuer": issuer,
+        "sha256": sha256_bytes(raw_bytes),
+        "created_at": _utc_now_iso(),
+    }
+    passport["documents"][doc_id] = meta
+    return meta
+
+def attach_evidence(field_obj: dict, evidence_item: dict) -> dict:
+    """
+    Garantisce formato campo + aggiunge evidence[].
+    Campo standard: {"value","confidence","explanation","evidence":[...]}
+    """
+    if not isinstance(field_obj, dict):
+        field_obj = {"value": field_obj, "confidence": 0.0, "explanation": ""}
+    field_obj.setdefault("evidence", [])
+    field_obj["evidence"].append(evidence_item)
+    return field_obj
+
+def add_evidence_to_section(section_data: dict, doc_meta: dict, source: str,
+                            locator: str = "") -> dict:
+    """
+    Applica evidence (doc_id+sha256) a TUTTI i campi di una sezione (PDF/Images ecc.).
+    """
+    out = {}
+    for k, v in (section_data or {}).items():
+        base = v if (isinstance(v, dict) and "value" in v and "confidence" in v) else _norm_field(v)
+        ev = {
+            "source": source,  # es: product_pdf | certificate | product_images
+            "document_id": doc_meta.get("document_id"),
+            "document_sha256": doc_meta.get("sha256"),
+            "type": doc_meta.get("type"),
+            "filename": doc_meta.get("filename"),
+            "issuer": doc_meta.get("issuer"),
+        }
+        if locator:
+            ev["locator"] = locator  # es: "page:2"
+        out[k] = attach_evidence(base, ev)
+    return out
+
+def export_passport_jsonld(passport: dict,
+                           context_url: str = "https://ec.europa.eu/dpp/context/v1") -> dict:
+    """
+    Wrapper JSON-LD (base) per interoperabilità.
+    Il contesto ufficiale UE può evolvere: questo è un placeholder pratico.
+    """
+    return {
+        "@context": context_url,
+        "@type": "DigitalProductPassport",
+        "id": passport.get("id"),
+        "product_type": passport.get("product_type"),
+        "version": passport.get("version"),
+        "issuer": passport.get("issuer"),
+        "identifiers": passport.get("identifiers", {}),
+        "documents": passport.get("documents", {}),
+        "sections": passport.get("sections", {}),
+        "certificates": passport.get("certificates", []),
+        "images": passport.get("images", []),
+        "digital_signature": passport.get("digital_signature"),
+        "change_log": passport.get("change_log", [])
+    }
+
+def make_gs1_digital_link(gtin: str, dpp_url: str) -> str:
+    """
+    Pattern GS1 Digital Link: https://id.gs1.org/01/{GTIN}?dpp={urlencoded}
+    Se GTIN non c'è, ritorna l'URL standard del DPP.
+    """
+    gtin_clean = "".join([c for c in (gtin or "") if c.isdigit()])
+    if not gtin_clean:
+        return dpp_url
+    return f"https://id.gs1.org/01/{gtin_clean}?dpp={quote(dpp_url, safe='')}"
+
 def normalize(text):
     text = text.lower().strip()
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return text.replace(" ", "_")
+    text = unicodedata.normalize("NFKD", text).encode("ascii","ignore").decode()
+    return text.replace(" ","_")
 
 def match_field(input_key, field_names):
     norm_input = normalize(input_key)
@@ -96,12 +157,197 @@ def match_field(input_key, field_names):
     if norm_input in norm_fields:
         return norm_fields[norm_input]
     matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.8)
-    if matches:
-        return norm_fields[matches[0]]
-    return None
+    return norm_fields[matches[0]] if matches else None
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def _canonical_json(obj) -> bytes:
+    # serializzazione deterministica (per firma/hash stabile)
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+def compute_passport_hash(passport: dict) -> str:
+    # escludo la firma stessa per evitare ricorsione
+    tmp = dict(passport)
+    tmp.pop("digital_signature", None)
+    payload = _canonical_json(tmp)
+    return hashlib.sha256(payload).hexdigest()
+
+def get_default_issuer() -> dict:
+    """
+    Default issuer da env vars (Streamlit Cloud -> Settings -> Secrets/Env).
+    Se non setti nulla, usa placeholder.
+    """
+    return {
+        "legal_name": os.getenv("ISSUER_LEGAL_NAME", "Nuvia S.r.l."),
+        "vat": os.getenv("ISSUER_VAT", "ITXXXXXXX"),
+        "role": os.getenv("ISSUER_ROLE", "manufacturer"),
+        "country": os.getenv("ISSUER_COUNTRY", "IT")
+    }
+
+def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dict | None = None):
+    """
+    Applica versioning + audit + attestazione + firma hash.
+    """
+    now = _utc_now_iso()
+
+    # Campi minimi
+    passport.setdefault("version", 0)
+    passport.setdefault("created_at", now)
+    passport.setdefault("last_updated_at", now)
+    passport.setdefault("change_log", [])
+
+    # bump versione
+    passport["version"] = int(passport.get("version") or 0) + 1
+    passport["last_updated_at"] = now
+
+    passport["change_log"].append({
+        "version": passport["version"],
+        "timestamp": now,
+        "actor": actor,
+        "action": action,
+        "reason": reason
+    })
+
+    # issuer + attestation (solo se fornito o se non presente)
+    if issuer is None and "issuer" not in passport:
+        issuer = get_default_issuer()
+
+    if issuer:
+        passport["issuer"] = issuer
+        passport["attestation"] = {
+            "statement": "The issuer declares that the information contained in this Digital Product Passport is accurate and compliant with ESPR Regulation (EU) 2024/1781.",
+            "timestamp": now
+        }
+
+    # firma integrità (hash)
+    h = compute_passport_hash(passport)
+    passport["digital_signature"] = {
+        "algorithm": "SHA-256",
+        "hash": h,
+        "signed_at": now,
+        "signed_by": (passport.get("issuer") or {}).get("legal_name", "unknown")
+    }
+
+    return passport
+
+
+
+def _norm_field(x, default_conf=0.0):
+    if isinstance(x, dict):
+        return {
+            "value": "" if x.get("value") is None else str(x.get("value")),
+            "confidence": float(x.get("confidence", default_conf) or 0.0),
+            "explanation": "" if x.get("explanation") is None else str(x.get("explanation"))
+        }
+    return {"value": "" if x is None else str(x), "confidence": float(default_conf), "explanation": ""}
+
+def _norm_payload_cert(payload: dict) -> dict:
+    # Normalizza output certificati (chiavi libere)
+    if isinstance(payload, dict):
+        return {k: _norm_field(v) for k, v in payload.items()}
+    return {"raw": _norm_field(payload)}
+    
+def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
+    # Normalizza output PDF sui campi attesi
+    out = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in expected_fields}
+    if isinstance(payload, dict):
+        for k in expected_fields:
+            out[k] = _norm_field(payload.get(k, out[k]))
+    return out
+
+
+
+def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
+    """
+    Estrae campi dal testo PDF e ritorna SEMPRE un dict:
+    {field: {value, confidence, explanation}}
+    """
+    if not pdf_text:
+        return {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
+
+    # template output
+    template = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
+
+    system = (
+        "You are a strict information extraction engine.\n"
+        "Return ONLY JSON, no markdown, no commentary.\n"
+        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
+        "If a field is unknown, leave value empty and confidence 0.\n"
+    )
+
+    user = (
+        f"Extract product passport fields for product_type={tipo}.\n"
+        "Use the following JSON template and populate fields from the text.\n"
+        "Return ONLY JSON.\n\n"
+        f"TEMPLATE:\n{json.dumps(template, ensure_ascii=False)}\n\n"
+        f"PDF_TEXT:\n{pdf_text[:20000]}"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        content = resp.choices[0].message.content or "{}"
+
+        # parse JSON robusto
+        try:
+            data = json.loads(content)
+        except Exception:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(content[start:end+1])
+            else:
+                data = {}
+
+        return _norm_payload_pdf(data, fields)
+
+    except Exception as e:
+        # fallback senza crash
+        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
+
+def passport_meta_row(passport: dict) -> dict:
+    """
+    Estrae una riga 'piatta' (Excel-friendly) dal passport.
+    Serve per scrivere il foglio 'passport' senza annidamenti (sections, liste, ecc.).
+    """
+    issuer = passport.get("issuer") or {}
+    sig = passport.get("digital_signature") or {}
+    att = passport.get("attestation") or {}
+
+    return {
+        "id": passport.get("id"),
+        "product_type": passport.get("product_type"),
+        "version": passport.get("version"),
+        "created_at": passport.get("created_at"),
+        "last_updated_at": passport.get("last_updated_at"),
+        "overall_rating": passport.get("overall_rating"),
+        "sustainability_score": passport.get("sustainability_score"),
+
+        "issuer_legal_name": issuer.get("legal_name"),
+        "issuer_vat": issuer.get("vat"),
+        "issuer_role": issuer.get("role"),
+        "issuer_country": issuer.get("country"),
+
+        "attestation_timestamp": att.get("timestamp"),
+
+        "signature_algorithm": sig.get("algorithm"),
+        "signature_hash": sig.get("hash"),
+        "signature_signed_at": sig.get("signed_at"),
+        "signature_signed_by": sig.get("signed_by"),
+    }
+
 
 # ======================================================
-# PDF CHUNKING
+# PDF / IMAGE UTILITIES
 # ======================================================
 def split_text(text, max_chars=3000, overlap=300):
     chunks = []
@@ -112,21 +358,20 @@ def split_text(text, max_chars=3000, overlap=300):
         start += max_chars - overlap
     return chunks
 
-# ======================================================
-# PDF / IMAGE UTILITIES
-# ======================================================
 def extract_text_from_pdf(pdf_file):
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            text += page.extract_text() or ""
+            txt = page.extract_text()
+            if txt:
+                text += txt + "\n"
     return text
 
-def image_to_base64(image_file):
-    if hasattr(image_file, "getvalue"):
-        return base64.b64encode(image_file.getvalue()).decode()
+def image_to_base64(image: Image.Image) -> str:
+    if image.mode in ("RGBA", "P"):
+        image = image.convert("RGB")
     buf = BytesIO()
-    image_file.save(buf, format="JPEG")
+    image.save(buf, format="JPEG")
     return base64.b64encode(buf.getvalue()).decode()
 
 def resize_image_for_vision(image_file, max_size=512):
@@ -142,904 +387,604 @@ def resize_image_for_vision(image_file, max_size=512):
 # CONFIDENCE
 # ======================================================
 def compute_confidence(values):
-    """
-    Calcola la confidenza di un campo basandosi sui valori estratti.
-    Restituisce 0 se la lista è vuota.
-    """
     if not values:
-        return 0.0  # Nessun dato → confidenza 0
+        return 0.0
     most_common = max(set(values), key=values.count)
-    confidence = values.count(most_common) / len(values)
-    return confidence
+    return values.count(most_common)/len(values)
 
 # ======================================================
-# GPT PDF EXTRACTION
+# CRITTOGRAFIA DATI SENSIBILI / SIGNATURE / VERSIONING
 # ======================================================
-def gpt_extract_from_pdf(text, client: OpenAI, tipo, fields):
-    chunks = split_text(text)
-    results = []
+def generate_key():
+    return Fernet.generate_key()
 
-    for chunk in chunks:
-        prompt = f"""
-Estrai dati tecnici del prodotto ({tipo}).
-Rispondi SOLO con JSON valido. Usa null se non presente.
-Campi: {json.dumps(fields)}
+def encrypt_sensitive_data(data: str, key: bytes) -> str:
+    f = Fernet(key)
+    return f.encrypt(data.encode()).decode()
 
-Testo: {chunk}
-"""
+def decrypt_sensitive_data(data: str, key: bytes) -> str:
+    f = Fernet(key)
+    return f.decrypt(data.encode()).decode()
+
+def sign_passport(passport: dict, key: bytes):
+    passport_copy = {k:v for k,v in passport.items() if k != "digital_signature"}
+    serialized = json.dumps(passport_copy, sort_keys=True).encode()
+    f = Fernet(key)
+    signature = f.encrypt(hashlib.sha256(serialized).digest())
+    passport["digital_signature"] = signature.decode()
+    passport["version"] = passport.get("version",0) + 1
+    passport["last_modified"] = datetime.utcnow().isoformat()
+    return passport
+
+def verify_passport_signature(passport: dict, key: bytes):
+    signature = passport.get("digital_signature")
+    if not signature:
+        return False
+    passport_copy = {k:v for k,v in passport.items() if k != "digital_signature"}
+    serialized = json.dumps(passport_copy, sort_keys=True).encode()
+    f = Fernet(key)
+    try:
+        decrypted = f.decrypt(signature.encode())
+        return decrypted == hashlib.sha256(serialized).digest()
+    except Exception:
+        return False
+
+# ======================================================
+# GPT FUNCTIONS
+# ======================================================
+
+def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
+    """
+    Estrae info da certificati (PDF o immagine) e restituisce SEMPRE
+    un dict normalizzato: {campo: {value, confidence, explanation}}
+    """
+
+    # ---------- 1) capisco se è PDF o immagine ----------
+    # Streamlit file_uploader -> UploadedFile, BytesIO o bytes: gestiamo tutto
+    if hasattr(file_like, "read"):
+        raw = file_like.read()
+    else:
+        raw = file_like
+
+    if raw is None:
+        return {}
+
+    # ripristina BytesIO per usi successivi
+    bio = BytesIO(raw)
+
+    is_pdf = raw[:4] == b"%PDF"
+
+    # ---------- 2) preparo contenuto per GPT ----------
+    if is_pdf:
+        # Testo estratto dal PDF
         try:
-            r = client.chat.completions.create(
-                model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0
+            text = extract_text_from_pdf(BytesIO(raw))
+        except Exception as e:
+            # fallback: testo vuoto ma non crashare
+            text = ""
+        input_block = {
+            "type": "text",
+            "text": (
+                "You are extracting structured fields from a certificate document.\n"
+                "Return ONLY valid JSON.\n\n"
+                f"CERTIFICATE_TEXT:\n{text[:20000]}"
             )
-            resp_text = r.choices[0].message.content
-            if resp_text.startswith("```"):
-                resp_text = "\n".join(resp_text.splitlines()[1:-1])
-            results.append(json.loads(resp_text))
-        except Exception:
-            continue
-
-    final = {}
-    for campo in fields:
-        values = [r.get(campo) for r in results if r.get(campo)]
-        final[campo] = {
-            "value": values[0] if values else None,
-            "confidence": compute_confidence(values),
-            "explanation": "Dato estratto da PDF" if values else "Dato non trovato nel PDF"
         }
-    return final
+    else:
+        # Immagine -> base64
+        try:
+            img = Image.open(bio)
+            img_b64 = image_to_base64(img)
+        except Exception:
+            # se non è apribile come immagine, prova comunque come testo (fallback)
+            img_b64 = None
 
-# ======================================================
-# GPT IMAGE ANALYSIS
-# ======================================================
+        if img_b64:
+            # usiamo multimodale: testo + immagine
+            input_block = [
+                {
+                    "type": "text",
+                    "text": (
+                        "You are extracting structured fields from a certificate image.\n"
+                        "Return ONLY valid JSON.\n"
+                    )
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                }
+            ]
+        else:
+            input_block = {
+                "type": "text",
+                "text": (
+                    "You are extracting structured fields from a certificate.\n"
+                    "The file could not be parsed as image. Return ONLY valid JSON.\n"
+                    "If you cannot extract fields, return {}."
+                )
+            }
+
+    # ---------- 3) prompt + schema di output ----------
+    # Campi “core” tipici certificati (adattabile, ma già utile)
+    schema_hint = {
+        "tipo_certificato": {"value": "", "confidence": 0.0, "explanation": ""},
+        "ente_emittente": {"value": "", "confidence": 0.0, "explanation": ""},
+        "numero_certificato": {"value": "", "confidence": 0.0, "explanation": ""},
+        "data_emissione": {"value": "", "confidence": 0.0, "explanation": ""},
+        "data_scadenza": {"value": "", "confidence": 0.0, "explanation": ""},
+        "norma_riferimento": {"value": "", "confidence": 0.0, "explanation": ""},
+        "prodotto_modello": {"value": "", "confidence": 0.0, "explanation": ""},
+        "ambito_scopo": {"value": "", "confidence": 0.0, "explanation": ""},
+        "note": {"value": "", "confidence": 0.0, "explanation": ""}
+    }
+
+    system = (
+        "You are a strict information extraction engine.\n"
+        "Return ONLY JSON, no markdown, no commentary.\n"
+        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
+        "If a field is unknown, leave value empty and confidence 0.\n"
+    )
+
+    user = (
+        "Extract certificate information. Use this JSON structure as output template:\n"
+        f"{json.dumps(schema_hint, ensure_ascii=False)}\n"
+        "Populate what you can from the document.\n"
+        "IMPORTANT: return ONLY JSON.\n"
+    )
+
+    # ---------- 4) chiamata OpenAI ----------
+    try:
+        # Nota: questo usa l'SDK OpenAI "nuovo" style chat.completions
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [ {"type": "text", "text": user} ] if isinstance(input_block, dict) else [ {"type": "text", "text": user} ] },
+                {"role": "user", "content": [input_block] if isinstance(input_block, dict) else input_block},
+            ],
+        )
+
+        content = resp.choices[0].message.content or "{}"
+
+        # ---------- 5) parse JSON robusto ----------
+        try:
+            data = json.loads(content)
+        except Exception:
+            # Prova a “ripulire” se GPT mette testo extra (capita raramente)
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(content[start:end+1])
+            else:
+                data = {}
+
+        # ---------- 6) normalizza output SEMPRE ----------
+        normalized = _norm_payload_cert(data)
+
+        # Garantisco che ci siano almeno i campi dello schema (mancanti -> vuoti)
+        for k in schema_hint.keys():
+            normalized.setdefault(k, {"value": "", "confidence": 0.0, "explanation": ""})
+
+        return normalized
+
+    except Exception as e:
+        # Non far crashare l'app: ritorna struttura vuota standard
+        fallback = {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in schema_hint.keys()}
+        return fallback
+
+
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    """
-    Analizza l'immagine del prodotto e restituisce un dizionario completo
-    con value, confidence e explanation per ogni campo.
-    """
-    campi = ["colore", "condizioni", "materiale_probabile", "categoria_visiva", "segni_usura"]
-
+    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
     prompt = f"""
 Analizza immagine prodotto {tipo}.
 Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
 Rispondi con JSON valido.
 Usa null se non determinabile.
 """
-
     def safe_json_parse(text):
         if text.startswith("```"):
             text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
-        first, last = text.find("{"), text.rfind("}")
+        first,last = text.find("{"), text.rfind("}")
         return json.loads(text[first:last+1])
-
     try:
         file_id = upload_image_to_openai(image_file, client)
         resp = client.responses.create(
             model="gpt-4o",
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "file_id": file_id}
-                ]
-            }]
+            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
         )
         data_raw = safe_json_parse(resp.output_text.strip())
-
-        # costruzione dizionario completo
         result = {}
         for c in campi:
             val = data_raw.get(c, None)
             result[c.capitalize()] = {
-                "value": val if val not in [None, "", "null"] else "non rilevato",
-                "confidence": 0.7 if val not in [None, "", "null"] else 0.0,
-                "explanation": "Dato estratto da immagine" if val not in [None, "", "null"] else "Non rilevabile"
-            }
-
-        return result
-
-    except Exception as e:
-        st.error(f"Errore GPT Image: {e}")
-        # se fallisce ritorna dizionario "vuoto"
-        result = {}
-        for c in campi:
-            result[c.capitalize()] = {
-                "value": "non rilevato",
-                "confidence": 0.0,
-                "explanation": "Non rilevabile"
+                "value": val if val not in [None,"","null"] else "non rilevato",
+                "confidence": 0.7 if val not in [None,"","null"] else 0.0,
+                "explanation": "Dato estratto da immagine" if val not in [None,"","null"] else "Non rilevabile"
             }
         return result
+    except Exception:
+        return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
 
-def upload_image_to_openai(image_file, client):
+def upload_image_to_openai(image_file, client: OpenAI):
     resized = resize_image_for_vision(image_file)
     uploaded = client.files.create(file=resized, purpose="vision")
     return uploaded.id
 
-    
 # ======================================================
-# FIELD RATING / EXPLAINABILITY
+# PASSPORT MANAGEMENT
 # ======================================================
-def compute_field_rating(field):
-    val = field.get("value")
-    if val in [None, "", "null"]:
-        return 0.0
-    conf = field.get("confidence", 0.0)
-    weight = field.get("eu_weight", 1.0)
-    return round(conf * weight, 2)
 
-def generate_explanation(field):
-    if field["value"] in [None, "", "null"]:
-        return "Dato mancante"
-    if field["confidence"] < 0.5:
-        return "Bassa confidenza"
-    return "Dato affidabile"
-
-def score_to_color(score):
-    if score >= 0.7:
-        return "🟢"
-    elif score >= 0.4:
-        return "🟡"
-    return "🔴"
-
-
-# ======================================================
-# ADD PRODUCT IMAGE
-# ======================================================
-def add_product_image(passport, image_file, caption=None):
-    """
-    Aggiunge un'immagine al passport.
-    image_file può essere un UploadedFile (Streamlit) o PIL Image.
-    """
-    try:
-        # Se è UploadedFile di Streamlit
-        if hasattr(image_file, "read"):
-            img = Image.open(image_file).convert("RGB")
-        else:
-            img = image_file
-
-        buf = BytesIO()
-        img.save(buf, format="JPEG")
-        img_base64 = base64.b64encode(buf.getvalue()).decode()
-
-        passport.setdefault("images", []).append({
-            "file_base64": img_base64,
-            "caption": caption or "Immagine prodotto",
-            "annotation": ""
-        })
-    except Exception as e:
-        import streamlit as st
-        st.error(f"Errore add_product_image: {e}")
-
-# ======================================================
-# PASSPORT
-# ======================================================
-def initialize_passport(product_id, product_type, fields):
+def initialize_passport(pid, tipo, fields):
     passport = {
-        "id": product_id,
-        "product_type": product_type,
-
-        # =========================
-        # METADATA
-        # =========================
-        "metadata": {
-            "created_at": datetime.utcnow().isoformat(),
-            "standard": "EU-DPP-2.0"
-        },
-
-        # =========================
-        # VERSIONING
-        # =========================
-        "versioning": {
-            "version": 1,
-            "updated_at": datetime.utcnow().isoformat(),
-            "previous_hash": None,
-            "changes": []
-        },
-
-        # =========================
-        # ACCESS CONTROL
-        # =========================
-        "access_control": {
-            "level": "public",  # public / restricted / private
-            "roles": []
-        },
-
-        # =========================
-        # ECONOMIC OPERATOR
-        # =========================
-        "economic_operator": {
-            "name": None,
-            "vat": None,
-            "country": None,
-            "role": "manufacturer"
-        },
-
-        # =========================
-        # LIFECYCLE
-        # =========================
-        "lifecycle": {
-            "manufactured": None,
-            "events": []
-        },
-
-        # =========================
-        # SECTIONS
-        # =========================
-        "sections": {
-            "Technical": {
-                "fields": {},
-                "section_rating": 0
-            },
-            "Visual": {
-                "fields": {},
-                "section_rating": 0
-            }
-        },
-
-        # =========================
-        # GLOBAL METRICS
-        # =========================
-        "overall_rating": 0.0,
-        "overall_espr": "MISSING",
-        "sustainability": {},
+        "id": pid,
+        "product_type": tipo,
+        "sections": {},
+        "certificates": [],
         "images": [],
-        "certificates": []
+        "overall_rating": 0,
+        "sustainability_score": 0,
+        "validated_by_operator": False,
+
+        # lifecycle/audit
+        "created_at": None,
+        "last_updated_at": None,
+        "change_log": [],
+
+        # issuer/attestation/firma
+        "issuer": None,
+        "attestation": None,
+        "digital_signature": None,
+
+        # versioning
+        "version": 0,
+
+        # NEW: interoperabilità + evidence registry
+        "identifiers": {},   # es. {"gtin": "...", "batch": "...", "serial": "..."}
+        "documents": {},     # doc registry per evidence
     }
 
-    # =========================
-    # INIT CAMPI TECNICI
-    # =========================
-    for f in fields:
-        passport["sections"]["Technical"]["fields"][f] = {
+    # inizializza campi PDF attesi
+    for field in fields:
+        passport["sections"].setdefault("PDF", {})[field] = {
             "value": None,
-            "confidence": 0.0,
-            "rating": 0.0,
-            "color": "🔴",
-            "explanation": "",
-            "source": None
+            "confidence": 0,
+            "explanation": ""
         }
 
+    # timbro iniziale
+    espr_stamp(
+        passport,
+        actor="manufacturer",
+        action="initial_creation",
+        reason="Initial DPP publication",
+        issuer=get_default_issuer()
+    )
     return passport
 
-def merge_data(passport, pdf_data, image_data, certificate_data=None):
-    """
-    Unisce dati da PDF, immagini e certificati nel passport.
-    Include:
-    - Provenance (PDF / immagini / certificati)
-    - Validazione certificati
-    - Scoring dei campi
-    - Aggiornamento metriche globali (Reliability, ESPR, Sustainability)
-    """
-    from datetime import datetime
 
-    # Merge PDF + immagini
-    all_data = {**pdf_data, **image_data}
+def merge_data(passport, pdf_data=None, image_data=None, cert_data=None,
+               pdf_doc_meta: Optional[dict] = None,
+               cert_doc_meta_list: Optional[list] = None):
+    changed = False
 
-    for section_name, section in passport.get("sections", {}).items():
-        for field_name, field in section.get("fields", {}).items():
-            for k, v in all_data.items():
-                matched = match_field(k, [field_name])
-                if matched == field_name:
-                    # Valore e confidence
-                    if isinstance(v, dict):
-                        value = v.get("value")
-                        conf = float(v.get("confidence", 0))
-                    else:
-                        value = v
-                        conf = 0.7 if v else 0.0
+    if pdf_data:
+        section = pdf_data
+        if pdf_doc_meta:
+            section = add_evidence_to_section(pdf_data, pdf_doc_meta, source="product_pdf")
+        passport["sections"].setdefault("PDF", {}).update(section)
+        changed = True
 
-                    field["value"] = value
-                    field["confidence"] = conf
-                    field["rating"] = compute_field_rating(field)
-                    field["color"] = score_to_color(field["rating"])
-                    field["explanation"] = generate_explanation(field)
-                    field["source"] = {
-                        "type": "pdf" if k in pdf_data else "image",
-                        "extracted_by": "ai",
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+    if image_data:
+        passport["sections"]["Images"] = image_data
+        changed = True
 
-    # =========================
-    # CERTIFICATI
-    # =========================
-    passport["certificates"] = []
-    if certificate_data:
-        for cert in certificate_data:
-            cert_validated = validate_certificate(cert)
-            cert_dict = {}
-
-            for k, v in cert_validated.items():
-                if isinstance(v, dict):
-                    value = v.get("value")
-                    conf = float(v.get("confidence", 0))
+    if cert_data is not None:
+        # cert_data: lista di dict
+        if cert_doc_meta_list and isinstance(cert_data, list):
+            enriched = []
+            for idx, cert in enumerate(cert_data):
+                meta = cert_doc_meta_list[idx] if idx < len(cert_doc_meta_list) else None
+                if meta and isinstance(cert, dict):
+                    cert2 = {}
+                    for k, v in cert.items():
+                        base = v if (isinstance(v, dict) and "value" in v and "confidence" in v) else _norm_field(v)
+                        cert2[k] = attach_evidence(base, {
+                            "source": "certificate",
+                            "document_id": meta.get("document_id"),
+                            "document_sha256": meta.get("sha256"),
+                            "type": meta.get("type"),
+                            "filename": meta.get("filename"),
+                            "issuer": meta.get("issuer"),
+                        })
+                    enriched.append(cert2)
                 else:
-                    value = v
-                    conf = 0.7 if v else 0.0
+                    enriched.append(cert)
+            passport["certificates"] = enriched
+        else:
+            passport["certificates"] = cert_data
+        changed = True
 
-                cert_dict[k] = {
-                    "value": value,
-                    "confidence": conf,
-                    "rating": compute_field_rating({
-                        "value": value,
-                        "confidence": conf
-                    }),
-                    "color": score_to_color(conf),
-                    "explanation": "Dato da certificato",
-                    "source": {
-                        "type": "certificate",
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                }
-
-            cert_dict["is_valid"] = cert_validated.get("is_valid", False)
-            passport["certificates"].append(cert_dict)
-
-    # =========================
-    # Calcolo metriche globali
-    # =========================
-    compute_overall(passport)
+    if changed:
+        espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data + evidence")
 
     return passport
 
-
-def compute_field_rating(field):
-    """
-    Calcola rating di un singolo campo.
-    Valuta sia confidence che eventuale peso per sostenibilità.
-    """
-    val = field.get("value")
-    if val in [None, "", "null"]:
-        return 0.0
-
-    conf = field.get("confidence", 0.0)
-    weight = field.get("eu_weight", 1.0)
-
-    # bonus se il campo indica sostenibilità
-    sustainability_bonus = 0.1 if "sostenibilita" in field.get("explanation", "").lower() or \
-        ("riciclato" in str(val).lower()) else 0.0
-
-    return round(min(conf * weight + sustainability_bonus, 1.0), 2)
-    
-
-# ======================================================
-# CALCOLO OVERALL + SUSTAINABILITY
-# ======================================================
-def compute_overall(passport):
-    """
-    Calcola ESPR, Reliability e Sustainability score,
-    includendo PDF, Immagini e Certificati.
-    Gestisce campi None, valori non-dizionario e certificati non validi.
-    """
-    total_conf = 0.0
-    total_fields = 0
-    sustainability_sum = 0.0
-    sustainability_count = 0
-
-    # =========================
-    # PDF e immagini
-    # =========================
-    for section in passport.get("sections", {}).values():
-        section_conf_sum = 0.0
-        field_count = 0
-        for field in section.get("fields", {}).values():
-            if not isinstance(field, dict):
-                continue
-            try:
-                conf = float(field.get("confidence", 0))
-            except (ValueError, TypeError):
-                conf = 0.0
-            section_conf_sum += conf
-            field_count += 1
-
-            val = field.get("value")
-            if val not in [None, "", "non rilevato"]:
-                explanation = str(field.get("explanation", "")).lower()
-                if "sostenibilita" in explanation or "riciclato" in str(val).lower():
-                    sustainability_sum += field.get("rating", 0)
-                    sustainability_count += 1
-
-        section["section_rating"] = (section_conf_sum / field_count) if field_count else 0
-        total_conf += section_conf_sum
-        total_fields += field_count
-
-    # =========================
-    # Certificati
-    # =========================
-    for cert in passport.get("certificates", []):
-        if cert.get("is_valid") is False:
-            continue  # ignora certificati non validi
-        for field in cert.values():
-            if not isinstance(field, dict):
-                continue
-            try:
-                conf = float(field.get("confidence", 0))
-            except (ValueError, TypeError):
-                conf = 0.0
-            total_conf += conf
-            total_fields += 1
-
-            val = field.get("value")
-            if val not in [None, "", "non rilevato"]:
-                explanation = str(field.get("explanation", "")).lower()
-                if "sostenibilita" in explanation or "riciclato" in str(val).lower():
-                    sustainability_sum += field.get("rating", 0)
-                    sustainability_count += 1
-
-    # =========================
-    # Overall reliability
-    # =========================
-    passport["overall_rating"] = (total_conf / total_fields) if total_fields else 0.0
-
-    # =========================
-    # ESPR (numero di campi con valore rilevato)
-    # =========================
-    espr_sum = 0
-    espr_count = 0
-    for section in passport.get("sections", {}).values():
-        for field in section.get("fields", {}).values():
-            if not isinstance(field, dict):
-                continue
-            val = field.get("value")
-            if val not in [None, "", "non rilevato"]:
-                espr_sum += 1
-                espr_count += 1
-
-    for cert in passport.get("certificates", []):
-        if cert.get("is_valid") is False:
-            continue
-        for field in cert.values():
-            if not isinstance(field, dict):
-                continue
-            val = field.get("value")
-            if val not in [None, "", "non rilevato"]:
-                espr_sum += 1
-                espr_count += 1
-
-    passport["overall_espr"] = (espr_sum / espr_count) if espr_count else 0.0
-    passport["sustainability_score"] = (sustainability_sum / sustainability_count) if sustainability_count else 0.0
-
-# ======================================================
-# STORAGE FILE / ACCESS
-# ======================================================
-def save_passport_to_file(passport):
+def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
+
+    # JSON standard
     path = os.path.join(PASSPORT_DIR, f"{passport['id']}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(passport, f, indent=2, ensure_ascii=False)
 
-def load_passport_from_file(passport_id):
-    path = os.path.join(PASSPORT_DIR, f"{passport_id}.json")
+    # JSON-LD (interoperabilità)
+    jsonld = export_passport_jsonld(passport)
+    path_ld = os.path.join(PASSPORT_DIR, f"{passport['id']}.jsonld")
+    with open(path_ld, "w", encoding="utf-8") as f:
+        json.dump(jsonld, f, indent=2, ensure_ascii=False)
+
+def load_passport_from_file(pid):
+    path = os.path.join(PASSPORT_DIR, f"{pid}.json")
     if not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path,"r",encoding="utf-8") as f:
         return json.load(f)
 
-def get_db_connection():
-    conn = pyodbc.connect(
-        r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=database/dpp.accdb;'
-    )
-    return conn
-
-def save_passport_to_access(passport):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO passports (id, product_type, created_at, overall_rating, overall_espr) VALUES (?, ?, ?, ?, ?)",
-        passport["id"], passport["product_type"], passport["metadata"]["created_at"], passport["overall_rating"], passport["overall_espr"]
-    )
-    for section_name, section in passport["sections"].items():
-        for field_name, field in section["fields"].items():
-            cursor.execute(
-                "INSERT INTO fields (passport_id, section, field_name, value, confidence, rating, explanation) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                passport["id"], section_name, field_name, str(field.get("value")), field.get("confidence",0), field.get("rating",0), field.get("explanation","")
-            )
-    for img in passport.get("images", []):
-        cursor.execute("INSERT INTO images (passport_id, image_base64) VALUES (?, ?)", passport["id"], img["file_base64"])
-    conn.commit()
-    conn.close()
+def log_passport_version(passport: dict):
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
+    hash_data = hashlib.sha256(json.dumps(passport, sort_keys=True).encode()).hexdigest()
+    log_entry = {
+        "passport_id": passport["id"],
+        "timestamp": datetime.utcnow().isoformat(),
+        "hash": hash_data
+    }
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry)+"\n")
 
 # ======================================================
 # QR CODE
 # ======================================================
 def generate_qr_from_url(url):
-    qr = qrcode.QRCode()
+    qr = qrcode.QRCode(box_size=10, border=2)
     qr.add_data(url)
-    img = qr.make_image()
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
     buf = BytesIO()
-    img.save(buf)
+    img.save(buf, format="PNG")
     buf.seek(0)
     return buf
 
 # ======================================================
-# UI / ESPR
+# ECOLABEL
 # ======================================================
-def render_espr_compliance(passport):
-    st.subheader("ESPR Compliance")
-    for name, section in passport["sections"].items():
-        score = section["section_rating"]
-        emoji = "🟢" if score >= 0.7 else "🟡" if score >= 0.4 else "🔴"
-        st.write(f"{name}: {emoji} {score}")
-    st.markdown(f"**Overall:** {passport['overall_espr']}")
+def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
+    text = extract_text_from_pdf(pdf_file)
+    extracted_data = gpt_extract_from_pdf(text, client, tipo="mobile", fields=ECOLABEL_FIELDS)
+    ecolabel_data = {}
+    for campo, info in extracted_data.items():
+        val = info.get("value")
+        if isinstance(val,bool):
+            ecolabel_data[campo] = val
+        elif isinstance(val,str):
+            ecolabel_data[campo] = val.strip().lower() in ["sì","si","true","yes","conforme"]
+        else:
+            ecolabel_data[campo] = False
+    return ecolabel_data
+
+def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
+    changed = False
+
+    if pdf_file:
+        # 1) Ecolabel (boolean) separato
+        ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
+        passport["sections"]["Ecolabel_UE"] = ecolabel_data
+
+        # 2) Estrazione PDF "prodotto" con campi corretti del prodotto
+        pdf_text = extract_text_from_pdf(pdf_file)
+        product_fields = PRODUCT_FIELDS.get(passport.get("product_type"), {}).get("pdf", [])
+        passport["sections"]["PDF"] = gpt_extract_from_pdf(pdf_text, client, passport.get("product_type"), product_fields)
+
+        changed = True
+
+    if image_data:
+        passport["sections"]["Images"] = image_data
+        changed = True
+
+    if cert_data is not None:
+        passport["certificates"] = cert_data
+        changed = True
+
+    if changed:
+        espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
+
+    return passport
 
 # ======================================================
-# HIGHLIGHT PDF FIELDS
+# EXCEL
 # ======================================================
-def highlight_pdf_fields(pdf_file, extracted_data):
+
+import os
+import pandas as pd
+from openpyxl import load_workbook
+
+def save_passport_to_excel_append(passport: dict):
     """
-    Evidenzia i campi estratti in un PDF.
-    
-    - pdf_file: percorso, UploadedFile o BytesIO
-    - extracted_data: dizionario con valori da evidenziare
-      Supporta sia:
-        {"campo": {"value": "valore", ...}}
-      sia:
-        {"campo": "valore"}
+    Salva il Digital Product Passport su Excel in modo ESPR‑audit‑ready.
+    - Crea il file se non esiste
+    - Appende se esiste
+    - Fogli:
+        * passport   (metadati piatti)
+        * fields     (passport_id, field_name, value)
+        * images     (passport_id, file_base64, caption)
+        * certificates
+        * change_log (audit ESPR)
     """
-    # Leggi i byte del PDF
-    pdf_bytes = pdf_file.read() if hasattr(pdf_file, "read") else open(pdf_file, "rb").read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
-    for page in doc:
-        for field_name, field in extracted_data.items():
-            # Gestione valori annidati o diretti
-            if isinstance(field, dict) and "value" in field:
-                val = field.get("value")
-            else:
-                val = field
-            if val:
-                text_instances = page.search_for(str(val))
-                for inst in text_instances:
-                    highlight = page.add_highlight_annot(inst)
-                    highlight.set_colors(stroke=(1, 1, 0))  # giallo
-                    highlight.update()
+    # ======================================================
+    # DATAFRAME DA SCRIVERE
+    # ======================================================
+    df_passport = pd.DataFrame([passport_meta_row(passport)])
 
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    doc.close()
-    return out
+    # fields
+    fields_rows = []
+    for section, fields in passport.get("sections", {}).items():
+        if isinstance(fields, dict):
+            for fname, f in fields.items():
+                val = f.get("value") if isinstance(f, dict) else f
+                fields_rows.append({
+                    "passport_id": passport.get("id"),
+                    "section": section,
+                    "field_name": fname,
+                    "value": val
+                })
+    df_fields = pd.DataFrame(fields_rows)
 
-
-
-# ======================================================
-# CREAZIONE ARCHIVO SU EXCEL
-# ======================================================
-
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO = st.secrets["GITHUB_REPO"] 
-GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "modify")
-EXCEL_FILE = os.path.join(PASSPORT_DIR, "archivio_passport.xlsx")
-os.makedirs(PASSPORT_DIR, exist_ok=True) 
-
-def save_passport_to_excel_append(passport):
-    import pandas as pd
-    import os
-
-    df_passport = pd.DataFrame([{
-        "id": passport["id"],
-        "product_type": passport["product_type"],
-        "created_at": passport["metadata"]["created_at"],
-        "overall_rating": passport["overall_rating"],
-        "overall_espr": passport["overall_espr"]
-    }])
-
-    rows = []
-    for section_name, section in passport["sections"].items():
-        for field_name, field in section["fields"].items():
-            rows.append({
-                "passport_id": passport["id"],
-                "section": section_name,
-                "field_name": field_name,
-                "value": field.get("value"),
-                "confidence": field.get("confidence"),
-                "rating": field.get("rating"),
-                "explanation": field.get("explanation")
-            })
-    df_fields = pd.DataFrame(rows)
-
-    img_rows = []
-    for img in passport.get("images", []):
-        img_rows.append({
-            "passport_id": passport["id"],
+    # images
+    images_rows = [
+        {
+            "passport_id": passport.get("id"),
             "file_base64": img.get("file_base64"),
-            "caption": img.get("caption")
-        })
-    df_images = pd.DataFrame(img_rows)
+            "caption": img.get("caption", "")
+        }
+        for img in passport.get("images", [])
+    ]
+    df_images = pd.DataFrame(images_rows)
 
+    # certificates
+    cert_rows = []
+    for cert in passport.get("certificates", []):
+        for k, v in cert.items():
+            val = v.get("value") if isinstance(v, dict) else v
+            cert_rows.append({
+                "passport_id": passport.get("id"),
+                "field_name": k,
+                "value": val
+            })
+    df_certs = pd.DataFrame(cert_rows)
+
+    # change log (ultimo evento)
+    log_rows = []
+    if passport.get("change_log"):
+        last = passport["change_log"][-1]
+        log_rows.append({
+            "passport_id": passport.get("id"),
+            "version": last.get("version"),
+            "timestamp": last.get("timestamp"),
+            "actor": last.get("actor"),
+            "action": last.get("action"),
+            "reason": last.get("reason"),
+        })
+    df_log = pd.DataFrame(log_rows)
+
+    # ======================================================
     # CREA FILE SE NON ESISTE
+    # ======================================================
     if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
             df_fields.to_excel(writer, sheet_name="fields", index=False)
             df_images.to_excel(writer, sheet_name="images", index=False)
+            df_certs.to_excel(writer, sheet_name="certificates", index=False)
+            df_log.to_excel(writer, sheet_name="change_log", index=False)
+        return
 
-    else:
-        # APPEND SICURO
+    # ======================================================
+    # APPEND SE ESISTE
+    # ======================================================
+    book = load_workbook(EXCEL_FILE)
+
+    def _append_df(df, sheet):
+        if df.empty:
+            return
+        startrow = book[sheet].max_row if sheet in book.sheetnames else 0
+        header = startrow == 0
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False, header=header, startrow=startrow)
 
-            # passport
-            startrow = writer.sheets["passport"].max_row
-            df_passport.to_excel(writer, sheet_name="passport", index=False, header=False, startrow=startrow)
+    _append_df(df_passport, "passport")
+    _append_df(df_fields, "fields")
+    _append_df(df_images, "images")
+    _append_df(df_certs, "certificates")
+    _append_df(df_log, "change_log")
 
-            # fields
-            startrow = writer.sheets["fields"].max_row
-            df_fields.to_excel(writer, sheet_name="fields", index=False, header=False, startrow=startrow)
+# ======================================================
+# IMAGE MANAGEMENT
+# ======================================================
 
-            # images
-            startrow = writer.sheets["images"].max_row
-            df_images.to_excel(writer, sheet_name="images", index=False, header=False, startrow=startrow)
-
-    return EXCEL_FILE
-
-
-
-def gpt_extract_cert_info(cert_file, client: OpenAI):
-    """
-    Estrae info strutturate da certificati (EPD, LCA, FSC, ecc.).
-    Ritorna dizionario: tipo_cert, numero, ente, validita, riferimenti.
-    """
-    # Step 1: Estrai testo se PDF
-    text = ""
+def add_product_image(passport: dict, img_file, caption: str = ""):
     try:
-        text = extract_text_from_pdf(cert_file)
-    except Exception:
-        # Se non PDF, possiamo tentare OCR o passare a GPT Vision
-        text = None
+        image = Image.open(img_file if not isinstance(img_file, BytesIO) else img_file)
+        img_b64 = image_to_base64(image)
 
-    prompt = f"""
-Analizza il certificato allegato.
-Estrai le seguenti informazioni:
-- tipo_certificato
-- numero_certificato
-- ente_emittente
-- data_emissione
-- data_scadenza
-- riferimenti_LCA/EPD
+        passport.setdefault("images", []).append({
+            "file_base64": img_b64,
+            "caption": caption or ""
+        })
 
-Rispondi solo con JSON valido. Usa null se il campo non è disponibile.
-Testo certificato: {text if text else 'Non disponibile, usare GPT Vision'}
-"""
+        espr_stamp(passport, actor="manufacturer", action="add_image", reason="Added product image")
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        resp_text = response.choices[0].message.content
-        if resp_text.startswith("```"):
-            resp_text = "\n".join(resp_text.splitlines()[1:-1])
-        cert_info = json.loads(resp_text)
-        return cert_info
+        return passport
     except Exception as e:
-        # fallback
-        return {
-            "tipo_certificato": None,
-            "numero_certificato": None,
-            "ente_emittente": None,
-            "data_emissione": None,
-            "data_scadenza": None,
-            "riferimenti": None,
-            "error": str(e)
-        }
-
-import hashlib
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-
-def generate_hash(passport):
-    data = dict(passport)
-    data.pop("signature", None)
-    serialized = json.dumps(data, sort_keys=True).encode()
-    return hashlib.sha256(serialized).hexdigest()
+        raise RuntimeError(f"Errore aggiungendo immagine: {e}")
 
 
-def sign_passport(passport, private_key_pem):
-    private_key = serialization.load_pem_private_key(
-        private_key_pem.encode(),
-        password=None
-    )
-
-    hash_value = generate_hash(passport)
-
-    signature = private_key.sign(
-        hash_value.encode(),
-        padding.PKCS1v15(),
-        hashes.SHA256()
-    )
-
-    passport["signature"] = {
-        "hash": hash_value,
-        "signature": signature.hex(),
-        "algorithm": "SHA256-RSA",
-        "signed_at": datetime.utcnow().isoformat()
-    }
-
-    return passport
-
-def update_version(passport, changes):
-    prev_hash = passport.get("signature", {}).get("hash")
-
-    passport["versioning"]["version"] += 1
-    passport["versioning"]["updated_at"] = datetime.utcnow().isoformat()
-    passport["versioning"]["previous_hash"] = prev_hash
-    passport["versioning"]["changes"] = changes
-
-    return passport
-
-def compute_sustainability(passport):
-    fields = passport["sections"]["Technical"]["fields"]
-
-    breakdown = {
-        "carbon": 0,
-        "circularity": 0,
-        "durability": 0,
-        "materials": 0
-    }
-
-    # Carbon
-    gwp = fields.get("Impronta carbonio GWP", {}).get("value")
-    if gwp:
-        try:
-            val = float(gwp)
-            breakdown["carbon"] = max(0, min(1, 1 - val / 100))
-        except:
-            pass
-
-    # Circularity
-    riciclato = fields.get("% di contenuto riciclato", {}).get("value")
-    if riciclato:
-        try:
-            breakdown["circularity"] = float(riciclato) / 100
-        except:
-            pass
-
-    # Durability
-    if fields.get("Garanzia", {}).get("value"):
-        breakdown["durability"] += 0.5
-    if fields.get("Materiali", {}).get("value"):
-        breakdown["durability"] += 0.5
-
-    # Materials
-    if fields.get("Materiali/componenti utilizzati", {}).get("value"):
-        breakdown["materials"] = 1
-
-    overall = sum(breakdown.values()) / len(breakdown)
-
-    passport["sustainability"] = {
-        "score": round(overall, 2),
-        "breakdown": breakdown
-    }
-
-    return passport
-
-def validate_certificate(cert):
-    valid = True
-
-    if not cert.get("numero_certificato"):
-        valid = False
-
-    if cert.get("data_scadenza"):
-        try:
-            scad = datetime.fromisoformat(cert["data_scadenza"])
-            if scad < datetime.utcnow():
-                valid = False
-        except:
-            valid = False
-
-    cert["is_valid"] = valid
-    return cert
-
-def add_lifecycle_event(passport, event_type, details):
-    passport.setdefault("lifecycle", {}).setdefault("events", []).append({
-        "type": event_type,
-        "details": details,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-
-def can_access(passport, role):
-    if passport["access_control"]["level"] == "public":
-        return True
-    return role in passport["access_control"]["roles"]
-
-def to_jsonld(passport):
-    return {
-        "@context": "https://europa.eu/dpp/schema",
-        "@type": "DigitalProductPassport",
-        "id": passport["id"],
-        "productType": passport["product_type"],
-        "sustainability": passport.get("sustainability"),
-        "manufacturer": passport.get("economic_operator"),
-        "data": passport["sections"]
-    }
-
-import uuid
-from datetime import datetime
-import re
-from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.backends import default_backend
-
-# 1️⃣ Schema dati ufficiale
-def create_standard_dpp(product_type: str, product_name: str, manufacturer_info: dict) -> dict:
+# ======================================================
+# COMPLIANCE RENDER
+# ======================================================
+def render_espr_compliance(passport, st=None):
     """
-    Crea un Digital Product Passport secondo uno schema base standard UE.
+    Mostra un riepilogo completo della compliance UE e della sostenibilità.
     """
-    dpp = {
-        "id": f"{product_type.upper()}-{uuid.uuid4().hex[:6]}",
-        "product_type": product_type,
-        "product_name": product_name,
-        "manufacturer": manufacturer_info,  # es. {"name":..., "vat":..., "address":...}
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "sections": {},  # PDF, immagini, certificati
-        "certificates": [],
-        "overall_rating": 0.0,
-        "overall_espr": 0.0,
-        "sustainability_score": 0.0,
-        "audit_trail": []
-    }
-    return dpp
+    if st is None:
+        import streamlit as st
 
-# 2️⃣ Validazione legale dei certificati
-def verify_certificate(cert_bytes: bytes, trusted_issuers: list) -> bool:
-    """
-    Verifica firma digitale e ente emittente di un certificato PDF.
-    """
-    try:
-        cert = load_pem_x509_certificate(cert_bytes, default_backend())
-        issuer = cert.issuer.rfc4514_string()
-        if issuer not in trusted_issuers:
-            return False
-        if cert.not_valid_before > datetime.utcnow() or cert.not_valid_after < datetime.utcnow():
-            return False
-        return True
-    except Exception:
-        return False
+    st.subheader("🇪🇺 Compliance e Sostenibilità UE")
+    pdf_section = passport.get("sections", {}).get("PDF", {})
+    ecolabel_section = passport.get("sections", {}).get("Ecolabel_UE", {})
 
-# 3️⃣ Calcolo punteggio sostenibilità
-def compute_sustainability_score(fields: dict) -> float:
-    """
-    Calcola punteggio sostenibilità quantitativo basato su metriche standard.
-    """
-    scores = []
-    for field_name, field in fields.items():
-        val = field.get("value")
-        if val in [None, "", "non rilevato"]:
-            continue
-        try:
-            val = float(val)
-        except:
-            continue
-        if "footprint" in field_name.lower():
-            score = max(0, min(1, 1 - val / 100))
-            scores.append(score)
-        elif "durabilita" in field_name.lower() or "riparabilita" in field_name.lower():
-            score = max(0, min(1, val / 10))
-            scores.append(score)
-    return sum(scores)/len(scores) if scores else 0
+    reach_status = ecolabel_section.get("svhc_limitati", False)
+    ecodesign_status = ecolabel_section.get("produzione_basso_impatto", False)
+    gdpr_status = pdf_section.get("Produttore", {}).get("value") is not None
 
-# 4️⃣ Tracciabilità e audit
-def log_audit(passport: dict, user: str, action: str, details: str = ""):
-    """
-    Registra azioni/modifiche sul passport con timestamp.
-    """
-    entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "user": user,
-        "action": action,
-        "details": details
-    }
-    if "audit_trail" not in passport:
-        passport["audit_trail"] = []
-    passport["audit_trail"].append(entry)
+    compliance_list = [
+        ("REACH / sostanze pericolose", reach_status),
+        ("Ecodesign / direttive UE", ecodesign_status),
+        ("GDPR", gdpr_status)
+    ]
+    st.markdown("### Normativa e Privacy")
+    for field, status in compliance_list:
+        st.write(f"{'✅' if status else '⚠️'} {field}")
 
-# 5️⃣ Validazione informazioni operatore
-def validate_operator_info(operator: dict) -> bool:
-    """
-    Verifica informazioni essenziali: nome, partita IVA e contatto.
-    """
-    if not operator.get("name") or not operator.get("vat"):
-        return False
-    vat_pattern = r"^[A-Z]{2}[0-9A-Z]{8,12}$"
-    return bool(re.match(vat_pattern, operator["vat"]))
+    st.markdown("### Materiali, Produzione e Riciclo")
+    materiali = pdf_section.get("Materiali/componenti utilizzati", {}).get("value", "non specificato")
+    peso = pdf_section.get("Peso", {}).get("value", "non specificato")
+    dimensioni = pdf_section.get("Dimensioni", {}).get("value", "non specificato")
+    energia = pdf_section.get("Energia consumata", {}).get("value", "non specificato")
+    luogo = pdf_section.get("Luogo di Produzione", {}).get("value", "non specificato")
+    riciclo = ecolabel_section.get("facilmente_smortabile", False)
+    basso_impatto = ecolabel_section.get("produzione_basso_impatto", False)
 
+    st.write(f"**Materiali/componenti:** {materiali}")
+    st.write(f"**Peso:** {peso}")
+    st.write(f"**Dimensioni:** {dimensioni}")
+    st.write(f"**Energia consumata:** {energia}")
+    st.write(f"**Catena di fornitura / Luogo produzione:** {luogo}")
+    st.write(f"**Facilità di smaltimento / riciclo:** {'✅' if riciclo else '⚠️'}")
+    st.write(f"**Indicatori di basso impatto produzione:** {'✅' if basso_impatto else '⚠️'}")
+
+    st.markdown("### Prezzo e Produzione")
+    prezzo = pdf_section.get("Prezzo in euro", {}).get("value", "non specificato")
+    data_prod = pdf_section.get("Data di produzione", {}).get("value", "non specificato")
+    st.write(f"**Prezzo:** {prezzo} €")
+    st.write(f"**Data di produzione:** {data_prod}")
+
+    st.markdown("### Sicurezza e Versioning")
+    st.write(f"**Crittografia dati sensibili:** {'✅' if passport.get('digital_signature') else '⚠️'}")
+    st.write(f"**Log modifiche / versioning:** {'✅' if passport.get('version') else '⚠️'}")
+
+    if passport.get("certificates"):
+        st.markdown("### Certificazioni")
+        for i, cert in enumerate(passport["certificates"],1):
+            tipo = cert.get("tipo_certificato", {}).get("value","non disponibile")
+           
