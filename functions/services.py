@@ -133,29 +133,30 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dic
     return passport
 
 
+
 def _norm_field(x, default_conf=0.0):
-    """
-    Converte x in un dict standard:
-    {"value": str, "confidence": float [0..1], "explanation": str}
-    """
     if isinstance(x, dict):
         return {
             "value": "" if x.get("value") is None else str(x.get("value")),
             "confidence": float(x.get("confidence", default_conf) or 0.0),
             "explanation": "" if x.get("explanation") is None else str(x.get("explanation"))
         }
-    # se è un valore semplice
     return {"value": "" if x is None else str(x), "confidence": float(default_conf), "explanation": ""}
 
-def _norm_payload(payload):
-    """
-    Normalizza l'intero payload:
-    - se payload è dict: normalizza ogni campo
-    - se payload è lista/altro: incapsula in "raw"
-    """
+def _norm_payload_cert(payload: dict) -> dict:
+    # Normalizza output certificati (chiavi libere)
     if isinstance(payload, dict):
         return {k: _norm_field(v) for k, v in payload.items()}
     return {"raw": _norm_field(payload)}
+    
+def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
+    # Normalizza output PDF sui campi attesi
+    out = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in expected_fields}
+    if isinstance(payload, dict):
+        for k in expected_fields:
+            out[k] = _norm_field(payload.get(k, out[k]))
+    return out
+
 
 
 def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
@@ -207,7 +208,7 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
             else:
                 data = {}
 
-        return _norm_payload(data, fields)
+        return _norm_payload_pdf(data, fields)
 
     except Exception as e:
         # fallback senza crash
@@ -459,7 +460,7 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
                 data = {}
 
         # ---------- 6) normalizza output SEMPRE ----------
-        normalized = _norm_payload(data)
+        normalized = _norm_payload_cert(data)(data)
 
         # Garantisco che ci siano almeno i campi dello schema (mancanti -> vuoti)
         for k in schema_hint.keys():
