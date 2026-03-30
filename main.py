@@ -60,19 +60,38 @@ for k, v in DEFAULT_STATE.items():
 passport_id = st.query_params.get("passport_id")
 if passport_id:
     passport = services.load_passport_from_file(passport_id)
-    if not passport:
+    if passport.get("qualified_signature"):
+        qs = passport["qualified_signature"]
+        st.subheader("Firma qualificata (QES)")
+        st.write(f"Provider: {qs.get('provider')}")
+        st.write(f"Servizio: {qs.get('service')}")
+        st.write(f"Signature ID: {qs.get('signature_id')}")
+        st.write(f"Stato: {qs.get('state')}")
+    else:
         st.error("Passport non trovato")
         st.stop()
 
     st.title("🇪🇺 Digital Product Passport")
 
+    # === METADATA PRINCIPALI ===
     st.markdown(f"""
-**ID:** {passport.get("id")}  
-**Tipo:** {passport.get("product_type")}  
-**Versione:** {passport.get("version")}  
-**Issuer:** {(passport.get("issuer") or {}).get("legal_name")}  
-**Firma hash:** `{(passport.get("digital_signature") or {}).get("hash","")[:16]}…`
-""")
+    **ID:** {passport.get("id")}  
+    **Tipo:** {passport.get("product_type")}  
+    **Versione:** {passport.get("version")}  
+    **Issuer:** {(passport.get("issuer") or {}).get("legal_name")}  
+    **Firma hash:** `{(passport.get("digital_signature") or {}).get("hash","")[:16]}…`
+    """)
+
+    # === FIRMA QUALIFICATA QES (OPENAPI) ===
+    if passport.get("qualified_signature"):
+        qs = passport["qualified_signature"]
+        st.subheader("🔐 Firma qualificata (QES)")
+        st.write(f"Provider: {qs.get('provider')}")
+        st.write(f"Servizio: {qs.get('service')}")
+        st.write(f"Signature ID: {qs.get('signature_id')}")
+        st.write(f"Stato: {qs.get('state')}")
+    else:
+        st.info("Nessuna firma qualificata QES presente")
 
     for sec_name, sec in passport.get("sections", {}).items():
         st.subheader(sec_name)
