@@ -239,6 +239,7 @@ with tabs[2]:
                 action="finalize",
                 reason="Final publication"
             )
+            services.sign_passport_pdf_qes_openapi(passport)
 
             # ==================================================
             # 🔐 FIRMA QES OPENAPI (QUESTA È LA PARTE NUOVA)
@@ -276,56 +277,159 @@ with tabs[2]:
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
-with tabs[3]:
-    st.header("Archivio Passport")
+with tabsst.header("📚 Archivio Passport")
 
-    if os.path.exists(services.EXCEL_FILE):
-        try:
-            df_passport = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").pipe(lambda df: df.rename(columns=str.strip))
-            df_fields = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").pipe(lambda df: df.rename(columns=str.strip))
-            df_images = pd.read_excel(services.EXCEL_FILE, sheet_name="images").pipe(lambda df: df.rename(columns=str.strip))
-
-            if df_passport.empty:
-                st.info("Nessun passport disponibile")
-            else:
-                # 1) Tieni SOLO l’ultima versione per ogni id
-                df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
-                df_latest = df_passport.sort_values(["id", "version"]).groupby("id", as_index=False).tail(1)
-
-                # 2) Crea una chiave unica per pivot: section__field_name
-                if "section" in df_fields.columns:
-                    df_fields["field_key"] = df_fields["section"].astype(str) + "__" + df_fields["field_name"].astype(str)
-                else:
-                    df_fields["field_key"] = df_fields["field_name"].astype(str)
-
-                # 3) Pivot "safe"
-                df_pivot = df_fields.pivot_table(
-                    index="passport_id",
-                    columns="field_key",
-                    values="value",
-                    aggfunc="first"
-                ).reset_index()
-
-                # 4) Merge con i meta
-                df_full = df_latest.merge(df_pivot, left_on="id", right_on="passport_id", how="left")
-
-                st.subheader("Risultati")
-                st.dataframe(df_full, use_container_width=True)
-
-                # Dettaglio
-                selected_id = st.selectbox("Seleziona Passport", df_full["id"]) if not df_full.empty else None
-                if selected_id:
-                    st.subheader("Dettaglio Passport (meta)")
-                    st.dataframe(df_latest[df_latest["id"] == selected_id])
-
-                    st.subheader("Campi (tutte le sezioni)")
-                    st.dataframe(df_fields[df_fields["passport_id"] == selected_id])
-
-                    st.subheader("Immagini")
-                    for _, row in df_images[df_images["passport_id"] == selected_id].iterrows():
-                        st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption", ""))
-
-        except Exception as e:
-            st.error(f"Errore archivio: {e}")
-    else:
+    if not os.path.exists(services.EXCEL_FILE):
         st.info("Nessun file Excel trovato")
+        st.stop()
+
+    try:
+        # === CARICAMENTO EXCEL ===
+        df_passport = (
+            pd.read_excel(services.EXCEL_FILE, sheet_name="passport")
+            .pipe(lambda df: df.rename(columns=str.strip))
+        )
+        df_fields = (
+            pd.read_excel(services.EXCEL_FILE, sheet_name="fields")
+            .pipe(lambda df: df.rename(columns=str.strip))
+        )
+        df_images = (
+            pd.read_excel(services.EXCEL_FILE, sheet_name="images")
+            .pipe(lambda df: df.rename(columns=str.strip))
+        )
+
+        if df_passport.empty:
+            st.info("Nessun passport disponibile")
+            st.stop()
+
+        # ==================================================
+        # 1) TIENI SOLO L’ULTIMA VERSIONE PER OGNI ID
+        # ==================================================
+        df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
+        df_latest = (
+            df_passport
+            .sort_values(["id", "version"])
+            .groupby("id", as_index=False)
+            .tail(1)
+        )
+
+        # ==================================================
+        # 2) COSTRUZIONE CAMPI (PIVOT SAFE)
+        # ==================================================
+        if "section" in df_fields.columns:
+            df_fields["field_key"] = (
+                df_fields["section"].astype(str) + "__" +
+                df_fields["field_name"].astype(str)
+            )
+        else:
+            df_fields["field_key"] = df_fields["field_name"].astype(str)
+
+        df_pivot = (
+            df_fields
+            .pivot_table(
+                index="passport_id",
+                columns="field_key",
+                values="value",
+                aggfunc="first"
+            )
+            .reset_index()
+        )
+
+        # ==================================================
+        # 3) MERGE META + CAMPI
+        # ==================================================
+        df_full = df_latest.merge(
+            df_pivot,
+            left_on="id",
+            right_on="passport_id",
+            how="left"
+        )
+
+        # ==================================================
+        # 4) TABELLA RIASSUNTIVA
+        # ==================================================
+        st.subheader("📊 Elenco Passport (ultima versione)")
+        st.dataframe(df_full, use_container_width=True)
+
+        # ==================================================
+        # 5) SELEZIONE DETTAGLIO
+        # ==================================================
+        selected_id = st.selectbox(
+            "Seleziona Passport",
+            df_full["id"]
+        )
+
+        if not selected_id:
+            st.stop()
+
+        # ==================================================
+        # 6) CARICA JSON PASSPORT (VERITÀ LEGALE)
+        # ==================================================
+        passport = services.load_passport_from_file(selected_id)
+        if not passport:
+            st.error("Passport JSON non trovato")
+            st.stop()
+
+        # ==================================================
+        # 7) META PASSPORT
+        # ==================================================
+        st.subheader("🧾 Dettaglio Passport (meta)")
+        st.dataframe(df_latest[df_latest["id"] == selected_id])
+
+        # ==================================================
+        # 8) FIRMA QUALIFICATA QES
+        # ==================================================
+        st.subheader("🔐 Firma qualificata (QES)")
+
+        if passport.get("qualified_signature"):
+            qs = passport["qualified_signature"]
+            st.success("Passport firmato con QES")
+
+            st.write(f"**Provider:** {qs.get('provider')}")
+            st.write(f"**Servizio:** {qs.get('service')}")
+            st.write(f"**Signature ID:** {qs.get('signature_id')}")
+            st.write(f"**Stato:** {qs.get('state')}")
+            st.write(f"**Tipo:** {qs.get('type', '—')}")
+            st.write(f"**Data firma:** {qs.get('signed_at', '—')}")
+
+        else:
+            st.warning("Passport NON firmato (QES assente)")
+
+        # ==================================================
+        # 9) DOWNLOAD PDF FIRMATO
+        # ==================================================
+        if passport.get("signed_pdf"):
+            st.subheader("📄 Documento firmato")
+            st.download_button(
+                label="⬇️ Scarica PDF firmato (QES)",
+                data=base64.b64decode(passport["signed_pdf"]),
+                file_name=f"{passport['id']}_QES.pdf",
+                mime="application/pdf"
+            )
+
+        # ==================================================
+        # 10) CAMPI DETTAGLIO
+        # ==================================================
+        st.subheader("🧩 Campi (tutte le sezioni)")
+        st.dataframe(
+            df_fields[df_fields["passport_id"] == selected_id],
+            use_container_width=True
+        )
+
+        # ==================================================
+        # 11) IMMAGINI
+        # ==================================================
+        st.subheader("🖼️ Immagini prodotto")
+        imgs = df_images[df_images["passport_id"] == selected_id]
+
+        if imgs.empty:
+            st.info("Nessuna immagine associata")
+        else:
+            for _, row in imgs.iterrows():
+                st.image(
+                    f"data:image/jpeg;base64,{row['file_base64']}",
+                    caption=row.get("caption", "")
+                )
+
+    except Exception as e:
+        st.error(f"Errore archivio: {e}")
