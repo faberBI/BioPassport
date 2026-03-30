@@ -74,16 +74,25 @@ def compute_passport_hash(passport: dict) -> str:
     payload = _canonical_json(tmp)
     return hashlib.sha256(payload).hexdigest()
 
-def get_default_issuer() -> dict:
-    """
-    Default issuer da env vars (Streamlit Cloud -> Settings -> Secrets/Env).
-    Se non setti nulla, usa placeholder.
-    """
+def get_default_issuer():
     return {
         "legal_name": os.getenv("ISSUER_LEGAL_NAME", "Nuvia S.r.l."),
         "vat": os.getenv("ISSUER_VAT", "ITXXXXXXX"),
+        "country": os.getenv("ISSUER_COUNTRY", "IT"),
         "role": os.getenv("ISSUER_ROLE", "manufacturer"),
-        "country": os.getenv("ISSUER_COUNTRY", "IT")
+
+        # 🔥 QUESTO È IL PUNTO CHIAVE
+        "liability_statement": (
+            "The issuer declares, under its sole legal responsibility, "
+            "that the information contained in this Digital Product Passport "
+            "is accurate and compliant with Regulation (EU) 2024/1781 (ESPR)."
+        ),
+
+        # opzionale ma molto apprezzato
+        "contact": {
+            "email": os.getenv("ISSUER_EMAIL", "compliance@nuvia.eu"),
+            "website": os.getenv("ISSUER_WEBSITE", "https://nuvia.eu")
+        }
     }
 
 def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dict | None = None):
@@ -846,4 +855,104 @@ def render_espr_compliance(passport, st=None):
         st.markdown("### Certificazioni")
         for i, cert in enumerate(passport["certificates"],1):
             tipo = cert.get("tipo_certificato", {}).get("value","non disponibile")
-           
+
+
+
+import base64, requests, json
+
+def openapi_create_token(scopes=("EU-QES_automatic",), ttl_seconds=3600):
+    base = st.secrets["OPENAPI_OAUTH_BASE_URL"].rstrip("/")
+    url = f"{base}/token"
+
+    raw = f'{st.secrets["OPENAPI_EMAIL"]}:{st.secrets["OPENAPI_APIKEY"]}'.encode("utf-8")
+    basic = "Basic " + base64.b64encode(raw).decode("utf-8")
+
+    payload = {"scopes": list(scopes), "ttl": ttl_seconds}
+    r = requests.post(url, json=payload, headers={"Authorization": basic, "Accept": "application/json"})
+    r.raise_for_status()
+    return r.json()  
+    
+def openapi_qes_automatic_sign(bearer_token: str, input_documents: list, signature_type="cades"):
+    base = st.secrets["OPENAPI_ESIGN_BASE_URL"].rstrip("/")
+    url = f"{base}/EU-QES_automatic"
+
+    payload = {
+        "inputDocuments": input_documents,
+        "certificateUsername": st.secrets["OPENAPI_CERT_USERNAME"],
+        "certificatePassword": st.secrets["OPENAPI_CERT_PASSWORD"],
+        "title": "DPP Qualified Signature",
+        "description": "Firma QES automatica del Digital Product Passport",
+        "signatureType": signature_type
+    }
+
+    r = requests.post(url, json=payload, headers={
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }, timeout=60)
+    r.raise_for_status()
+    return r.json()  
+
+def sign_passport_on_publish(passport: dict):
+    # A) token
+    tok = openapi_create_token()
+    bearer = tok.get("token") 
+
+    # B) DPP -> base64
+    raw = json.dumps(passport, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    b64 = base64.b64encode(raw).decode("utf-8")
+
+    # C) firma
+    resp = openapi_qes_automatic_sign(
+        bearer_token=bearer,
+        input_documents=[{"sourceType": "base64", "payload": b64}],
+        signature_type="cades"
+    )
+
+    # D) salva dentro il DPP
+    passport["qualified_signature"] = {
+        "provider": "OpenAPI eSignature",
+        "service": "EU-QES_automatic",
+        "signature_id": (resp.get("data") or {}).get("id"),
+        "state": (resp.get("data") or {}).get("state"),
+        "response": resp
+    }
+    return passport
+
+def sign_passport_qes_openapi(passport: dict):
+    """
+    Firma il passport JSON con OpenAPI QES automatico
+    e salva i metadati dentro passport["qualified_signature"]
+    """
+
+    # === 1) TOKEN OAUTH ===
+    token_resp = openapi_create_token(scopes=["EU-QES_automatic"])
+    bearer = token_resp["token"]
+
+    # === 2) JSON canonico ===
+    tmp = dict(passport)
+    tmp.pop("qualified_signature", None)
+
+    raw = json.dumps(tmp, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    b64 = base64.b64encode(raw).decode("utf-8")
+
+    # === 3) FIRMA ===
+    resp = openapi_qes_automatic_sign(
+        bearer_token=bearer,
+        input_documents=[{
+            "sourceType": "base64",
+            "payload": b64
+        }],
+        signature_type="cades"
+    )
+
+    data = resp.get("data", {})
+
+    passport["qualified_signature"] = {
+        "provider": "OpenAPI",
+        "service": "EU-QES_automatic",
+        "signature_id": data.get("id"),
+        "state": data.get("state"),
+        "signed_at": datetime.utcnow().isoformat(),
+        "raw_response": resp
+    }
