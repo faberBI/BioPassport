@@ -347,29 +347,22 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
     Estrae info da certificati (PDF o immagine) e restituisce SEMPRE
     un dict normalizzato: {campo: {value, confidence, explanation}}
     """
-
-    # ---------- 1) capisco se è PDF o immagine ----------
-    # Streamlit file_uploader -> UploadedFile, BytesIO o bytes: gestiamo tutto
+    # ---------- 1) leggi bytes ----------
     if hasattr(file_like, "read"):
         raw = file_like.read()
     else:
         raw = file_like
 
-    if raw is None:
+    if not raw:
         return {}
-
-    # ripristina BytesIO per usi successivi
-    bio = BytesIO(raw)
 
     is_pdf = raw[:4] == b"%PDF"
 
-    # ---------- 2) preparo contenuto per GPT ----------
+    # ---------- 2) prepara contenuto ----------
     if is_pdf:
-        # Testo estratto dal PDF
         try:
             text = extract_text_from_pdf(BytesIO(raw))
-        except Exception as e:
-            # fallback: testo vuoto ma non crashare
+        except Exception:
             text = ""
         input_block = {
             "type": "text",
@@ -380,41 +373,24 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
             )
         }
     else:
-        # Immagine -> base64
         try:
-            img = Image.open(bio)
+            img = Image.open(BytesIO(raw))
             img_b64 = image_to_base64(img)
         except Exception:
-            # se non è apribile come immagine, prova comunque come testo (fallback)
             img_b64 = None
 
         if img_b64:
-            # usiamo multimodale: testo + immagine
             input_block = [
-                {
-                    "type": "text",
-                    "text": (
-                        "You are extracting structured fields from a certificate image.\n"
-                        "Return ONLY valid JSON.\n"
-                    )
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
-                }
+                {"type": "text", "text": "Extract certificate fields. Return ONLY JSON."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
             ]
         else:
             input_block = {
                 "type": "text",
-                "text": (
-                    "You are extracting structured fields from a certificate.\n"
-                    "The file could not be parsed as image. Return ONLY valid JSON.\n"
-                    "If you cannot extract fields, return {}."
-                )
+                "text": "Extract certificate fields. Return ONLY JSON. If impossible return {}."
             }
 
-    # ---------- 3) prompt + schema di output ----------
-    # Campi “core” tipici certificati (adattabile, ma già utile)
+    # ---------- 3) schema output ----------
     schema_hint = {
         "tipo_certificato": {"value": "", "confidence": 0.0, "explanation": ""},
         "ente_emittente": {"value": "", "confidence": 0.0, "explanation": ""},
@@ -441,15 +417,14 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
         "IMPORTANT: return ONLY JSON.\n"
     )
 
-    # ---------- 4) chiamata OpenAI ----------
+    # ---------- 4) call OpenAI ----------
     try:
-        # Nota: questo usa l'SDK OpenAI "nuovo" style chat.completions
         resp = client.chat.completions.create(
             model=model,
             temperature=0,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": [ {"type": "text", "text": user} ] if isinstance(input_block, dict) else [ {"type": "text", "text": user} ] },
+                {"role": "user", "content": user},
                 {"role": "user", "content": [input_block] if isinstance(input_block, dict) else input_block},
             ],
         )
@@ -460,7 +435,6 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
         try:
             data = json.loads(content)
         except Exception:
-            # Prova a “ripulire” se GPT mette testo extra (capita raramente)
             start = content.find("{")
             end = content.rfind("}")
             if start != -1 and end != -1 and end > start:
@@ -468,20 +442,17 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
             else:
                 data = {}
 
-        # ---------- 6) normalizza output SEMPRE ----------
-        normalized = _norm_payload_cert(data)(data)
+        # ✅ FIX: qui prima avevi _norm_payload_cert(data)(data) (sbagliato) [1](https://outlook.office365.com/owa/?ItemID=AAMkADc1NjAzMWI0LWVkZjUtNGNiYS1iZTc1LTk5Zjc2YTM0MmU0OABGAAAAAAC6gddaoK7mQ4ywo%2fiCrZUSBwAcOa%2fcmRsdS5%2fe2FZINWcxAAAAAAEMAAAcOa%2fcmRsdS5%2fe2FZINWcxAABcFD4yAAA%3d&exvsurl=1&viewmodel=ReadMessageItem)
+        normalized = _norm_payload_cert(data)
 
-        # Garantisco che ci siano almeno i campi dello schema (mancanti -> vuoti)
+        # completa campi mancanti
         for k in schema_hint.keys():
             normalized.setdefault(k, {"value": "", "confidence": 0.0, "explanation": ""})
 
         return normalized
 
     except Exception as e:
-        # Non far crashare l'app: ritorna struttura vuota standard
-        fallback = {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in schema_hint.keys()}
-        return fallback
-
+        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in schema_hint.keys()}
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
@@ -1002,3 +973,227 @@ def download_signed_pdf(signature_id: str) -> bytes:
     r.raise_for_status()
     return r.content
     
+# ======================================================.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 40
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(40, y, "Digital Product Passport")
+    y -= 25
+
+    c.setFont("Helvetica", 10)
+    head = [
+        ("ID", passport.get("id")),
+        ("Tipo", passport.get("product_type")),
+        ("Versione", passport.get("version")),
+        ("Issuer", (passport.get("issuer") or {}).get("legal_name")),
+        ("Hash", (passport.get("digital_signature") or {}).get("hash")),
+    ]
+    for k, v in head:
+        c.drawString(40, y, f"{k}: {v}")
+        y -= 14
+
+    y -= 10
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y, "Sezioni")
+    y -= 18
+
+    c.setFont("Helvetica", 9)
+    sections = passport.get("sections", {}) or {}
+    for sec_name, sec in sections.items():
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(40, y, f"[{sec_name}]")
+        y -= 14
+        c.setFont("Helvetica", 9)
+
+        if isinstance(sec, dict):
+            for fname, f in sec.items():
+                val = f.get("value", "") if isinstance(f, dict) else f
+                txt = f"{fname}: {val}"
+                for chunk in [txt[i:i+110] for i in range(0, len(txt), 110)]:
+                    c.drawString(50, y, chunk)
+                    y -= 12
+                    if y < 50:
+                        c.showPage()
+                        y = h - 40
+                        c.setFont("Helvetica", 9)
+
+        y -= 8
+        if y < 50:
+            c.showPage()
+            y = h - 40
+            c.setFont("Helvetica", 9)
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True) -> dict:
+    """
+    ✅ QUESTA È LA FUNZIONE CHE CHIAMI DAL MAIN:
+    services.sign_passport_pdf_qes_openapi(passport)
+
+    - genera PDF del passport
+    - firma via OpenAPI EU-QES_automatic in PAdES (PDF)
+    - salva metadati in passport["qualified_signature"]
+    - (opzionale) scarica e allega il PDF firmato in passport["signed_pdf"] (base64)
+    """
+    tok = openapi_create_token(scopes=["EU-QES_automatic"], ttl_seconds=3600)
+    bearer = _extract_bearer_token(tok)
+
+    pdf_bytes = generate_passport_pdf(passport)
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    resp = openapi_qes_automatic_sign(
+        bearer_token=bearer,
+        input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
+        signature_type="pades",
+        title=f"DPP {passport.get('id')} QES",
+        description="Firma QES automatica del Digital Product Passport (PDF)"
+    )
+
+    data = resp.get("data") or {}
+    passport["qualified_signature"] = {
+        "provider": "OpenAPI",
+        "service": "EU-QES_automatic",
+        "signature_id": data.get("id"),
+        "state": data.get("state"),
+        "certificateType": data.get("certificateType"),
+        "signatureType": data.get("signatureType"),
+        "signed_at": _utc_now_iso(),
+        "raw_response": resp
+    }
+
+    # Allego PDF firmato (se disponibile subito)
+    # Se state = WAIT_VALIDATION potrebbe non essere ancora pronto: in quel caso il download può fallire.
+    if attach_signed_pdf and passport["qualified_signature"].get("signature_id"):
+        try:
+            signed_bytes = openapi_get_signed_document(bearer, passport["qualified_signature"]["signature_id"])
+            passport["signed_pdf"] = base64.b64encode(signed_bytes).decode("utf-8")
+        except Exception:
+            # Non bloccare la pubblicazione: il PDF può essere scaricato più tardi
+            passport["signed_pdf"] = None
+
+    return passport["qualified_signature"]
+``
+# OPENAPI QES (OAuth + eSignature) + PDF firmato
+# ======================================================
+import requests
+
+def _get_secret(name: str, default: str = "") -> str:
+    """
+    Legge prima da Streamlit secrets (se disponibili), altrimenti da env var.
+    Così services.py funziona sia in Streamlit che in locale.
+    """
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return str(os.getenv(name, default))
+
+def _openapi_basic_auth_header() -> str:
+    email = _get_secret("OPENAPI_EMAIL")
+    apikey = _get_secret("OPENAPI_APIKEY")
+    if not email or not apikey:
+        raise RuntimeError("Mancano OPENAPI_EMAIL / OPENAPI_APIKEY nei secrets/env")
+    raw = f"{email}:{apikey}".encode("utf-8")
+    token = base64.b64encode(raw).decode("utf-8")
+    return f"Basic {token}"
+
+def openapi_create_token(scopes=None, ttl_seconds: int = 3600) -> dict:
+    """
+    POST /token (OAuth). Ritorna JSON con token/expire (tipicamente top-level).
+    """
+    if scopes is None:
+        scopes = ["EU-QES_automatic"]
+
+    base = _get_secret("OPENAPI_OAUTH_BASE_URL").rstrip("/")
+    if not base:
+        raise RuntimeError("Manca OPENAPI_OAUTH_BASE_URL nei secrets/env")
+
+    url = f"{base}/token"
+    headers = {
+        "Authorization": _openapi_basic_auth_header(),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    payload = {"scopes": scopes, "ttl": ttl_seconds}
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def _extract_bearer_token(token_resp: dict) -> str:
+    """
+    Alcune API rispondono con token top-level, altre con data.token.
+    """
+    bearer = token_resp.get("token") or (token_resp.get("data") or {}).get("token")
+    if not bearer:
+        raise RuntimeError(f"Token OpenAPI non trovato nella risposta: {token_resp}")
+    return bearer
+
+def openapi_qes_automatic_sign(
+    bearer_token: str,
+    input_documents: list,
+    signature_type: str = "pades",
+    title: str = "DPP Qualified Signature",
+    description: str = "Firma QES automatica del Digital Product Passport"
+) -> dict:
+    """
+    POST /EU-QES_automatic (eSignature).
+    Usa certificateUsername/password del certificato (sandbox o produzione).
+    """
+    base = _get_secret("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    if not base:
+        raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
+
+    cert_user = _get_secret("OPENAPI_CERT_USERNAME")
+    cert_pass = _get_secret("OPENAPI_CERT_PASSWORD")
+    if not cert_user or not cert_pass:
+        raise RuntimeError("Mancano OPENAPI_CERT_USERNAME / OPENAPI_CERT_PASSWORD nei secrets/env")
+
+    url = f"{base}/EU-QES_automatic"
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    payload = {
+        "inputDocuments": input_documents,
+        "certificateUsername": cert_user,
+        "certificatePassword": cert_pass,
+        "title": title,
+        "description": description,
+        "signatureType": signature_type  # "cades" | "pades" | "xades" | "pkcs1"
+    }
+
+    r = requests.post(url, json=payload, headers=headers, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+def openapi_get_signed_document(bearer_token: str, signature_id: str) -> bytes:
+    """
+    GET /signatures/{id}/signedDocument
+    Ritorna bytes del documento firmato (PDF se PAdES, p7m/zip se CAdES, ecc.).
+    """
+    base = _get_secret("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    if not base:
+        raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
+
+    url = f"{base}/signatures/{signature_id}/signedDocument"
+    headers = {"Authorization": f"Bearer {bearer_token}", "Accept": "*/*"}
+    r = requests.get(url, headers=headers, timeout=60)
+    r.raise_for_status()
+    return r.content
+
+def generate_passport_pdf(passport: dict) -> bytes:
+    """
+    PDF minimale firmabile (PAdES). Richiede reportlab.
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = BytesIO()
