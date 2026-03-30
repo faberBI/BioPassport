@@ -277,7 +277,8 @@ with tabs[2]:
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
-with tabsst.header("📚 Archivio Passport")
+with tabs[3]:
+    st.header("📚 Archivio Passport")
 
     if not os.path.exists(services.EXCEL_FILE):
         st.info("Nessun file Excel trovato")
