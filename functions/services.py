@@ -10,10 +10,11 @@ from PIL import Image
 import pandas as pd
 from openai import OpenAI
 import hashlib
-from datetime import datetime
 from cryptography.fernet import Fernet
 from openpyxl import load_workbook
 import qrcode
+from datetime import timezone, datetime
+
 
 # ======================================================
 # CONFIG
@@ -57,6 +58,80 @@ def match_field(input_key, field_names):
         return norm_fields[norm_input]
     matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.8)
     return norm_fields[matches[0]] if matches else None
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def _canonical_json(obj) -> bytes:
+    # serializzazione deterministica (per firma/hash stabile)
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+def compute_passport_hash(passport: dict) -> str:
+    # escludo la firma stessa per evitare ricorsione
+    tmp = dict(passport)
+    tmp.pop("digital_signature", None)
+    payload = _canonical_json(tmp)
+    return hashlib.sha256(payload).hexdigest()
+
+def get_default_issuer() -> dict:
+    """
+    Default issuer da env vars (Streamlit Cloud -> Settings -> Secrets/Env).
+    Se non setti nulla, usa placeholder.
+    """
+    return {
+        "legal_name": os.getenv("ISSUER_LEGAL_NAME", "Nuvia S.r.l."),
+        "vat": os.getenv("ISSUER_VAT", "ITXXXXXXX"),
+        "role": os.getenv("ISSUER_ROLE", "manufacturer"),
+        "country": os.getenv("ISSUER_COUNTRY", "IT")
+    }
+
+def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dict | None = None):
+    """
+    Applica versioning + audit + attestazione + firma hash.
+    """
+    now = _utc_now_iso()
+
+    # Campi minimi
+    passport.setdefault("version", 0)
+    passport.setdefault("created_at", now)
+    passport.setdefault("last_updated_at", now)
+    passport.setdefault("change_log", [])
+
+    # bump versione
+    passport["version"] = int(passport.get("version") or 0) + 1
+    passport["last_updated_at"] = now
+
+    passport["change_log"].append({
+        "version": passport["version"],
+        "timestamp": now,
+        "actor": actor,
+        "action": action,
+        "reason": reason
+    })
+
+    # issuer + attestation (solo se fornito o se non presente)
+    if issuer is None and "issuer" not in passport:
+        issuer = get_default_issuer()
+
+    if issuer:
+        passport["issuer"] = issuer
+        passport["attestation"] = {
+            "statement": "The issuer declares that the information contained in this Digital Product Passport is accurate and compliant with ESPR Regulation (EU) 2024/1781.",
+            "timestamp": now
+        }
+
+    # firma integrità (hash)
+    h = compute_passport_hash(passport)
+    passport["digital_signature"] = {
+        "algorithm": "SHA-256",
+        "hash": h,
+        "signed_at": now,
+        "signed_by": (passport.get("issuer") or {}).get("legal_name", "unknown")
+    }
+
+    return passport
+
 
 # ======================================================
 # PDF / IMAGE UTILITIES
@@ -243,6 +318,7 @@ def upload_image_to_openai(image_file, client: OpenAI):
 # ======================================================
 # PASSPORT MANAGEMENT
 # ======================================================
+
 def initialize_passport(pid, tipo, fields):
     passport = {
         "id": pid,
@@ -253,21 +329,59 @@ def initialize_passport(pid, tipo, fields):
         "overall_rating": 0,
         "sustainability_score": 0,
         "validated_by_operator": False,
+
+        # nuovi campi lifecycle/audit
+        "created_at": None,
+        "last_updated_at": None,
+        "change_log": [],
+
+        # firma / issuer
+        "issuer": None,
+        "attestation": None,
         "digital_signature": None,
-        "version": 0,
-        "last_modified": None
+
+        # versioning
+        "version": 0
     }
+
+    # inizializza campi PDF attesi
     for field in fields:
-        passport["sections"].setdefault("PDF", {})[field] = {"value": None, "confidence": 0, "explanation": ""}
+        passport["sections"].setdefault("PDF", {})[field] = {
+            "value": None,
+            "confidence": 0,
+            "explanation": ""
+        }
+
+    # prima timbratura ESPR (creazione)
+    espr_stamp(
+        passport,
+        actor="manufacturer",
+        action="initial_creation",
+        reason="Initial DPP publication",
+        issuer=get_default_issuer()
+    )
     return passport
 
+
 def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
+    changed = False
+
     if pdf_data:
         passport["sections"].setdefault("PDF", {}).update(pdf_data)
+        changed = True
+
     if image_data:
         passport["sections"]["Images"] = image_data
-    if cert_data:
-        passport["certificates"] = cert_data
+        changed = True
+
+    if cert_data is not None:
+        passport["certificates"] = cert_data  # ✅ NO virgola
+        changed = True
+
+    if changed:
+        espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data")
+
+    return passport
 
 def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
@@ -324,66 +438,159 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
     return ecolabel_data
 
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
+    changed = False
+
     if pdf_file:
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
         passport["sections"]["Ecolabel_UE"] = ecolabel_data
-        pdf_text_data = gpt_extract_from_pdf(extract_text_from_pdf(pdf_file), client, "mobile", ECOLABEL_FIELDS)
+
+        pdf_text = extract_text_from_pdf(pdf_file)
+        pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
         passport["sections"]["PDF"] = pdf_text_data
+
+        changed = True
+
     if image_data:
         passport["sections"]["Images"] = image_data
-    if cert_data:
+        changed = True
+
+    if cert_data is not None:
         passport["certificates"] = cert_data
+        changed = True
+
+    if changed:
+        espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
+
+    return passport
 
 # ======================================================
 # EXCEL
 # ======================================================
 
-def save_passport_to_excel_append(passport):
-    # 1) Se il file non esiste: crealo con i 3 fogli
+import os
+import pandas as pd
+from openpyxl import load_workbook
+
+def save_passport_to_excel_append(passport: dict):
+    """
+    Salva il Digital Product Passport su Excel in modo ESPR‑audit‑ready.
+    - Crea il file se non esiste
+    - Appende se esiste
+    - Fogli:
+        * passport   (metadati piatti)
+        * fields     (passport_id, field_name, value)
+        * images     (passport_id, file_base64, caption)
+        * certificates
+        * change_log (audit ESPR)
+    """
+
+    # ======================================================
+    # DATAFRAME DA SCRIVERE
+    # ======================================================
+    df_passport = pd.DataFrame([passport_meta_row(passport)])
+
+    # fields
+    fields_rows = []
+    for section, fields in passport.get("sections", {}).items():
+        if isinstance(fields, dict):
+            for fname, f in fields.items():
+                val = f.get("value") if isinstance(f, dict) else f
+                fields_rows.append({
+                    "passport_id": passport.get("id"),
+                    "section": section,
+                    "field_name": fname,
+                    "value": val
+                })
+    df_fields = pd.DataFrame(fields_rows)
+
+    # images
+    images_rows = [
+        {
+            "passport_id": passport.get("id"),
+            "file_base64": img.get("file_base64"),
+            "caption": img.get("caption", "")
+        }
+        for img in passport.get("images", [])
+    ]
+    df_images = pd.DataFrame(images_rows)
+
+    # certificates
+    cert_rows = []
+    for cert in passport.get("certificates", []):
+        for k, v in cert.items():
+            val = v.get("value") if isinstance(v, dict) else v
+            cert_rows.append({
+                "passport_id": passport.get("id"),
+                "field_name": k,
+                "value": val
+            })
+    df_certs = pd.DataFrame(cert_rows)
+
+    # change log (ultimo evento)
+    log_rows = []
+    if passport.get("change_log"):
+        last = passport["change_log"][-1]
+        log_rows.append({
+            "passport_id": passport.get("id"),
+            "version": last.get("version"),
+            "timestamp": last.get("timestamp"),
+            "actor": last.get("actor"),
+            "action": last.get("action"),
+            "reason": last.get("reason"),
+        })
+    df_log = pd.DataFrame(log_rows)
+
+    # ======================================================
+    # CREA FILE SE NON ESISTE
+    # ======================================================
     if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            pd.DataFrame([passport]).to_excel(writer, sheet_name="passport", index=False)
-            pd.DataFrame(columns=["passport_id", "field_name", "value"]).to_excel(writer, sheet_name="fields", index=False)
-            pd.DataFrame(columns=["passport_id", "file_base64", "caption"]).to_excel(writer, sheet_name="images", index=False)
-        return  # il with salva/chiude automaticamente [1](https://discuss.streamlit.io/t/attributeerror-this-app-has-encountered-an-error-the-original-error-message-is-redacted-to-prevent-data-leaks-using-st-gsheets-connection/60970)
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            df_fields.to_excel(writer, sheet_name="fields", index=False)
+            df_images.to_excel(writer, sheet_name="images", index=False)
+            df_certs.to_excel(writer, sheet_name="certificates", index=False)
+            df_log.to_excel(writer, sheet_name="change_log", index=False)
+        return
 
-    # 2) File esiste: calcolo la startrow con openpyxl
+    # ======================================================
+    # APPEND SE ESISTE
+    # ======================================================
     book = load_workbook(EXCEL_FILE)
-    if "passport" in book.sheetnames:
-        startrow = book["passport"].max_row
-        header = False
-    else:
-        startrow = 0
-        header = True
 
-    df_passport = pd.DataFrame([passport])
+    def _append_df(df, sheet):
+        if df.empty:
+            return
+        startrow = book[sheet].max_row if sheet in book.sheetnames else 0
+        header = startrow == 0
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False, header=header, startrow=startrow)
 
-    # 3) Append supportato da pandas: mode='a' + if_sheet_exists='overlay'
-    with pd.ExcelWriter(
-        EXCEL_FILE,
-        engine="openpyxl",
-        mode="a",
-        if_sheet_exists="overlay"
-    ) as writer:
-        df_passport.to_excel(
-            writer,
-            sheet_name="passport",
-            index=False,
-            header=header,
-            startrow=startrow
-        )
-
+    _append_df(df_passport, "passport")
+    _append_df(df_fields, "fields")
+    _append_df(df_images, "images")
+    _append_df(df_certs, "certificates")
+    _append_df(df_log, "change_log")
 
 # ======================================================
 # IMAGE MANAGEMENT
 # ======================================================
-def add_product_image(passport: dict, img_file):
+
+def add_product_image(passport: dict, img_file, caption: str = ""):
     try:
-        image = Image.open(img_file) if not isinstance(img_file, BytesIO) else Image.open(img_file)
+        image = Image.open(img_file if not isinstance(img_file, BytesIO) else img_file)
         img_b64 = image_to_base64(image)
-        passport.setdefault("images", []).append({"file_base64": img_b64, "caption": ""})
+
+        passport.setdefault("images", []).append({
+            "file_base64": img_b64,
+            "caption": caption or ""
+        })
+
+        espr_stamp(passport, actor="manufacturer", action="add_image", reason="Added product image")
+
+        return passport
     except Exception as e:
         raise RuntimeError(f"Errore aggiungendo immagine: {e}")
+
 
 # ======================================================
 # COMPLIANCE RENDER
