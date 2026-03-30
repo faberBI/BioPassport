@@ -886,7 +886,7 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
     resp = openapi_qes_automatic_sign(
         bearer_token=bearer_token,
         input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
-        signature_type="pades",
+        signature_type="cades",
         title=f"DPP {passport.get('id')} QES",
         description="Firma QES automatica del Digital Product Passport (PDF)"
     )
