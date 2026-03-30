@@ -916,7 +916,8 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
             passport["signed_pdf"] = None
 
     return passport["qualified_signature"]
-``
+
+
 # OPENAPI QES (OAuth + eSignature) + PDF firmato
 # ======================================================
 import os
