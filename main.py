@@ -192,6 +192,7 @@ with tabs[2]:
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
+            # === merge dati ===
             if tipo == "mobile":
                 services.merge_data_with_ecolabel(
                     passport,
@@ -208,20 +209,48 @@ with tabs[2]:
                     st.session_state.validated_cert
                 )
 
+            # === immagini ===
             for b in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(b))
 
-            services.espr_stamp(passport, actor="manufacturer", action="finalize", reason="Final publication")
+            # === ESPR stamp ===
+            services.espr_stamp(
+                passport,
+                actor="manufacturer",
+                action="finalize",
+                reason="Final publication"
+            )
 
+            # ==================================================
+            # 🔐 FIRMA QES OPENAPI (QUESTA È LA PARTE NUOVA)
+            # ==================================================
+            with st.spinner("Firma qualificata QES in corso..."):
+                try:
+                    services.sign_passport_qes_openapi(passport)
+                except Exception as e:
+                    st.error(f"Errore firma QES: {e}")
+                    st.stop()
+
+            # === salvataggi ===
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            st.success("✅ Digital Product Passport pubblicato")
+            st.success("✅ Digital Product Passport pubblicato e firmato")
 
+            # === output ===
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             st.code(url)
             qr = services.generate_qr_from_url(url)
             st.image(qr)
+
+            # info firma
+            sig = passport.get("qualified_signature", {})
+            if sig:
+                st.info(
+                    f"Firma QES OpenAPI\n"
+                    f"ID: {sig.get('signature_id')}\n"
+                    f"Stato: {sig.get('state')}"
+                )
     else:
         st.info("Completa prima la validazione")
 
