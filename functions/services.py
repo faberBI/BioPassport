@@ -956,3 +956,49 @@ def sign_passport_qes_openapi(passport: dict):
         "signed_at": datetime.utcnow().isoformat(),
         "raw_response": resp
     }
+
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from io import BytesIO
+
+def generate_passport_pdf(passport: dict) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    w, h = A4
+
+    y = h - 40
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(40, y, "Digital Product Passport")
+    y -= 30
+
+    c.setFont("Helvetica", 10)
+    for k, v in passport.items():
+        if isinstance(v, (dict, list)):
+            continue
+        c.drawString(40, y, f"{k}: {v}")
+        y -= 14
+        if y < 40:
+            c.showPage()
+            y = h - 40
+
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+import requests
+import streamlit as st
+
+def download_signed_pdf(signature_id: str) -> bytes:
+    base = st.secrets["OPENAPI_ESIGN_BASE_URL"].rstrip("/")
+    url = f"{base}/signatures/{signature_id}/signedDocument"
+
+    tok = openapi_create_token(scopes=["EU-QES_automatic"])
+    bearer = tok["token"]
+
+    r = requests.get(url, headers={
+        "Authorization": f"Bearer {bearer}",
+        "Accept": "application/pdf"
+    })
+    r.raise_for_status()
+    return r.content
+    
