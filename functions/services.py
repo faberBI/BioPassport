@@ -846,4 +846,3 @@ def render_espr_compliance(passport, st=None):
         st.markdown("### Certificazioni")
         for i, cert in enumerate(passport["certificates"],1):
             tipo = cert.get("tipo_certificato", {}).get("value","non disponibile")
-           
