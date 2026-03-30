@@ -213,8 +213,7 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         # fallback senza crash
         return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
 
-
-ef passport_meta_row(passport: dict) -> dict:
+def passport_meta_row(passport: dict) -> dict:
     """
     Estrae una riga 'piatta' (Excel-friendly) dal passport.
     Serve per scrivere il foglio 'passport' senza annidamenti (sections, liste, ecc.).
