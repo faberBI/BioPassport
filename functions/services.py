@@ -1174,12 +1174,30 @@ def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False
 def openapi_list_scopes(skip: int = 0, limit: int = 100) -> dict:
     base = _sec("OPENAPI_OAUTH_BASE_URL").rstrip("/")
     url = f"{base}/scopes?skip={skip}&limit={limit}"
+
     headers = {
         "Authorization": _openapi_basic_auth_header(),
         "Accept": "application/json",
     }
+
     r = requests.get(url, headers=headers, timeout=30)
+
+    # 🔍 DEBUG DI SICUREZZA
+    try:
+        data = r.json()
+    except Exception:
+        raise RuntimeError(
+            f"SCOPES NON JSON ({r.status_code}): {r.text}"
+        )
+
     if not r.ok:
-        raise RuntimeError(f"SCOPES ERROR {r.status_code}: {r.text}")
-    return r.json()
+        raise RuntimeError(
+            f"SCOPES ERROR {r.status_code}: {data}"
+        )
+
+    # ✅ GARANTIAMO DI RESTITUIRE SOLO UN DICT
+    if not isinstance(data, dict):
+        return {"raw": data}
+
+    return data
 
