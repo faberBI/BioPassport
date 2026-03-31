@@ -225,13 +225,11 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
 
 def passport_meta_row(passport: dict) -> dict:
-    """
-    Estrae una riga 'piatta' (Excel-friendly) dal passport.
-    Serve per scrivere il foglio 'passport' senza annidamenti (sections, liste, ecc.).
-    """
     issuer = passport.get("issuer") or {}
     sig = passport.get("digital_signature") or {}
     att = passport.get("attestation") or {}
+    lifecycle = passport.get("lifecycle") or {}
+    pb = passport.get("physical_binding") or {}
 
     return {
         "id": passport.get("id"),
@@ -239,6 +237,7 @@ def passport_meta_row(passport: dict) -> dict:
         "version": passport.get("version"),
         "created_at": passport.get("created_at"),
         "last_updated_at": passport.get("last_updated_at"),
+
         "overall_rating": passport.get("overall_rating"),
         "sustainability_score": passport.get("sustainability_score"),
 
@@ -248,11 +247,20 @@ def passport_meta_row(passport: dict) -> dict:
         "issuer_country": issuer.get("country"),
 
         "attestation_timestamp": att.get("timestamp"),
-
         "signature_algorithm": sig.get("algorithm"),
         "signature_hash": sig.get("hash"),
         "signature_signed_at": sig.get("signed_at"),
         "signature_signed_by": sig.get("signed_by"),
+
+        # ✅ lifecycle
+        "lifecycle_status": lifecycle.get("status"),
+
+        # ✅ physical binding
+        "binding_carrier": pb.get("carrier"),
+        "binding_location": pb.get("location"),
+        "binding_public_url": pb.get("public_url"),
+        "binding_generated_at": pb.get("generated_at"),
+        "binding_tamper_risk": pb.get("tamper_risk"),
     }
 
 
@@ -503,21 +511,24 @@ def initialize_passport(pid, tipo, fields):
         "sections": {},
         "certificates": [],
         "images": [],
+        "evidences": [],              # ✅ nuovo
+        "physical_binding": None,     # ✅ nuovo
+        "lifecycle": {"status": "draft", "events": []},  # ✅ nuovo
+
         "overall_rating": 0,
         "sustainability_score": 0,
         "validated_by_operator": False,
 
-        # nuovi campi lifecycle/audit
+        # audit/versioning
         "created_at": None,
         "last_updated_at": None,
         "change_log": [],
 
-        # firma / issuer
+        # issuer/attestation/hash
         "issuer": None,
         "attestation": None,
         "digital_signature": None,
 
-        # versioning
         "version": 0
     }
 
@@ -529,7 +540,8 @@ def initialize_passport(pid, tipo, fields):
             "explanation": ""
         }
 
-    # prima timbratura ESPR (creazione)
+    # evento lifecycle + prima timbratura
+    append_lifecycle_event(passport, "draft", {"reason": "initialization"})
     espr_stamp(
         passport,
         actor="manufacturer",
@@ -546,18 +558,16 @@ def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
     if pdf_data:
         passport["sections"].setdefault("PDF", {}).update(pdf_data)
         changed = True
-
     if image_data:
         passport["sections"]["Images"] = image_data
         changed = True
-
     if cert_data is not None:
-        passport["certificates"] = cert_data  # ✅ NO virgola
+        passport["certificates"] = cert_data
         changed = True
 
     if changed:
+        append_lifecycle_event(passport, "updated", {"what": "merge_data"})
         espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data")
-
     return passport
 
 def save_passport_to_file(passport: dict):
@@ -624,7 +634,6 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
         pdf_text = extract_text_from_pdf(pdf_file)
         pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
         passport["sections"]["PDF"] = pdf_text_data
-
         changed = True
 
     if image_data:
@@ -636,8 +645,8 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
         changed = True
 
     if changed:
+        append_lifecycle_event(passport, "updated", {"what": "merge_data_with_ecolabel"})
         espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
-
     return passport
 
 # ======================================================
@@ -649,18 +658,6 @@ import pandas as pd
 from openpyxl import load_workbook
 
 def save_passport_to_excel_append(passport: dict):
-    """
-    Salva il Digital Product Passport su Excel in modo ESPR‑audit‑ready.
-    - Crea il file se non esiste
-    - Appende se esiste
-    - Fogli:
-        * passport   (metadati piatti)
-        * fields     (passport_id, field_name, value)
-        * images     (passport_id, file_base64, caption)
-        * certificates
-        * change_log (audit ESPR)
-    """
-
     # ======================================================
     # DATAFRAME DA SCRIVERE
     # ======================================================
@@ -691,19 +688,25 @@ def save_passport_to_excel_append(passport: dict):
     ]
     df_images = pd.DataFrame(images_rows)
 
-    # certificates
+    # certificates (flatten)
     cert_rows = []
     for cert in passport.get("certificates", []):
-        for k, v in cert.items():
-            val = v.get("value") if isinstance(v, dict) else v
-            cert_rows.append({
-                "passport_id": passport.get("id"),
-                "field_name": k,
-                "value": val
-            })
+        if isinstance(cert, dict):
+            evid = cert.get("evidence", {})
+            for k, v in cert.items():
+                if k == "evidence":
+                    continue
+                val = v.get("value") if isinstance(v, dict) else v
+                cert_rows.append({
+                    "passport_id": passport.get("id"),
+                    "field_name": k,
+                    "value": val,
+                    "evidence_id": evid.get("evidence_id"),
+                    "evidence_hash": evid.get("hash")
+                })
     df_certs = pd.DataFrame(cert_rows)
 
-    # change log (ultimo evento)
+    # change log (ultimo)
     log_rows = []
     if passport.get("change_log"):
         last = passport["change_log"][-1]
@@ -717,9 +720,36 @@ def save_passport_to_excel_append(passport: dict):
         })
     df_log = pd.DataFrame(log_rows)
 
+    # ✅ lifecycle events (tutti)
+    lifecycle_rows = []
+    for ev in (passport.get("lifecycle", {}) or {}).get("events", []):
+        lifecycle_rows.append({
+            "passport_id": passport.get("id"),
+            "event": ev.get("event"),
+            "timestamp": ev.get("timestamp"),
+            "data": json.dumps(ev.get("data", {}), ensure_ascii=False)
+        })
+    df_lifecycle = pd.DataFrame(lifecycle_rows)
+
+    # ✅ evidences
+    evid_rows = []
+    for evd in passport.get("evidences", []):
+        evid_rows.append({
+            "passport_id": passport.get("id"),
+            "evidence_id": evd.get("evidence_id"),
+            "type": evd.get("type"),
+            "source": evd.get("source"),
+            "filename": evd.get("filename"),
+            "hash_algorithm": evd.get("hash_algorithm"),
+            "hash": evd.get("hash"),
+            "created_at": evd.get("created_at"),
+        })
+    df_evidences = pd.DataFrame(evid_rows)
+
     # ======================================================
     # CREA FILE SE NON ESISTE
     # ======================================================
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
     if not os.path.exists(EXCEL_FILE):
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             df_passport.to_excel(writer, sheet_name="passport", index=False)
@@ -727,7 +757,32 @@ def save_passport_to_excel_append(passport: dict):
             df_images.to_excel(writer, sheet_name="images", index=False)
             df_certs.to_excel(writer, sheet_name="certificates", index=False)
             df_log.to_excel(writer, sheet_name="change_log", index=False)
+
+            # ✅ nuovi sheet
+            df_lifecycle.to_excel(writer, sheet_name="lifecycle_events", index=False)
+            df_evidences.to_excel(writer, sheet_name="evidences", index=False)
         return
+
+    # ======================================================
+    # APPEND SE ESISTE
+    # ======================================================
+    book = load_workbook(EXCEL_FILE)
+
+    def _append_df(df, sheet):
+        if df is None or df.empty:
+            return
+        startrow = book[sheet].max_row if sheet in book.sheetnames else 0
+        header = startrow == 0
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False, header=header, startrow=startrow)
+
+    _append_df(df_passport, "passport")
+    _append_df(df_fields, "fields")
+    _append_df(df_images, "images")
+    _append_df(df_certs, "certificates")
+    _append_df(df_log, "change_log")
+    _append_df(df_lifecycle, "lifecycle_events")
+    _append_df(df_evidences, "evidences")
 
     # ======================================================
     # APPEND SE ESISTE
@@ -968,9 +1023,6 @@ def _openapi_basic_auth_header() -> str:
     raw = f"{email}:{apikey}".encode("utf-8")
     return "Basic " + base64.b64encode(raw).decode("utf-8")
 
-
-
-
 def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
     if not scopes or not isinstance(scopes, list):
         raise ValueError("scopes deve essere una lista non vuota")
@@ -1199,3 +1251,127 @@ def openapi_list_scopes(skip: int = 0, limit: int = 100) -> dict:
 
     return data
 
+
+
+def compute_sha256_bytes(raw: bytes) -> str:
+    if raw is None:
+        raise ValueError("raw bytes is None")
+    return hashlib.sha256(raw).hexdigest()
+
+LIFECYCLE_STATUS_MAP = {
+    "draft": "draft",
+    "manufactured": "manufactured",
+    "placed_on_market": "placed_on_market",
+    "certified": "certified",
+    "signed": "signed",
+    "updated": "updated",
+    "repaired": "repaired",
+    "component_replaced": "component_replaced",
+    "resold": "resold",
+    "withdrawn": "withdrawn",
+    "end_of_life": "end_of_life",
+}
+
+def ensure_lifecycle(passport: dict) -> dict:
+    passport.setdefault("lifecycle", {"status": "draft", "events": []})
+    if "status" not in passport["lifecycle"]:
+        passport["lifecycle"]["status"] = "draft"
+    if "events" not in passport["lifecycle"]:
+        passport["lifecycle"]["events"] = []
+    return passport
+
+def append_lifecycle_event(passport: dict, event: str, data: dict | None = None) -> dict:
+    ensure_lifecycle(passport)
+    now = _utc_now_iso()
+    ev = {
+        "event": event,
+        "timestamp": now,
+        "data": data or {}
+    }
+    passport["lifecycle"]["events"].append(ev)
+
+    # status semantico
+    passport["lifecycle"]["status"] = LIFECYCLE_STATUS_MAP.get(event, event)
+    return passport
+
+def ensure_evidence_store(passport: dict) -> dict:
+    passport.setdefault("evidences", [])
+    return passport
+
+def add_certificate_evidence(
+    passport: dict,
+    cert_parsed: dict,
+    raw_bytes: bytes,
+    filename: str = "",
+    source: str = "uploaded_certificate"
+) -> dict:
+    """
+    Aggiunge un certificato normalizzato + evidenza verificabile (hash sha256 dei bytes originali).
+    """
+    ensure_evidence_store(passport)
+
+    evid_hash = compute_sha256_bytes(raw_bytes)
+    evid_id = f"evid_{evid_hash[:16]}"
+
+    evidence_obj = {
+        "evidence_id": evid_id,
+        "type": "document",
+        "source": source,
+        "filename": filename or "",
+        "hash_algorithm": "SHA-256",
+        "hash": evid_hash,
+        "created_at": _utc_now_iso(),
+    }
+    passport["evidences"].append(evidence_obj)
+
+    # collega l’evidenza al certificato
+    cert_obj = _norm_payload_cert(cert_parsed) if isinstance(cert_parsed, dict) else {"raw": _norm_field(cert_parsed)}
+    cert_obj.setdefault("evidence", {})
+    cert_obj["evidence"] = {
+        "evidence_id": evid_id,
+        "hash": evid_hash,
+        "hash_algorithm": "SHA-256",
+        "filename": filename or "",
+        "source": source
+    }
+
+    passport.setdefault("certificates", [])
+    passport["certificates"].append(cert_obj)
+
+    # evento lifecycle + audit stamp
+    append_lifecycle_event(passport, "certified", {"evidence_id": evid_id, "filename": filename})
+    espr_stamp(passport, actor="manufacturer", action="add_certificate_evidence", reason=f"Added certificate evidence {evid_id}")
+
+    return passport
+
+def set_physical_binding(
+    passport: dict,
+    public_url: str,
+    carrier: str = "qr",
+    location: str = "product_label",
+    tamper_risk: str = "medium"
+) -> dict:
+    passport["physical_binding"] = {
+        "carrier": carrier,
+        "location": location,
+        "public_url": public_url,
+        "generated_at": _utc_now_iso(),
+        "tamper_risk": tamper_risk
+    }
+    append_lifecycle_event(passport, "updated", {"physical_binding": {"carrier": carrier, "location": location}})
+    espr_stamp(passport, actor="manufacturer", action="set_physical_binding", reason="Linked physical carrier to DPP")
+    return passport
+
+def post_market_event(
+    passport: dict,
+    event: str,
+    data: dict,
+    actor: str = "service_partner",
+    reason: str = "Post-market update"
+) -> dict:
+    """
+    Eventi post-vendita: riparazioni, sostituzioni componenti, rivendita, ritiro, fine vita.
+    """
+    append_lifecycle_event(passport, event, data or {})
+    espr_stamp(passport, actor=actor, action=f"post_market_{event}", reason=reason)
+    return passport
