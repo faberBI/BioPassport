@@ -14,7 +14,8 @@ from cryptography.fernet import Fernet
 from openpyxl import load_workbook
 import qrcode
 from datetime import timezone, datetime
-
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 # ======================================================
 # CONFIG
@@ -1060,14 +1061,12 @@ def openapi_get_signed_document(bearer_token: str, signature_id: str) -> bytes:
 # ---------- PDF del DPP (minimo firmabile) ----------
 def generate_passport_pdf(passport: dict) -> bytes:
     """
-    Genera un PDF minimale del passport (firmabile in PAdES).
-    Richiede reportlab.
+    Genera un PDF minimale del passport (firmabile).
+    Ritorna SEMPRE bytes.
     """
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
+
     w, h = A4
     y = h - 40
 
@@ -1076,6 +1075,7 @@ def generate_passport_pdf(passport: dict) -> bytes:
     y -= 22
 
     c.setFont("Helvetica", 10)
+
     header = [
         ("ID", passport.get("id")),
         ("Tipo", passport.get("product_type")),
@@ -1083,3 +1083,15 @@ def generate_passport_pdf(passport: dict) -> bytes:
         ("Issuer", (passport.get("issuer") or {}).get("legal_name")),
         ("Hash", (passport.get("digital_signature") or {}).get("hash")),
     ]
+
+    for label, value in header:
+        c.drawString(40, y, f"{label}: {value or '-'}")
+        y -= 14
+
+    # ✅ CHIUSURA CORRETTA PDF
+    c.showPage()
+    c.save()
+
+    buf.seek(0)
+    return buf.getvalue()   # ✅ QUESTO È IL PUNTO CHIAVE
+``
