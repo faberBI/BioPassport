@@ -247,7 +247,7 @@ with tabs[2]:
                 action="finalize",
                 reason="Final publication"
             )
-            st.json(services.openapi_list_scopes(0, 100))
+            st.write(services.openapi_list_scopes(0, 100))
             # ==================================================
             # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
             # ==================================================
