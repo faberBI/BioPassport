@@ -247,9 +247,7 @@ with tabs[2]:
                 action="finalize",
                 reason="Final publication"
             )
-            scopes_resp = services.openapi_list_scopes(0, 100)
-            # opzionale: estrai solo la parte utile
-            st.json(scopes_resp.get("data", scopes_resp))
+
             # ==================================================
             # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
             # ==================================================
