@@ -997,13 +997,16 @@ def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
 
 
 def _bearer(token_resp: dict) -> str:
-    """
-    Supporta sia token_resp['token'] sia token_resp['data']['token'].
-    """
-    b = token_resp.get("token") or (token_resp.get("data") or {}).get("token")
-    if not b:
-        raise RuntimeError(f"Token OpenAPI non trovato nella risposta: {token_resp}")
-    return b
+    # alcuni endpoint rispondono: {"data":[{"token":"..."}], "success":true}
+    if "data" in token_resp and isinstance(token_resp["data"], list) and token_resp["data"]:
+        t = token_resp["data"][0].get("token")
+        if t:
+            return t
+    # fallback
+    t = token_resp.get("token") or token_resp.get("access_token")
+    if t:
+        return t
+    raise RuntimeError(f"Token non trovato nella risposta OAuth: {token_resp}")
 
 # ---------- eSignature: firma QES ----------
 def openapi_qes_automatic_sign(
