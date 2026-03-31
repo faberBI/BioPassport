@@ -1171,9 +1171,9 @@ def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False
 
     return passport["qualified_seal"]
 
-def openapi_list_scopes() -> dict:
+def openapi_list_scopes(skip: int = 0, limit: int = 100) -> dict:
     base = _sec("OPENAPI_OAUTH_BASE_URL").rstrip("/")
-    url = f"{base}/scopes"
+    url = f"{base}/scopes?skip={skip}&limit={limit}"
     headers = {
         "Authorization": _openapi_basic_auth_header(),
         "Accept": "application/json",
