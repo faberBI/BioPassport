@@ -250,9 +250,9 @@ with tabs[2]:
 
 
             
-            st.write(_sec("OPENAPI_OAUTH_BASE_URL"))
+            st.write(os.environ.get("OPENAPI_OAUTH_BASE_URL"))
             st.write(scopes)
-            st.write(_sec("OPENAPI_ESIGN_BASE_URL"))
+            st.write(os.environ.get("OPENAPI_ESIGN_BASE_URL"))
 
             # ==================================================
             # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
