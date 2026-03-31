@@ -248,6 +248,12 @@ with tabs[2]:
                 reason="Final publication"
             )
 
+
+            
+            st.write(_sec("OPENAPI_OAUTH_BASE_URL"))
+            st.write(scopes)
+            st.write(_sec("OPENAPI_ESIGN_BASE_URL"))
+
             # ==================================================
             # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
             # ==================================================
