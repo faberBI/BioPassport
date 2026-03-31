@@ -878,7 +878,7 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
     - salva metadati in passport["qualified_signature"]
     - (opzionale) scarica e allega PDF firmato in passport["signed_pdf"] (base64)
     """
-    tok = openapi_create_token(scopes=["*:*.*/*"], ttl_seconds=3600)
+    tok = openapi_create_token(scopes=["POST:esignature.openapi.com/EU-QES_eseal"], ttl_seconds=3600)
     bearer_token = _bearer(tok)
 
     pdf_bytes = generate_passport_pdf(passport)
@@ -970,25 +970,24 @@ def _openapi_basic_auth_header() -> str:
 
 
 
+
 def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
-    """
-    POST /token (OAuth) - genera un token OAuth valido.
-    scopes è OBBLIGATORIO (es: ["POST:esignature.openapi.com/*"])
-    """
     if not scopes or not isinstance(scopes, list):
-        raise ValueError("scopes deve essere una lista non vuota (es: ['POST:esignature.openapi.com/*'])")
+        raise ValueError("scopes deve essere una lista non vuota")
 
     base = _sec("OPENAPI_OAUTH_BASE_URL").rstrip("/")
-    if not base:
-        raise RuntimeError("Manca OPENAPI_OAUTH_BASE_URL nei secrets/env")
-
     url = f"{base}/token"
+
     headers = {
-        "Authorization": _openapi_basic_auth_header(),
+        "Authorization": _openapi_basic_auth_header(),  # email:APIKEY_PROD
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    payload = {"scopes": scopes, "ttl": ttl_seconds}
+
+    payload = {
+        "scopes": scopes,
+        "ttl": ttl_seconds
+    }
 
     r = requests.post(url, json=payload, headers=headers, timeout=30)
     if not r.ok:
@@ -996,18 +995,17 @@ def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
 
     return r.json()
 
-
 def _bearer(token_resp: dict) -> str:
-    # alcuni endpoint rispondono: {"data":[{"token":"..."}], "success":true}
-    if "data" in token_resp and isinstance(token_resp["data"], list) and token_resp["data"]:
-        t = token_resp["data"][0].get("token")
-        if t:
-            return t
-    # fallback
-    t = token_resp.get("token") or token_resp.get("access_token")
-    if t:
-        return t
-    raise RuntimeError(f"Token non trovato nella risposta OAuth: {token_resp}")
+    if isinstance(token_resp, dict):
+        if "data" in token_resp and isinstance(token_resp["data"], list):
+            if token_resp["data"] and "token" in token_resp["data"][0]:
+                return token_resp["data"][0]["token"]
+        if "access_token" in token_resp:
+            return token_resp["access_token"]
+        if "token" in token_resp:
+            return token_resp["token"]
+
+    raise RuntimeError(f"Token OAuth non trovato: {token_resp}")
 
 # ---------- eSignature: firma QES ----------
 def openapi_qes_automatic_sign(
@@ -1132,7 +1130,7 @@ def openapi_qes_eseal_sign(bearer_token: str, input_documents: list, signature_t
 
 def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False) -> dict:
     # 1) token OAuth (scopes coerenti col tuo setup)
-    tok = openapi_create_token(scopes=["POST:esignature.openapi.com/*"], ttl_seconds=3600)
+    tok = openapi_create_token(scopes=["POST:esignature.openapi.com/EU-QES_eseal"], ttl_seconds=3600)
     bearer_token = _bearer(tok)
 
     # 2) pdf -> bytes -> base64
