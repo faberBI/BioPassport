@@ -202,16 +202,19 @@ with tabs[1]:
     else:
         st.info("Esegui prima l’analisi")
 
+
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabs[2]:
-    if st.session_state.validated_pdf and st.session_state.validated_image:
+with tabsif st.session_state.get("validated_pdf") and st.session_state.get("validated_image"):
+
         if st.button("Pubblica DPP"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
             passport = services.initialize_passport(pid, tipo, fields)
 
-            # === merge dati ===
+            # ==================================================
+            # 1) MERGE DATI VALIDATI
+            # ==================================================
             if tipo == "mobile":
                 services.merge_data_with_ecolabel(
                     passport,
@@ -228,49 +231,62 @@ with tabs[2]:
                     st.session_state.validated_cert
                 )
 
-            # === immagini ===
+            # ==================================================
+            # 2) IMMAGINI PRODOTTO
+            # ==================================================
             for b in st.session_state.uploaded_images_bytes:
                 services.add_product_image(passport, BytesIO(b))
 
-            # === ESPR stamp ===
+            # ==================================================
+            # 3) ESPR STAMP (FINALIZZAZIONE)
+            # ==================================================
             services.espr_stamp(
                 passport,
                 actor="manufacturer",
                 action="finalize",
                 reason="Final publication"
             )
-            services.sign_passport_pdf_qes_openapi(passport)
 
             # ==================================================
-            # 🔐 FIRMA QES OPENAPI (QUESTA È LA PARTE NUOVA)
+            # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
             # ==================================================
-            with st.spinner("Firma qualificata QES in corso..."):
+            with st.spinner("Sigillo elettronico qualificato (QeSeal) in corso..."):
                 try:
-                    services.sign_passport_qes_openapi(passport)
+                    services.seal_passport_pdf_qeseal_openapi(passport)
                 except Exception as e:
-                    st.error(f"Errore firma QES: {e}")
+                    st.error(f"❌ Errore sigillo qualificato: {e}")
                     st.stop()
 
-            # === salvataggi ===
+            # ==================================================
+            # 5) SALVATAGGI
+            # ==================================================
             services.save_passport_to_file(passport)
             services.save_passport_to_excel_append(passport)
 
-            st.success("✅ Digital Product Passport pubblicato e firmato")
+            st.success("✅ Digital Product Passport pubblicato e sigillato")
 
-            # === output ===
+            # ==================================================
+            # 6) OUTPUT PUBBLICO
+            # ==================================================
             url = f"{st.secrets['APP_URL']}?passport_id={pid}"
             st.code(url)
+
             qr = services.generate_qr_from_url(url)
             st.image(qr)
 
-            # info firma
-            sig = passport.get("qualified_signature", {})
-            if sig:
+            # ==================================================
+            # 7) INFO SIGILLO
+            # ==================================================
+            seal = passport.get("qualified_seal", {})
+            if seal:
                 st.info(
-                    f"Firma QES OpenAPI\n"
-                    f"ID: {sig.get('signature_id')}\n"
-                    f"Stato: {sig.get('state')}"
+                    "Sigillo elettronico qualificato (QeSeal)\n\n"
+                    f"• Provider: {seal.get('provider')}\n"
+                    f"• Servizio: {seal.get('service')}\n"
+                    f"• ID: {seal.get('seal_id')}\n"
+                    f"• Stato: {seal.get('state')}"
                 )
+
     else:
         st.info("Completa prima la validazione")
 
