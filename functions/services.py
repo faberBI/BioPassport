@@ -969,6 +969,7 @@ def _openapi_basic_auth_header() -> str:
     return "Basic " + base64.b64encode(raw).decode("utf-8")
 
 
+
 def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
     """
     POST /token (OAuth) - genera un token OAuth valido.
@@ -993,7 +994,7 @@ def openapi_create_token(scopes, ttl_seconds: int = 3600) -> dict:
     if not r.ok:
         raise RuntimeError(f"OAUTH ERROR {r.status_code}: {r.text}")
 
-    return r.json(
+    return r.json()
 
 
 def _bearer(token_resp: dict) -> str:
