@@ -1094,4 +1094,4 @@ def generate_passport_pdf(passport: dict) -> bytes:
 
     buf.seek(0)
     return buf.getvalue()   # ✅ QUESTO È IL PUNTO CHIAVE
-``
+
