@@ -251,7 +251,11 @@ with tabs[2]:
 
             
             st.write(os.environ.get("OPENAPI_OAUTH_BASE_URL"))
-            st.write(scopes)
+            scopes = ["POST:test.esignature.openapi.com/EU-QES_eseal"]
+            st.write("SCOPES:", scopes)
+            tok = openapi_create_token(scopes=scopes)
+            st.write("token", tok)
+
             st.write(os.environ.get("OPENAPI_ESIGN_BASE_URL"))
 
             # ==================================================
