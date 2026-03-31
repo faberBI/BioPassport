@@ -248,16 +248,6 @@ with tabs[2]:
                 reason="Final publication"
             )
 
-
-            
-            st.write(os.environ.get("OPENAPI_OAUTH_BASE_URL"))
-            scopes = ["POST:test.esignature.openapi.com/EU-QES_eseal"]
-            st.write("SCOPES:", scopes)
-            tok = services.openapi_create_token(scopes=scopes)
-            st.write("token", tok)
-
-            st.write(os.environ.get("OPENAPI_ESIGN_BASE_URL"))
-
             # ==================================================
             # 4) 🔐 SIGILLO QUALIFICATO AZIENDALE (QeSeal)
             # ==================================================
