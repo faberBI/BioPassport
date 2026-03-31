@@ -881,6 +881,21 @@ def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True
     bearer_token = _bearer(tok)
 
     pdf_bytes = generate_passport_pdf(passport)
+    #pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    #pdf_bytes = generate_passport_pdf(passport)
+
+    # ✅ normalizza: se ti torna BytesIO invece di bytes
+    if hasattr(pdf_bytes, "getvalue"):
+        pdf_bytes = pdf_bytes.getvalue()
+
+    # ✅ se per errore è stringa, la trasformo
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("utf-8")
+
+    # ✅ safety check
+    if not isinstance(pdf_bytes, (bytes, bytearray)):
+        raise TypeError(f"generate_passport_pdf() ha restituito {type(pdf_bytes)} invece di bytes")
+
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
     resp = openapi_qes_automatic_sign(
