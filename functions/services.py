@@ -1098,9 +1098,9 @@ def generate_passport_pdf(passport: dict) -> bytes:
 
 
 def openapi_qes_eseal_sign(bearer_token: str, input_documents: list, signature_type="cades",
-                           title="QeSeal", description="Qualified Electronic Seal"):
+                           title="QeSeal", description="Qualified Electronic Seal") -> dict:
     base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
-    url = f"{base}/EU-QES_eseal"   # ✅ endpoint sigillo
+    url = f"{base}/EU-QES_eseal"  # ✅ endpoint sigillo [1](https://xlsxwriter.readthedocs.io/working_with_pandas.html)
 
     payload = {
         "inputDocuments": input_documents,
@@ -1121,4 +1121,46 @@ def openapi_qes_eseal_sign(bearer_token: str, input_documents: list, signature_t
         raise RuntimeError(f"eSeal ERROR {r.status_code}: {r.text}")
 
     return r.json()
+
+
+def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False) -> dict:
+    # 1) token OAuth (scopes coerenti col tuo setup)
+    tok = openapi_create_token(scopes=["*:*.openapi.it/*"], ttl_seconds=3600)
+    bearer_token = _bearer(tok)
+
+    # 2) pdf -> bytes -> base64
+    pdf_bytes = generate_passport_pdf(passport)
+    if hasattr(pdf_bytes, "getvalue"):
+        pdf_bytes = pdf_bytes.getvalue()
+    if not isinstance(pdf_bytes, (bytes, bytearray)):
+        raise TypeError(f"generate_passport_pdf() ha restituito {type(pdf_bytes)} invece di bytes")
+
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    # 3) chiamata eSeal
+    resp = openapi_qes_eseal_sign(
+        bearer_token=bearer_token,
+        input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
+        signature_type="cades",
+        title="Nuvia srls",
+        description="Nuvia srls seal"
+    )
+
+    data = resp.get("data") or {}
+    passport["qualified_seal"] = {
+        "provider": "OpenAPI",
+        "service": "EU-QES_eseal",
+        "seal_id": data.get("id"),
+        "state": data.get("state"),
+        "signatureType": data.get("signatureType"),
+        "raw_response": resp
+    }
+
+    # 4) opzionale: download documento sigillato (se vuoi)
+    # NB: il server sandbox eSignature è test.esignature.openapi.com 
+    # if attach_signed and passport["qualified_seal"].get("seal_id"):
+    #     signed_bytes = openapi_get_signed_document(bearer_token, passport["qualified_seal"]["seal_id"])
+    #     passport["sealed_document"] = base64.b64encode(signed_bytes).decode("utf-8")
+
+    return passport["qualified_seal"]
 
