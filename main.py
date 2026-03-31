@@ -183,7 +183,7 @@ with tabs[0]:
                 cert_list.append(services.gpt_extract_cert_info(BytesIO(b), client))
             st.session_state.cert_data = cert_list
 
-        st"Analisi completata ✅")
+        st.success("Analisi completata ✅")
 
 # ======================================================
 # TAB 2 — VALIDAZIONE
