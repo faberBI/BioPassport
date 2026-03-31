@@ -1095,3 +1095,30 @@ def generate_passport_pdf(passport: dict) -> bytes:
     buf.seek(0)
     return buf.getvalue()   # ✅ QUESTO È IL PUNTO CHIAVE
 
+
+
+def openapi_qes_eseal_sign(bearer_token: str, input_documents: list, signature_type="cades",
+                           title="QeSeal", description="Qualified Electronic Seal"):
+    base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    url = f"{base}/EU-QES_eseal"   # ✅ endpoint sigillo
+
+    payload = {
+        "inputDocuments": input_documents,
+        "certificateUsername": _sec("OPENAPI_CERT_USERNAME"),
+        "certificatePassword": _sec("OPENAPI_CERT_PASSWORD"),
+        "title": title,
+        "description": description,
+        "signatureType": signature_type
+    }
+
+    r = requests.post(url, json=payload, headers={
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }, timeout=60)
+
+    if not r.ok:
+        raise RuntimeError(f"eSeal ERROR {r.status_code}: {r.text}")
+
+    return r.json()
+
