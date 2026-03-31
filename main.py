@@ -206,7 +206,8 @@ with tabs[1]:
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabsif st.session_state.get("validated_pdf") and st.session_state.get("validated_image"):
+with tabs[2]:
+    if st.session_state.get("validated_pdf") and st.session_state.get("validated_image"):
 
         if st.button("Pubblica DPP"):
             pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
