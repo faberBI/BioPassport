@@ -4,14 +4,168 @@
 
 <h2 align="center">Nuvia Digital Product Passport</h2>
 
-Web app interattiva per creare e visualizzare passaporti digitali dei prodotti secondo il regolamento **EU Ecodesign (ESPR)**.
+🧾 Nuvia — Piattaforma Digital Product Passport (ESPR‑ready)
+Nuvia è una piattaforma avanzata per la gestione del Digital Product Passport (DPP), progettata per supportare la compliance al Regolamento UE ESPR (Reg. UE 2024/1781) tramite dati di prodotto strutturati, verificabili e orientati al ciclo di vita.
+A differenza delle soluzioni DPP basate solo su QR o storytelling, Nuvia è costruita come un sistema compliance‑first, pensato per produrre passaporti di prodotto audit‑ready, validi e affidabili lungo tutto il ciclo di vita del prodotto, inclusi gli eventi post‑market.
 
-Carica PDF e immagini del prodotto, estrae automaticamente i dati certificati e le informazioni visive tramite AI, consente la validazione manuale e pubblica un passaporto digitale accessibile via QR code.
+✨ Funzionalità principali
+✅ Digital Product Passport ESPR‑ready
 
-### 🚀 Caratteristiche principali
+Creazione di un Digital Product Passport per ciascun prodotto
+Doppia persistenza:
 
-* Estrazione automatica da PDF e immagini con GPT  
-* Form di validazione interattivi  
-* Pubblicazione read-only con QR code  
-* UI moderna con font Nunito Sans e palette personalizzata  
-* Logo Nuvia integrato  
+JSON come fonte legale primaria (“legal truth”)
+Excel per audit, reportistica e controlli
+
+
+Struttura progettata per allinearsi ai requisiti ESPR e ai futuri delegated acts
+
+
+🤖 Estrazione dati assistita da AI con validazione umana
+
+Estrazione automatica di informazioni da:
+
+PDF di prodotto
+Immagini
+Certificati (PDF o immagini)
+
+
+Ogni dato è accompagnato da:
+
+value
+confidence
+explanation
+
+
+Human‑in‑the‑loop: l’operatore valida e corregge i dati prima della pubblicazione
+
+
+🔐 Certificati verificabili e integrità delle evidenze
+
+Ogni certificato è associato a un’evidenza crittografica
+I documenti originali sono hashati tramite SHA‑256
+L’hash è salvato come riferimento immutabile nel DPP
+Consente di dimostrare che:
+
+il certificato esisteva
+non è stato alterato
+corrispondeva al DPP al momento della firma
+
+
+
+
+♻️ Modello di ciclo di vita del prodotto
+Nuvia tratta il DPP come un oggetto digitale vivo, non come un documento statico.
+Eventi di lifecycle supportati:
+
+manufactured
+placed_on_market
+certified
+updated
+repaired
+component_replaced
+resold
+withdrawn
+end_of_life
+
+Ogni evento è:
+
+timestampato
+versionato
+tracciabile
+riflesso nello stato corrente del DPP
+
+
+🔗 Legame fisico‑digitale formalizzato
+
+Collegamento esplicito tra prodotto fisico e DPP digitale
+Supporto a QR code (estendibile a NFC / RFID)
+Registrazione di:
+
+tipo di carrier
+posizione sul prodotto
+URL pubblico
+livello di rischio di manomissione
+
+
+Pensato per market surveillance e controlli doganali
+
+
+🛡️ Integrità, responsabilità e auditabilità
+
+Serializzazione JSON canonica
+Hash di integrità SHA‑256 del passaporto
+Versioning con change log completo
+Attestazione legale dell’issuer
+Progettato per audit regolatori, non solo per visualizzazione consumer
+
+
+✍️ Sigillo elettronico qualificato (QeSeal / QES)
+
+Integrazione opzionale con Sigillo Elettronico Qualificato UE
+Firma di un PDF ufficiale del DPP
+Metadati salvati nel passport:
+
+provider
+ID del sigillo
+stato della firma
+
+
+Adatto a contesti ad alta esposizione regolatoria
+
+
+🖥️ Interfacce operatore e pubblica
+
+UI operatore (Streamlit):
+
+upload documenti
+analisi AI
+validazione
+pubblicazione
+
+
+Vista pubblica:
+
+accesso via QR / URL
+lifecycle
+certificati ed evidenze
+stato di conformità
+
+
+
+
+🏗️ Architettura
+
+Core in Python
+Service layer modulare (services.py)
+Separazione chiara tra:
+
+estrazione dati
+validazione
+gestione lifecycle
+integrità crittografica
+firma esterna
+
+
+Pronta per:
+
+API
+integrazione ERP / PLM
+scalabilità multi‑prodotto
+
+
+Soluzioni DPP tradizionaliNuviaPagine prodotto staticheOggetti digitali con ciclo di vitaOrientate al marketingOrientate alla regolazioneDocumenti non verificatiEvidenze hashateQR come semplice linkLegame fisico‑digitale formalizzatoAudit limitatoAudit‑grade by design
+
+🚦 Stato del progetto
+✅ Creazione DPP
+✅ Lifecycle e post‑market
+✅ Certificati verificabili
+✅ Legame fisico‑digitale
+✅ Integrazione QeSeal (sandbox / prod ready)
+
+📌 Destinatari
+
+Produttori UE soggetti a ESPR
+Filiere regolamentate (elettronica, arredo, infrastrutture, utility)
+Team compliance, legali e sustainability
+Auditor e autorità di vigilanza Logo Nuvia integrato  
