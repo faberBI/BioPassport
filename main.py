@@ -98,7 +98,8 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🚀 Pubblica", "�
 # ======================================================
 # TAB 1 — UPLOAD & AI
 # ======================================================
-with tabspdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
+with tabs[0]:
+    pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
     cert_files = st.file_uploader("Certificati", type=["pdf", "jpg", "png"], accept_multiple_files=True)
 
@@ -134,7 +135,8 @@ with tabspdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
 # ======================================================
 # TAB 2 — VALIDAZIONE
 # ======================================================
-with tabsif st.session_state.pdf_data and st.session_state.image_data:
+with tabs[1]:
+        if st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione PDF")
         st.session_state.validated_pdf = {
             k: {
@@ -162,7 +164,8 @@ with tabsif st.session_state.pdf_data and st.session_state.image_data:
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabsif not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
+with tabs[2]:
+        if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
@@ -253,11 +256,6 @@ with tabsif not (st.session_state.get("validated_pdf") and st.session_state.get(
                 signature_mode=st.session_state["ses_mode"]
             )
             st.success("✅ Richiesta SES inviata")
-# ======================================================
-# TAB 4 — ARCHIVIO
-# ======================================================
-with tabsst.header("📚 Archivio Passport")
-
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
