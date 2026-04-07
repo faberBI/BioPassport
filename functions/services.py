@@ -1553,52 +1553,41 @@ def _scope_for_eu_ses() -> str:
 
 def openapi_eu_ses_request(
     bearer_token: str,
-    input_documents: list,
+    pdf_base64: str,
     signers: list,
     signature_mode: list = None,
-    callback_url: str = None,
-    user_editable_data: dict = None
+    ui_options: dict = None,
+    title: str = "Nuvia srls",
+    description: str = "prova",
 ) -> dict:
     """
-    Firma elettronica semplice (FES/SES) con OTP via OpenAPI eSignature:
-    POST /EU-SES
-
-    input_documents: lista di documenti (base64/remote)
-    signers: lista firmatari con dati + coordinate firma + authentication
-    signature_mode: ["typed"] e/o ["drawn"]
-    callback_url: opzionale
-    user_editable_data: opzionale (consente editing lato signer su nome/email/mobile)
-
-    Ritorna la risposta JSON (contiene request id, stato e URL di firma per i signer).
+    POST /EU-SES (PROD) - usa inputDocuments come stringa base64 (come nel playground).
     """
     import requests
 
-    base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
-    if not base:
-        raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
-
-    url = f"{base}/EU-SES"
-    headers = {
-        "Authorization": f"Bearer {bearer_token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+    url = "https://esignature.openapi.com/EU-SES"
 
     payload = {
-        "inputDocuments": input_documents,
-        "signers": signers
+        "title": title,
+        "description": description,
+        "inputDocuments": pdf_base64,
+        "signers": signers,
+        "options": {
+            "timezone": "UTC",
+            "signatureMode": signature_mode or ["typed"]
+        }
     }
 
-    if signature_mode:
-        payload["signatureMode"] = signature_mode
+    if ui_options:
+        payload["options"]["ui"] = ui_options
 
-    if callback_url:
-        payload["callback"] = {"url": callback_url}
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
 
-    if user_editable_data:
-        payload["userEditableData"] = user_editable_data
-
-    r = requests.post(url, json=payload, headers=headers, timeout=60)
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
     if not r.ok:
         raise RuntimeError(f"EU-SES ERROR {r.status_code}: {r.text}")
     return r.json()
