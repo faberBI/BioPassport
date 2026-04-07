@@ -11,3 +11,5 @@ fitz
 PyMuPDF
 openpyxl
 cryptography
+playwright
+
