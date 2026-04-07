@@ -234,24 +234,11 @@ with tabs[1]:
 # TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
-
-    # --------------------------------------------------
-    # Guard-rail: serve prima validazione completata
-    # --------------------------------------------------
     if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
-    # --------------------------------------------------
-    # Feature flag
-    # --------------------------------------------------
-    ENABLE_QESEAL = False   # ✅ Metti True SOLO se/when hai certificato QeSeal
-    ENABLE_SES = True      # ✅ Firma elettronica semplice (OTP) per demo/test
-
-    # --------------------------------------------------
-    # Bottone principale: PUBBLICA DPP
-    # --------------------------------------------------
-    if st.button("🚀 Pubblica Digital Product Passport"):
+    if st.button("Pubblica DPP"):
 
         # ==================================================
         # 1) CREAZIONE PASSPORT
@@ -260,9 +247,10 @@ with tabs[2]:
         passport = services.initialize_passport(pid, tipo, fields)
 
         # ==================================================
-        # 2) URL pubblico + binding fisico-digitale
+        # 2) URL PUBBLICO + BINDING FISICO-DIGITALE
         # ==================================================
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+
         services.set_physical_binding(
             passport,
             public_url=url,
@@ -272,7 +260,7 @@ with tabs[2]:
         )
 
         # ==================================================
-        # 3) MERGE DATI VALIDATI
+        # 3) MERGE DATI VALIDATI (NO CERTIFICATI QUI)
         # ==================================================
         if tipo == "mobile":
             services.merge_data_with_ecolabel(
@@ -291,24 +279,27 @@ with tabs[2]:
             )
 
         # ==================================================
-        # 4) IMMAGINI
+        # 4) IMMAGINI PRODOTTO
         # ==================================================
         for b in (st.session_state.uploaded_images_bytes or []):
             services.add_product_image(passport, BytesIO(b))
 
         # ==================================================
-        # 5) CERTIFICATI + EVIDENZE
+        # 5) CERTIFICATI VERIFICABILI (EVIDENCE HASH)
         # ==================================================
         if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
             for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
+
                 parsed = (
                     st.session_state.validated_cert[i]
                     if i < len(st.session_state.validated_cert)
                     else {}
                 )
+
                 fname = (
                     st.session_state.uploaded_cert_names[i]
-                    if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
+                    if st.session_state.get("uploaded_cert_names")
+                    and i < len(st.session_state.uploaded_cert_names)
                     else f"cert_{i+1}"
                 )
 
@@ -321,25 +312,31 @@ with tabs[2]:
                 )
 
         # ==================================================
-        # 6) VALIDAZIONE ESPR (BLOCCANTE)
+        # 6) VALIDAZIONE ESPR – FURNITURE / WOOD
         # ==================================================
         check = services.validate_espr_furniture(passport)
 
+        # Warning non bloccanti
         if check.get("warnings"):
-            st.warning("⚠️ Warning di qualità dati")
+            st.warning("⚠️ Warning ESPR / qualità dati")
             for w in check["warnings"]:
                 st.write(f"- {w}")
 
+        # Errori bloccanti
         if not check.get("is_compliant", False):
-            st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
+            st.error("❌ DPP NON conforme ai requisiti ESPR (furniture/wood)")
+
             if check.get("missing_fields"):
-                st.write("### Campi mancanti")
+                st.write("### Campi obbligatori mancanti (sections)")
                 for f in check["missing_fields"]:
                     st.write(f"- {f}")
+
             if check.get("missing_blocks"):
-                st.write("### Blocchi mancanti")
+                st.write("### Blocchi obbligatori mancanti")
                 for b in check["missing_blocks"]:
                     st.write(f"- {b}")
+
+            st.info("➡️ Completa i campi obbligatori prima di pubblicare.")
             st.stop()
 
         # ==================================================
@@ -353,141 +350,59 @@ with tabs[2]:
         )
 
         # ==================================================
-        # 8) QeSeal (opzionale, NON bloccante)
+        # 8) SIGILLO ELETTRONICO QUALIFICATO (QeSeal)
         # ==================================================
-        qeseal_ok = False
-        if ENABLE_QESEAL:
-            with st.spinner("Applico QeSeal..."):
-                try:
-                    services.seal_passport_pdf_qeseal_openapi(passport)
-                    qeseal_ok = True
-                except Exception as e:
-                    st.warning(f"⚠️ QeSeal non applicato: {e}")
+        qeseal_ok = True
+
+        with st.spinner("Sigillo elettronico qualificato (QeSeal) in corso..."):
+            try:
+                services.seal_passport_pdf_qeseal_openapi(passport)
+            except Exception as e:
+                msg = str(e)
+                if (
+                    "Not enough credit" in msg
+                    or "error\":410" in msg
+                    or "402" in msg
+                ):
+                    qeseal_ok = False
+                    st.warning(
+                        "⚠️ Sigillo NON applicato: credito sandbox insufficiente. "
+                        "Il DPP viene comunque pubblicato."
+                    )
+                else:
+                    st.error(f"❌ Errore sigillo qualificato: {e}")
+                    st.stop()
 
         # ==================================================
-        # 9) SALVATAGGI
+        # 9) SALVATAGGIO DATI
         # ==================================================
         services.save_passport_to_file(passport)
         services.save_passport_to_excel_append(passport)
-        st.session_state['published_passport'] = passport
 
         if qeseal_ok:
-            st.success("✅ DPP pubblicato e sigillato (QeSeal)")
+            st.success("✅ Digital Product Passport pubblicato e sigillato")
         else:
-            st.success("✅ DPP pubblicato (senza QeSeal)")
+            st.success("✅ Digital Product Passport pubblicato (senza sigillo)")
 
         # ==================================================
-        # 10) OUTPUT PUBBLICO
+        # 10) OUTPUT PUBBLICO + QR
         # ==================================================
         st.code(url)
-        st.image(services.generate_qr_from_url(url))
-        
-        # ==================================================
-        # QR CODE + DOWNLOAD
-        # ==================================================
         qr = services.generate_qr_from_url(url)
+        st.image(qr)
 
-        st.image(qr, caption="QR Code pubblico del Digital Product Passport")
-
-        # ✅ RESET del buffer (fondamentale)
-        qr.seek(0)
-
-        st.download_button(
-        label="⬇️ Scarica QR Code (PNG)",
-        data=qr,
-        file_name=f"{passport['id']}_qrcode.png",
-        mime="image/png"
-        )
-
-       # ==================================================
-    # 11) FIRMA ELETTRONICA SEMPLICE (SES/FES) – DEMO / TEST
-    #     ✅ st.form → niente reload mentre scrivi
-    # ==================================================
-    if ENABLE_SES:
-        st.divider()
-        st.subheader("✍️ Firma elettronica semplice (OTP)")
-    
-        # ✅ recupera SEMPRE il passport pubblicato dallo state
-        pp = st.session_state.get("published_passport")
-    
-        if not pp:
-            st.info("Pubblica prima il DPP per poter avviare la firma.")
-            st.stop()
-    
-        # ✅ inizializza stato UNA SOLA VOLTA
-        st.session_state.setdefault("ses_name", "Mario")
-        st.session_state.setdefault("ses_surname", "Rossi")
-        st.session_state.setdefault("ses_email", "mario.rossi@test.it")
-        st.session_state.setdefault("ses_mobile", "+39333111222")
-        st.session_state.setdefault("ses_channel", "email")
-        st.session_state.setdefault("ses_mode", "typed")
-        st.session_state.setdefault("ses_allow_edit", False)
-    
-        # ✅ FORM (evita rerun fastidiosi)
-        with st.form("ses_form", clear_on_submit=False):
-            col1, col2 = st.columns(2)
-    
-            with col1:
-                st.text_input("Nome firmatario (persona fisica)", key="ses_name")
-                st.text_input("Cognome firmatario", key="ses_surname")
-                st.text_input("Email OTP", key="ses_email")
-    
-            with col2:
-                st.text_input("Cellulare OTP", key="ses_mobile")
-                st.selectbox("Canale OTP", ["email", "sms"], key="ses_channel")
-                st.selectbox("Modalità firma", ["typed", "drawn"], key="ses_mode")
-    
-            st.checkbox(
-                "Consenti al firmatario di modificare nome/email/cellulare",
-                key="ses_allow_edit"
+        # ==================================================
+        # 11) INFO SIGILLO (SE PRESENTE)
+        # ==================================================
+        seal = passport.get("qualified_seal", {})
+        if seal:
+            st.info(
+                "Sigillo elettronico qualificato (QeSeal)\n\n"
+                f"• Provider: {seal.get('provider')}\n"
+                f"• Servizio: {seal.get('service')}\n"
+                f"• ID: {seal.get('seal_id')}\n"
+                f"• Stato: {seal.get('state')}"
             )
-    
-            submit_ses = st.form_submit_button("Invia richiesta firma SES")
-    
-        # ✅ CHIAMATA SES SOLO AL SUBMIT
-        if submit_ses:
-            with st.spinner("Invio richiesta di firma SES..."):
-                try:
-                    services.sign_passport_pdf_ses_openapi(
-                        pp,  # ✅ SOLO pp, MAI passport
-                        signer_name=st.session_state["ses_name"],
-                        signer_surname=st.session_state["ses_surname"],
-                        signer_email=st.session_state["ses_email"],
-                        signer_mobile=st.session_state["ses_mobile"],
-                        otp_channel=st.session_state["ses_channel"],
-                        signature_mode=st.session_state["ses_mode"],
-                        allow_user_edit=st.session_state["ses_allow_edit"]
-                    )
-    
-                    services.espr_stamp(
-                        pp,
-                        actor="manufacturer",
-                        action="request_ses_signature",
-                        reason="Requested SES (OTP) signature for demo/test"
-                    )
-    
-                    services.save_passport_to_file(pp)
-                    services.save_passport_to_excel_append(pp)
-    
-                    # ✅ aggiorna lo state
-                    st.session_state["published_passport"] = pp
-    
-                    st.success("✅ Richiesta SES inviata")
-                except Exception as e:
-                    st.error(f"❌ Errore SES: {e}")
-                    st.stop()
-    
-        # ✅ MOSTRA LINK DI FIRMA (se presenti)
-        signing_urls = (pp.get("simple_signature") or {}).get("signing_urls") or []
-        signing_urls = [u for u in signing_urls if u]
-    
-        if signing_urls:
-            st.markdown("### 🔗 Link firma")
-            for u in signing_urls:
-                st.write(u)
-        elif pp.get("simple_signature"):
-            with st.expander("Debug risposta SES"):
-                st.json(pp["simple_signature"].get("raw_response", {}))
 
 # ======================================================
 # TAB 4 — ARCHIVIO
