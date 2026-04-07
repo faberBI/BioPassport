@@ -1599,43 +1599,91 @@ def sign_passport_pdf_ses_openapi(
     signer_email: str,
     signer_mobile: str
 ) -> dict:
+    """
+    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
+
+    - Usa Bearer PROD (identico al playground)
+    - inputDocuments = base64 puro
+    - Aggiorna passport["simple_signature"] in modo coerente con TAB 3
+    """
 
     import streamlit as st
     import base64
 
-    # ✅ 1) Usa il bearer PROD
-    bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
+    # --------------------------------------------------
+    # 1) Bearer token (PROD – già autorizzato EU-SES)
+    # --------------------------------------------------
+    try:
+        bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
+    except KeyError:
+        raise RuntimeError("Missing OPENAPI_BEARER_PROD in Streamlit secrets")
 
-    # ✅ 2) Genera PDF
+    # --------------------------------------------------
+    # 2) Genera PDF del passport
+    # --------------------------------------------------
     pdf_bytes = generate_passport_pdf(passport)
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
+        raise RuntimeError("generate_passport_pdf() did not return valid PDF bytes")
 
-    # ✅ 3) Base64 PURO (come playground)
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    # --------------------------------------------------
+    # 3) Base64 PURO (NO header data:...)
+    # --------------------------------------------------
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-    # ✅ 4) Signers
-    signers = [
-        {
-            "name": signer_name,
-            "surname": signer_surname,
-            "email": signer_email,
-            "mobile": signer_mobile,
-            "authentication": "sms"
-        }
-    ]
+    # --------------------------------------------------
+    # 4) Definizione firmatario (SES / OTP)
+    # --------------------------------------------------
+    signers = [{
+        "name": signer_name,
+        "surname": signer_surname,
+        "email": signer_email,
+        "mobile": signer_mobile,
+        "authentication": "sms"
+    }]
 
-    # ✅ 5) Chiamata IDENTICA al playground
+    # --------------------------------------------------
+    # 5) Chiamata EU-SES
+    # --------------------------------------------------
     resp = openapi_eu_ses_request(
         bearer_token=bearer_token,
-        pdf_base64=pdf_b64,
+        pdf_base64=pdf_base64,
         signers=signers,
         signature_mode=["typed"]
     )
 
-    # ✅ 6) Log nel passport
+    # --------------------------------------------------
+    # 6) Validazione risposta minima
+    # --------------------------------------------------
+    if not isinstance(resp, dict) or "data" not in resp:
+        raise RuntimeError(f"Unexpected EU-SES response: {resp}")
+
+    data = resp["data"]
+
+    if "id" not in data or "state" not in data:
+        raise RuntimeError(f"Incomplete EU-SES response data: {data}")
+
+    # --------------------------------------------------
+    # 7) Estrazione link di firma (OTP)
+    # --------------------------------------------------
+    signing_urls = []
+    for s in data.get("signers", []):
+        url = s.get("url")
+        if url:
+            signing_urls.append(url)
+
+    # --------------------------------------------------
+    # 8) Scrittura STRUCTURED nel passport
+    # --------------------------------------------------
     passport["simple_signature"] = {
         "provider": "OpenAPI",
         "type": "EU-SES",
-        "raw_response": resp
+        "request_id": data["id"],             # es. 69d4f8d7...
+        "status": data["state"],               # WAIT_VALIDATION / SIGNED
+        "signing_urls": signing_urls,           # link OTP
+        "created_at": data.get("createdAt"),
+        "raw_response": resp                    # debug / audit
     }
 
     return resp
+
+
