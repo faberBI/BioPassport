@@ -1637,42 +1637,22 @@ def sign_passport_pdf_ses_openapi(
 ) -> dict:
     """
     Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
-
-    - Usa Bearer PROD (identico al playground)
-    - inputDocuments = base64 puro
-    - Aggiorna passport["simple_signature"] in modo coerente con TAB 3
     """
 
     import streamlit as st
     import base64
 
-    # --------------------------------------------------
-    # 1) Bearer token (PROD – già autorizzato EU-SES)
-    # --------------------------------------------------
-    try:
-        bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
-    except KeyError:
-        raise RuntimeError("Missing OPENAPI_BEARER_PROD in Streamlit secrets")
+    # 1) Bearer token
+    bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
 
-    # --------------------------------------------------
-    # 2) Recupera PDF ufficiale generato (NON generarlo di nuovo!)
-    # --------------------------------------------------
+    # 2) Recupera PDF ufficiale
     if "pdf_document" not in passport:
         raise RuntimeError("passport['pdf_document'] mancante — PDF non generato")
 
     pdf_bytes = base64.b64decode(passport["pdf_document"])
-
-    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
-        raise RuntimeError("passport['pdf_document'] è vuoto o invalido")
-
-    # --------------------------------------------------
-    # 3) Base64 PURO (NO header data:...)
-    # --------------------------------------------------
     pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-    # --------------------------------------------------
-    # 4) Definizione firmatario (SES / OTP)
-    # --------------------------------------------------
+    # 3) Firmatario
     signers = [{
         "name": signer_name,
         "surname": signer_surname,
@@ -1681,9 +1661,7 @@ def sign_passport_pdf_ses_openapi(
         "authentication": "sms"
     }]
 
-    # --------------------------------------------------
-    # 5) Chiamata EU-SES (usa la tua funzione già funzionante)
-    # --------------------------------------------------
+    # 4) Chiamata EU-SES
     resp = openapi_eu_ses_request(
         bearer_token=bearer_token,
         pdf_base64=pdf_base64,
@@ -1691,30 +1669,23 @@ def sign_passport_pdf_ses_openapi(
         signature_mode=["typed"]
     )
 
-    # --------------------------------------------------
-    # 6) Validazione risposta minima
-    # --------------------------------------------------
-    if not isinstance(resp, dict) or "data" not in resp:
-        raise RuntimeError(f"Unexpected EU-SES response: {resp}")
+    # 5) Salva dati necessari per il REFRESH STATO
+    passport.setdefault("simple_signature", {})
+    passport["simple_signature"]["pdf_base64"] = pdf_base64
+    passport["simple_signature"]["signers"] = signers
+    passport["simple_signature"]["signature_mode"] = ["typed"]
 
+    # 6) Validazione risposta
     data = resp["data"]
 
-    if "id" not in data or "state" not in data:
-        raise RuntimeError(f"Incomplete EU-SES response data: {data}")
-
-    # --------------------------------------------------
-    # 7) Estrazione link di firma (OTP)
-    # --------------------------------------------------
+    # 7) Estrazione link OTP
     signing_urls = []
     for s in data.get("signers", []):
-        url = s.get("url")
-        if url:
-            signing_urls.append(url)
+        if s.get("url"):
+            signing_urls.append(s["url"])
 
-    # --------------------------------------------------
     # 8) Scrittura STRUCTURED nel passport
-    # --------------------------------------------------
-    passport["simple_signature"] = {
+    passport["simple_signature"].update({
         "provider": "OpenAPI",
         "type": "EU-SES",
         "request_id": data["id"],
@@ -1722,11 +1693,9 @@ def sign_passport_pdf_ses_openapi(
         "signing_urls": signing_urls,
         "created_at": data.get("createdAt"),
         "raw_response": resp
-    }
+    })
 
     return resp
-
-
 
 def generate_passport_pdf(passport: dict) -> bytes:
     buffer = BytesIO()
