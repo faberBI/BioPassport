@@ -352,7 +352,6 @@ with tabs[1]:
                     )
                 except Exception as e:
                     st.error(f"Errore download PDF firmato: {e}")
-``
 # TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
