@@ -1630,47 +1630,97 @@ def sign_passport_pdf_ses_openapi(
     signer_email: str,
     signer_mobile: str
 ) -> dict:
-    import base64
-    import streamlit as st
+    """
+    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
 
-    # Recupera il PDF ufficiale generato
+    - Usa Bearer PROD (identico al playground)
+    - inputDocuments = base64 puro
+    - Aggiorna passport["simple_signature"] in modo coerente con TAB 3
+    """
+
+    import streamlit as st
+    import base64
+
+    # --------------------------------------------------
+    # 1) Bearer token (PROD – già autorizzato EU-SES)
+    # --------------------------------------------------
+    try:
+        bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
+    except KeyError:
+        raise RuntimeError("Missing OPENAPI_BEARER_PROD in Streamlit secrets")
+
+    # --------------------------------------------------
+    # 2) Recupera PDF ufficiale generato (NON generarlo di nuovo!)
+    # --------------------------------------------------
     if "pdf_document" not in passport:
-        raise ValueError("Errore: il passport non contiene il PDF da firmare.")
+        raise RuntimeError("passport['pdf_document'] mancante — PDF non generato")
 
     pdf_bytes = base64.b64decode(passport["pdf_document"])
 
-    # --- CHIAMATA ALLA FIRMA SES ---
-    API_KEY = st.secrets["OPENAPI_BEARER_PROD"]
+    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
+        raise RuntimeError("passport['pdf_document'] è vuoto o invalido")
 
-    endpoint = "https://ses.openapi.it/sign"
+    # --------------------------------------------------
+    # 3) Base64 PURO (NO header data:...)
+    # --------------------------------------------------
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-    payload = {
-        "document": base64.b64encode(pdf_bytes).decode(),
-        "signer": {
-            "name": signer_name,
-            "surname": signer_surname,
-            "email": signer_email,
-            "mobile": signer_mobile
-        }
+    # --------------------------------------------------
+    # 4) Definizione firmatario (SES / OTP)
+    # --------------------------------------------------
+    signers = [{
+        "name": signer_name,
+        "surname": signer_surname,
+        "email": signer_email,
+        "mobile": signer_mobile,
+        "authentication": "sms"
+    }]
+
+    # --------------------------------------------------
+    # 5) Chiamata EU-SES (usa la tua funzione già funzionante)
+    # --------------------------------------------------
+    resp = openapi_eu_ses_request(
+        bearer_token=bearer_token,
+        pdf_base64=pdf_base64,
+        signers=signers,
+        signature_mode=["typed"]
+    )
+
+    # --------------------------------------------------
+    # 6) Validazione risposta minima
+    # --------------------------------------------------
+    if not isinstance(resp, dict) or "data" not in resp:
+        raise RuntimeError(f"Unexpected EU-SES response: {resp}")
+
+    data = resp["data"]
+
+    if "id" not in data or "state" not in data:
+        raise RuntimeError(f"Incomplete EU-SES response data: {data}")
+
+    # --------------------------------------------------
+    # 7) Estrazione link di firma (OTP)
+    # --------------------------------------------------
+    signing_urls = []
+    for s in data.get("signers", []):
+        url = s.get("url")
+        if url:
+            signing_urls.append(url)
+
+    # --------------------------------------------------
+    # 8) Scrittura STRUCTURED nel passport
+    # --------------------------------------------------
+    passport["simple_signature"] = {
+        "provider": "OpenAPI",
+        "type": "EU-SES",
+        "request_id": data["id"],
+        "status": data["state"],
+        "signing_urls": signing_urls,
+        "created_at": data.get("createdAt"),
+        "raw_response": resp
     }
 
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
+    return resp
 
-    resp = requests.post(endpoint, json=payload, headers=headers)
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"SES signing failed: {resp.text}")
-
-    signed_pdf_b64 = resp.json()["signed_document"]
-
-    # Salva il PDF firmato nel passport
-    passport["signed_pdf_document"] = signed_pdf_b64
-    passport["simple_signature"] = {"status": "signed"}
-
-    return passport
 
 
 def generate_passport_pdf(passport: dict) -> bytes:
