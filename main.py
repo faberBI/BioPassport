@@ -9,6 +9,12 @@ from openai import OpenAI
 
 from functions import services
 
+# --------------------------------------------------
+# Feature flag
+# --------------------------------------------------
+ENABLE_QESEAL = False   # ✅ True solo con certificato QeSeal
+ENABLE_SES = True       # ✅ SES (OTP) – demo / prod light
+
 # ======================================================
 # CONFIG STREAMLIT
 # ======================================================
