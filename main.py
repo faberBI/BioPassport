@@ -188,98 +188,117 @@ with tabs[0]:
 # TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
-    if st.session_state.pdf_data and st.session_state.image_data:
+
+    pdf_data = st.session_state.get("pdf_data")
+    image_data = st.session_state.get("image_data")
+
+    if pdf_data and image_data:
+
+        # -------------------------------
+        # PDF
+        # -------------------------------
         st.subheader("Validazione PDF")
-        st.session_state.validated_pdf = {
-            k: {
-                "value": st.text_input(f"PDF · {k}", v.get("value", ""), help=v.get("explanation", "")),
+
+        validated_pdf = {}
+        for k, v in pdf_data.items():
+            validated_pdf[k] = {
+                "value": st.text_input(
+                    f"PDF · {k}",
+                    v.get("value", ""),
+                    help=v.get("explanation", ""),
+                    key=f"pdf_{k}"
+                ),
                 "confidence": v.get("confidence", 0),
                 "explanation": v.get("explanation", "")
             }
-            for k, v in st.session_state.pdf_data.items()
-        }
 
+        st.session_state.validated_pdf = validated_pdf
+
+        # -------------------------------
+        # IMMAGINI
+        # -------------------------------
         st.subheader("Validazione Immagini")
-        st.session_state.validated_image = {
-            k: {
-                "value": st.text_input(f"IMG · {k}", v.get("value", ""), help=v.get("explanation", "")),
+
+        validated_image = {}
+        for k, v in image_data.items():
+            validated_image[k] = {
+                "value": st.text_input(
+                    f"IMG · {k}",
+                    v.get("value", ""),
+                    help=v.get("explanation", ""),
+                    key=f"img_{k}"
+                ),
                 "confidence": v.get("confidence", 0),
                 "explanation": v.get("explanation", "")
             }
-            for k, v in st.session_state.image_data.items()
-        }
 
-        if st.session_state.cert_data:
+        st.session_state.validated_image = validated_image
+
+        # -------------------------------
+        # CERTIFICATI
+        # -------------------------------
+        cert_data = st.session_state.get("cert_data")
+
+        if cert_data:
             st.subheader("Certificati")
-            validated = []
-            for i, cert in enumerate(st.session_state.cert_data):
+
+            validated_certs = []
+
+            for i, cert in enumerate(cert_data):
                 st.markdown(f"**Certificato {i+1}**")
                 row = {}
+
                 for k, v in cert.items():
                     val = v.get("value", "") if isinstance(v, dict) else v
+
                     row[k] = {
-                        "value": st.text_input(f"CERT {i+1} · {k}", val, key=f"c{i}_{k}"),
+                        "value": st.text_input(
+                            f"CERT {i+1} · {k}",
+                            val,
+                            key=f"cert_{i}_{k}"
+                        ),
                         "confidence": v.get("confidence", 0) if isinstance(v, dict) else 0,
                         "explanation": v.get("explanation", "") if isinstance(v, dict) else ""
                     }
-                validated.append(row)
-            st.session_state.validated_cert = validated
+
+                validated_certs.append(row)
+
+            st.session_state.validated_cert = validated_certs
 
         st.success("Validazione pronta ✅")
+
     else:
         st.info("Esegui prima l’analisi")
 
-# ====================================================== check.get("is_compliant", False):
-            st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
-            for f in check.get("missing_fields", []):
-                st.write(f"- {f}")
-            for b in check.get("missing_blocks", []):
-                st.write(f"- {b}")
-            st.stop()
 
-        # 7) FINALIZZAZIONE ESPR
-        services.espr_stamp(
-            passport,
-            actor="manufacturer",
-            action="finalize",
-            reason="Final publication (ESPR compliant)"
-        )
+# ======================================================
+# POST-PUBBLICAZIONE + FIRMA
+# ======================================================
 
-        # 8) QeSeal (opzionale)
-        if ENABLE_QESEAL:
-            try:
-                services.seal_passport_pdf_qeseal_openapi(passport)
-                st.success("✅ QeSeal applicato")
-            except Exception as e:
-                st.warning(f"⚠️ QeSeal non applicato: {e}")
+pp = st.session_state.get("published_passport")
 
-        # 9) SALVATAGGI
-        services.save_passport_to_file(passport)
-        services.save_passport_to_excel_append(passport)
-        st.session_state["published_passport"] = passport
+if pp:
 
-        st.success("✅ DPP pubblicato")
-
-    # --------------------------------------------------
+    # -------------------------------
     # OUTPUT PUBBLICO
-    # --------------------------------------------------
-    pp = st.session_state.get("published_passport")
-    if pp:
-        url = f"{st.secrets['APP_URL']}?passport_id={pp['id']}"
-        st.code(url)
+    # -------------------------------
+    st.subheader("🌐 Passport pubblico")
+
+    url = f"{st.secrets.get('APP_URL')}?passport_id={pp['id']}"
+    st.code(url)
+
+    try:
         qr_img = services.generate_qr_from_url(url)
         st.image(qr_img, caption="QR DPP")
+    except Exception as e:
+        st.warning(f"QR non generato: {e}")
 
-    # --------------------------------------------------
+    # -------------------------------
     # FIRMA SES (OTP)
-    # --------------------------------------------------
+    # -------------------------------
     if ENABLE_SES:
         st.divider()
         st.subheader("✍️ Firma elettronica semplice (OTP)")
-
-        if not pp:
-            st.info("Pubblica prima il DPP")
-            st.stop()
 
         # Default valori
         st.session_state.setdefault("ses_name", "Nuvia")
@@ -294,6 +313,9 @@ with tabs[1]:
             st.text_input("Cellulare OTP", key="ses_mobile")
             submit = st.form_submit_button("Invia richiesta firma SES")
 
+        # -------------------------------
+        # INVIO FIRMA
+        # -------------------------------
         if submit:
             with st.spinner("Invio richiesta firma SES..."):
                 try:
@@ -304,16 +326,17 @@ with tabs[1]:
                         signer_email=st.session_state["ses_email"],
                         signer_mobile=st.session_state["ses_mobile"]
                     )
+
                     services.save_passport_to_file(pp)
                     st.success("✅ Richiesta firma SES inviata")
+
                 except Exception as e:
                     st.error(f"❌ Errore SES: {e}")
-                    st.stop()
 
-        # --------------------------------------------------
-        # LINK FIRMA OTP
-        # --------------------------------------------------
-        ses = pp.get("simple_signature", {})
+        # -------------------------------
+        # LINK FIRMA
+        # -------------------------------
+        ses = pp.get("simple_signature") or {}
         urls = ses.get("signing_urls") or []
 
         if urls:
@@ -321,35 +344,47 @@ with tabs[1]:
             for u in urls:
                 st.link_button("Vai alla firma", u)
 
-        # --------------------------------------------------
-        # VERIFICA STATO + DOWNLOAD PDF FIRMATO
-        # --------------------------------------------------
-        if ses:
+        # -------------------------------
+        # VERIFICA STATO
+        # -------------------------------
+        if ses and ses.get("request_id"):
+
             st.divider()
+
             if st.button("🔄 Verifica stato firma"):
                 try:
                     status = services.openapi_get_signature_status(
-                        bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
+                        bearer_token=st.secrets.get("OPENAPI_BEARER_PROD"),
                         signature_id=ses["request_id"]
                     )
+
                     ses["status"] = status["data"]["state"]
+                    pp["simple_signature"] = ses
+
                     services.save_passport_to_file(pp)
+
                     st.info(f"Stato firma: {ses['status']}")
+
                 except Exception as e:
                     st.error(f"Errore stato firma: {e}")
 
+            # -------------------------------
+            # DOWNLOAD PDF FIRMATO
+            # -------------------------------
             if ses.get("status") == "SIGNED":
                 try:
                     pdf_signed = services.openapi_download_signed_pdf(
-                        bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
+                        bearer_token=st.secrets.get("OPENAPI_BEARER_PROD"),
                         signature_id=ses["request_id"]
                     )
+
                     st.download_button(
                         "⬇️ Scarica Passport firmato",
                         data=pdf_signed,
                         file_name=f"{pp['id']}_signed.pdf",
                         mime="application/pdf"
                     )
+
                 except Exception as e:
                     st.error(f"Errore download PDF firmato: {e}")
 # TAB 3 — PUBBLICA
