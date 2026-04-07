@@ -460,22 +460,46 @@ with tabs[2]:
                 st.json(pp["simple_signature"].get("raw_response", {}))
 
         # --------------------------------------------------
-        # 📥 SCARICA SEMPRE IL QR CODE (senza controlli firma)
+        # 📥 SCARICA SEMPRE IL QR CODE (robusto)
         # --------------------------------------------------
         import io
+        import base64
         from PIL import Image
+        import numpy as np
         
-        # Genera URL del passport
         url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
         
-        # Genera QR
         qr_img = services.generate_qr_from_url(url)
         
-        # Se non è PIL, converto
-        if not isinstance(qr_img, Image.Image):
-            qr_img = Image.open(io.BytesIO(qr_img))
+        # --- NORMALIZZAZIONE QR ---
+        def normalize_qr(qr):
+            # Caso 1: già PIL
+            if isinstance(qr, Image.Image):
+                return qr
         
-        # Prepara buffer
+            # Caso 2: bytes
+            if isinstance(qr, (bytes, bytearray)):
+                return Image.open(io.BytesIO(qr))
+        
+            # Caso 3: base64 string
+            if isinstance(qr, str):
+                try:
+                    raw = base64.b64decode(qr)
+                    return Image.open(io.BytesIO(raw))
+                except Exception:
+                    pass
+                
+            # Caso 4: numpy array
+            if isinstance(qr, np.ndarray):
+                return Image.fromarray(qr)
+        
+            # Caso 5: fallback → errore leggibile
+            raise TypeError(f"Formato QR non gestito: {type(qr)}")
+        
+        # Normalizza
+        qr_img = normalize_qr(qr_img)
+        
+        # Buffer per download
         buf = io.BytesIO()
         qr_img.save(buf, format="PNG")
         buf.seek(0)
@@ -487,6 +511,7 @@ with tabs[2]:
             file_name=f"{pp.get('id', 'passport')}_qr.png",
             mime="image/png"
         )
+
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
