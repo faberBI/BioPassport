@@ -16,16 +16,16 @@ import qrcode
 from datetime import timezone, datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from playwright.sync_api import sync_playwright
+import requests
 
-def generate_pdf_from_url(url: str) -> bytes:
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
-        page.goto(url, wait_until="networkidle")
-        pdf_bytes = page.pdf(format="A4")
-        browser.close()
-        return pdf_bytes
+def generate_pdf_from_url(url):
+    resp = requests.post(
+        "https://api.pdfshift.io/v3/convert",
+        auth=("api_key", ""),
+        json={"source": url}
+    )
+    return resp.content
+
 
 # ======================================================
 # CONFIG
