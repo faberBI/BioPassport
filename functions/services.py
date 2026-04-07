@@ -1640,7 +1640,7 @@ def sign_passport_pdf_ses_openapi(
     pdf_bytes = base64.b64decode(passport["pdf_document"])
 
     # --- CHIAMATA ALLA FIRMA SES ---
-    API_KEY = st.secrets["OPENAPI_SES_TOKEN"]
+    API_KEY = st.secrets["OPENAPI_BEARER_PROD"]
 
     endpoint = "https://ses.openapi.it/sign"
 
