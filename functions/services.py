@@ -1834,4 +1834,25 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
     return html
 
+def generate_pdf_from_html(html: str) -> bytes:
+    API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
+    endpoint = "https://pdf.openapi.it/base"
+
+    payload = {
+        "html": html,
+        "format": "A4",
+        "margin": "20px",
+        "printBackground": True,
+        "pageRanges": "1-"
+    }
+
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    resp = requests.post(endpoint, json=payload, headers=headers)
+    resp.raise_for_status()
+
+    return resp.content
 
