@@ -22,9 +22,7 @@ import streamlit as st
 import base64
 
 def generate_pdf_from_url(url: str) -> bytes:
-    import streamlit as st
     import requests
-
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
 
     endpoint = "https://pdf.openapi.it/base"
@@ -34,8 +32,6 @@ def generate_pdf_from_url(url: str) -> bytes:
         "format": "A4",
         "margin": "20px",
         "printBackground": True,
-        "fullPage": True,
-        "scrollPage": True,
         "pageRanges": "1-",
         "waitFor": 3000
     }
@@ -49,6 +45,7 @@ def generate_pdf_from_url(url: str) -> bytes:
     resp.raise_for_status()
 
     return resp.content
+
 
 
 
