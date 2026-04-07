@@ -104,7 +104,6 @@ def match_field(input_key, field_names):
     matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.8)
     return norm_fields[matches[0]] if matches else None
 
-
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
