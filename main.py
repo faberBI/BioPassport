@@ -487,9 +487,6 @@ with tabs[2]:
             file_name=f"{pp.get('id', 'passport')}_qr.png",
             mime="image/png"
         )
-        else:
-            st.info("QR scaricabile disponibile solo dopo firma SES completata")
-
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
