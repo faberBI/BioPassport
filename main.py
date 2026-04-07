@@ -369,16 +369,11 @@ with tabs[2]:
         services.save_passport_to_file(passport)
         services.save_passport_to_excel_append(passport)
         st.session_state['published_passport'] = passport
-        # === GENERA PDF DEL PASSPORT ===
         # === GENERA PDF UFFICIALE DEL DPP DALLA PAGINA PUBBLICA ===
         public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
         pdf_bytes = services.generate_pdf_from_url(public_url)
-
         passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
-
         services.save_passport_to_file(passport)
-
-
 
         if qeseal_ok:
             st.success("✅ DPP pubblicato e sigillato (QeSeal)")
