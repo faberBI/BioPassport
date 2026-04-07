@@ -878,12 +878,13 @@ def add_product_image(passport: dict, img_file, caption: str = ""):
 def render_espr_compliance(passport, st=None):
     """
     Render completo della compliance ESPR in Streamlit.
-    Mostra:
+    Evidenzia:
     - issuer
     - physical binding
     - lifecycle
     - esito validazione
-    - tutti i campi con evidenza mandatory / optional / mancanti
+    - campi obbligatori / raccomandati / opzionali
+    Funziona anche con campi legacy o non normalizzati.
     """
     if st is None:
         import streamlit as st
@@ -893,7 +894,7 @@ def render_espr_compliance(passport, st=None):
     # ==================================================
     # 1) ISSUER
     # ==================================================
-    st.markdown("### 🏭 Issuer (Responsabile del prodotto)")
+    st.markdown("### 🏭 Issuer")
     issuer = passport.get("issuer", {})
     if issuer:
         for k, v in issuer.items():
@@ -949,7 +950,7 @@ def render_espr_compliance(passport, st=None):
             st.write(f"- ❌ {f}")
 
     # ==================================================
-    # 5) CAMPI DEL PASSPORT (IL PEZZO CHIAVE)
+    # 5) CAMPI DEL PASSPORT (ROBUSTO)
     # ==================================================
     st.markdown("### 🧾 Campi del Digital Product Passport")
 
@@ -962,12 +963,23 @@ def render_espr_compliance(passport, st=None):
         st.markdown(f"#### 📁 Sezione: {section_name}")
 
         for field_name, data in fields.items():
-            value = str(data.get("value", "")).strip()
-            confidence = float(data.get("confidence", 0) or 0)
-            explanation = data.get("explanation", "")
-            mandatory = data.get("mandatory", False)
-            priority = data.get("priority", "optional")
 
+            # --- NORMALIZZAZIONE ROBUSTA ---
+            if isinstance(data, dict):
+                value = str(data.get("value", "")).strip()
+                confidence = float(data.get("confidence", 0) or 0)
+                explanation = data.get("explanation", "")
+                mandatory = bool(data.get("mandatory", False))
+                priority = data.get("priority", "optional")
+            else:
+                # campo legacy / raw
+                value = str(data).strip() if data is not None else ""
+                confidence = 0.0
+                explanation = ""
+                mandatory = False
+                priority = "optional"
+
+            # --- STATO CAMPO ---
             if mandatory and not value:
                 st.error(f"❌ **{field_name}** · OBBLIGATORIO → MANCANTE")
             elif mandatory:
@@ -977,15 +989,17 @@ def render_espr_compliance(passport, st=None):
             else:
                 st.info(f"ℹ️ **{field_name}** · Opzionale")
 
-            cols = st.columns([2, 1])
-            with colsst.write(f"**Valore:** {value or '—'}")
+            # --- DETTAGLI ---
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"**Valore:** {value or '—'}")
                 if explanation:
                     st.caption(f"Fonte: {explanation}")
 
-            with colsst.write(f"**Confidenza:** {round(confidence, 2)}")
+            with col2:
+                st.write(f"**Confidenza:** {round(confidence, 2)}")
 
         st.divider()
-
 
 # ---------- FUNZIONE PRINCIPALE: quella che chiami dal main ----------
 def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True) -> dict:
