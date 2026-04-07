@@ -18,6 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import requests
 import os
+import streamlit as st
 
 def generate_pdf_from_url(url: str) -> bytes:
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
