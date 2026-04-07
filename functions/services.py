@@ -44,6 +44,50 @@ ECOLABEL_FIELDS = [
     "voc_bassi","facilmente_smortabile","produzione_basso_impatto","info_consumatore_ok"
 ]
 
+
+# ======================================================
+# ESPR – FURNITURE / WOOD FIELD PRIORITY MAP
+# ======================================================
+
+FIELD_PRIORITY_MAP = {
+    # --- IDENTITÀ PRODOTTO ---
+    "Nome prodotto": "essential",
+    "Categoria prodotto": "essential",
+    "Numero di modello": "essential",
+    "Produttore": "essential",
+
+    # --- PRODUZIONE ---
+    "Luogo di Produzione": "essential",
+    "Paese di Produzione": "essential",
+    "Data di produzione": "essential",
+
+    # --- MATERIALI & LEGNO ---
+    "Materiali/componenti utilizzati": "essential",
+    "Tipologia di legno": "essential",
+    "Origine del legno": "essential",
+    "Sostanze preoccupanti": "essential",
+
+    # --- CERTIFICAZIONI ---
+    "Conformità tecnica": "essential",
+    "Certificazioni": "essential",
+    "Ente certificatore": "essential",
+
+    # --- FINE VITA ---
+    "Indicazioni di smaltimento": "essential",
+    "Fine vita": "essential",
+
+    # --- STRONGLY RECOMMENDED ---
+    "Percentuale di contenuto riciclato": "strongly_recommended",
+    "Durabilità": "strongly_recommended",
+    "Istruzioni di riparazione": "strongly_recommended",
+    "Parti sostituibili": "strongly_recommended",
+
+    # --- OPTIONAL ---
+    "Prezzo in euro": "optional",
+    "Peso": "optional",
+    "Dimensioni": "optional",
+}
+
 # ======================================================
 # NORMALIZATION / MATCHING
 # ======================================================
@@ -144,19 +188,31 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dic
 
 
 
-def _norm_field(x, default_conf=0.0):
+def _norm_field(x, field_name=None, default_conf=0.0):
     if isinstance(x, dict):
-        return {
-            "value": "" if x.get("value") is None else str(x.get("value")),
-            "confidence": float(x.get("confidence", default_conf) or 0.0),
-            "explanation": "" if x.get("explanation") is None else str(x.get("explanation"))
-        }
-    return {"value": "" if x is None else str(x), "confidence": float(default_conf), "explanation": ""}
+        value = "" if x.get("value") is None else str(x.get("value"))
+        confidence = float(x.get("confidence", default_conf) or 0.0)
+        explanation = "" if x.get("explanation") is None else str(x.get("explanation"))
+    else:
+        value = "" if x is None else str(x)
+        confidence = float(default_conf)
+        explanation = ""
+
+    priority = FIELD_PRIORITY_MAP.get(field_name, "optional")
+    mandatory = priority == "essential"
+
+    return {
+        "value": value,
+        "confidence": confidence,
+        "explanation": explanation,
+        "priority": priority,
+        "mandatory": mandatory
+    }
 
 def _norm_payload_cert(payload: dict) -> dict:
     # Normalizza output certificati (chiavi libere)
     if isinstance(payload, dict):
-        return {k: _norm_field(v) for k, v in payload.items()}
+        return {k: _norm_field(v, field_name=k) for k, v in payload.items()}
     return {"raw": _norm_field(payload)}
     
 def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
@@ -164,7 +220,7 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
     out = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in expected_fields}
     if isinstance(payload, dict):
         for k in expected_fields:
-            out[k] = _norm_field(payload.get(k, out[k]))
+            out[k] = _norm_field(payload.get(k, out[k]), field_name=k)
     return out
 
 
@@ -1376,6 +1432,82 @@ def post_market_event(
     espr_stamp(passport, actor=actor, action=f"post_market_{event}", reason=reason)
     return passport
 
+def validate_espr_furniture(passport: dict) -> dict:
+    """
+    Valida i requisiti ESSENTIAL per DPP furniture/wood in modo robusto.
+    Ritorna un dict con:
+      - missing_fields: campi mandatory mancanti dentro sections
+      - missing_blocks: blocchi mandatory mancanti a livello root (binding/issuer/evidences)
+      - warnings: valori presenti ma non “validi” (placeholder)
+    """
+    missing_fields = []
+    missing_blocks = []
+    warnings = []
+
+    # --- 1) controlla i campi nelle sections (PDF/Images/Ecolabel_UE ecc.) ---
+    for sec_name, section in (passport.get("sections") or {}).items():
+        if not isinstance(section, dict):
+            continue
+
+        for fname, f in section.items():
+            if not isinstance(f, dict):
+                continue
+
+            if f.get("mandatory"):
+                val = f.get("value")
+
+                # considera vuoti anche placeholder comuni
+                if val is None:
+                    missing_fields.append(fname)
+                    continue
+
+                sval = str(val).strip().lower()
+                if sval in ("", "none", "null", "non specificato", "non rilevato", "-"):
+                    missing_fields.append(fname)
+
+                # warning se confidenza molto bassa su campo mandatory
+                conf = float(f.get("confidence", 0) or 0)
+                if conf < 0.3:
+                    warnings.append(f"{fname}: confidenza bassa ({conf})")
+
+    # --- 2) controlli “root-level” essenziali per DPP ---
+    # 2a) issuer/attestation
+    issuer = passport.get("issuer") or {}
+    if not issuer.get("legal_name"):
+        missing_blocks.append("issuer.legal_name")
+    if not passport.get("attestation"):
+        missing_blocks.append("attestation")
+
+    # 2b) legame fisico-digitale (carrier + url)
+    pb = passport.get("physical_binding") or {}
+    if not pb.get("carrier"):
+        missing_blocks.append("physical_binding.carrier")
+    if not pb.get("public_url"):
+        missing_blocks.append("physical_binding.public_url")
+
+    # 2c) lifecycle
+    lc = passport.get("lifecycle") or {}
+    if not lc.get("status"):
+        missing_blocks.append("lifecycle.status")
+
+    # 2d) certificati verificabili (evidences) — fondamentale per “wood/furniture”
+    # se hai certificates ma nessuna evidence, è un problema
+    certs = passport.get("certificates") or []
+    evids = passport.get("evidences") or []
+    if len(certs) > 0 and len(evids) == 0:
+        missing_blocks.append("evidences (missing evidence hashes for certificates)")
+
+    # se richiedi almeno 1 certificato in furniture/wood
+    # (es. EUDR/EUTR/legno), puoi forzare questo check:
+    if len(certs) == 0:
+        warnings.append("Nessun certificato presente: per furniture/wood spesso è richiesto almeno un documento di tracciabilità/legality del legno.")
+
+    return {
+        "missing_fields": sorted(set(missing_fields)),
+        "missing_blocks": sorted(set(missing_blocks)),
+        "warnings": sorted(set(warnings)),
+        "is_compliant": (len(missing_fields) == 0 and len(missing_blocks) == 0)
+    }
 def _scope_for_eu_ses() -> str:
     """
     Determina lo scope corretto per EU-SES in base all'ambiente (sandbox/prod).
