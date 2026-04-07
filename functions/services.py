@@ -17,13 +17,34 @@ from datetime import timezone, datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import requests
+import os
 
-def generate_pdf_from_url(url):
-    resp = requests.post(
-        "https://api.pdfshift.io/v3/convert",
-        auth=("api_key", ""),
-        json={"source": url}
-    )
+def generate_pdf_from_url(url: str) -> bytes:
+    """
+    Converte una pagina web in PDF usando pdf.openapi.it
+    """
+    API_KEY = os.getenv("OPENAPI_PDF_TOKEN")  # metti il token nei secrets
+
+    endpoint = "https://pdf.openapi.it/base"
+
+    payload = {
+        "url": url,
+        "format": "A4",
+        "margin": "20px",
+        "printBackground": True,
+        "waitFor": 2000,  # aspetta 2 secondi per caricare Streamlit
+    }
+
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    resp = requests.post(endpoint, json=payload, headers=headers)
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"PDF generation failed: {resp.text}")
+
     return resp.content
 
 
