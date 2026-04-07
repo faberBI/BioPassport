@@ -1375,3 +1375,158 @@ def post_market_event(
     append_lifecycle_event(passport, event, data or {})
     espr_stamp(passport, actor=actor, action=f"post_market_{event}", reason=reason)
     return passport
+
+def _scope_for_eu_ses() -> str:
+    """
+    Determina lo scope corretto per EU-SES in base all'ambiente (sandbox/prod).
+    """
+    base_esign = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    if "test." in base_esign:
+        return "POST:test.esignature.openapi.com/EU-SES"
+    return "POST:esignature.openapi.com/EU-SES"
+
+
+def openapi_eu_ses_request(
+    bearer_token: str,
+    input_documents: list,
+    signers: list,
+    signature_mode: list = None,
+    callback_url: str = None,
+    user_editable_data: dict = None
+) -> dict:
+    """
+    Firma elettronica semplice (FES/SES) con OTP via OpenAPI eSignature:
+    POST /EU-SES
+
+    input_documents: lista di documenti (base64/remote)
+    signers: lista firmatari con dati + coordinate firma + authentication
+    signature_mode: ["typed"] e/o ["drawn"]
+    callback_url: opzionale
+    user_editable_data: opzionale (consente editing lato signer su nome/email/mobile)
+
+    Ritorna la risposta JSON (contiene request id, stato e URL di firma per i signer).
+    """
+    import requests
+
+    base = _sec("OPENAPI_ESIGN_BASE_URL").rstrip("/")
+    if not base:
+        raise RuntimeError("Manca OPENAPI_ESIGN_BASE_URL nei secrets/env")
+
+    url = f"{base}/EU-SES"
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    payload = {
+        "inputDocuments": input_documents,
+        "signers": signers
+    }
+
+    if signature_mode:
+        payload["signatureMode"] = signature_mode
+
+    if callback_url:
+        payload["callback"] = {"url": callback_url}
+
+    if user_editable_data:
+        payload["userEditableData"] = user_editable_data
+
+    r = requests.post(url, json=payload, headers=headers, timeout=60)
+    if not r.ok:
+        raise RuntimeError(f"EU-SES ERROR {r.status_code}: {r.text}")
+    return r.json()
+
+def sign_passport_pdf_ses_openapi(
+    passport: dict,
+    signer_name: str,
+    signer_surname: str,
+    signer_email: str,
+    signer_mobile: str,
+    otp_channel: str = "email",          # "email" o "sms"
+    signature_mode: str = "typed",       # "typed" o "drawn"
+    page: int = 1,
+    x: str = "300",
+    y: str = "100",
+    callback_url: str = "",
+    allow_user_edit: bool = False
+) -> dict:
+    """
+    Genera un PDF del DPP e avvia una firma FES/SES (OTP) con POST /EU-SES.
+    Salva i metadati in passport["simple_signature"].
+
+    NOTA: NON è QeSeal e NON è firma qualificata.
+    """
+    # 1) token OAuth per scope EU-SES
+    scope = _scope_for_eu_ses()
+    tok = openapi_create_token(scopes=[scope], ttl_seconds=3600)
+    bearer_token = _bearer(tok)
+
+    # 2) genera PDF
+    pdf_bytes = generate_passport_pdf(passport)
+    if hasattr(pdf_bytes, "getvalue"):
+        pdf_bytes = pdf_bytes.getvalue()
+    if not isinstance(pdf_bytes, (bytes, bytearray)):
+        raise TypeError(f"generate_passport_pdf() ha restituito {type(pdf_bytes)} invece di bytes")
+
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    # 3) signers payload (coerente con doc EU-SES) [1](https://fiberc.sharepoint.com/sites/BIM/Shared%20Documents/Files/NOLAITAV/Bollettini/Bollettini%20digitalizzati/NAT073_BOLDIG_CHIAMATA_1711191_BollettinoDigitale_MAVM250123.pdf?web=1)[2](https://fiberc-my.sharepoint.com/personal/37502468_fibercop_com/Documents/Documents/ERM_FIBERCOP/Documentazione%20Utile/Libri-Articoli%20ML/Esercitazione%20ML%20.ipynb%20-%20Colab.html?web=1)
+    signers = [
+        {
+            "name": signer_name,
+            "surname": signer_surname,
+            "email": signer_email,
+            "mobile": signer_mobile,
+            "authentication": [otp_channel],
+            "signatures": [
+                {"page": page, "x": x, "y": y, "name": "Firma"}
+            ]
+        }
+    ]
+
+    user_editable_data = None
+    if allow_user_edit:
+        user_editable_data = {"name": "true", "mobile": "true", "email": "true"}
+
+    # 4) request SES
+    resp = openapi_eu_ses_request(
+        bearer_token=bearer_token,
+        input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
+        signers=signers,
+        signature_mode=[signature_mode],
+        callback_url=callback_url or None,
+        user_editable_data=user_editable_data
+    )
+
+    # 5) salva sul passport
+    passport["simple_signature"] = {
+        "provider": "OpenAPI",
+        "service": "EU-SES",
+        "requested_at": _utc_now_iso(),
+        "signer": {
+            "name": signer_name,
+            "surname": signer_surname,
+            "email": signer_email,
+            "mobile": signer_mobile,
+            "otp_channel": otp_channel,
+            "signature_mode": signature_mode
+        },
+        "raw_response": resp
+    }
+
+    # 6) prova ad estrarre URL di firma (best-effort: struttura può variare)
+    try:
+        data = resp.get("data", resp)
+        # spesso ci sono URL dentro signers
+        if isinstance(data, dict) and "signers" in data and data["signers"]:
+            passport["simple_signature"]["signing_urls"] = [
+                s.get("url") or s.get("signingUrl") or s.get("link")
+                for s in data["signers"]
+                if isinstance(s, dict)
+            ]
+    except Exception:
+        pass
+
+    return passport["simple_signature"]
