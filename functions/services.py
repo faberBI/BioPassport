@@ -20,10 +20,7 @@ import requests
 import os
 
 def generate_pdf_from_url(url: str) -> bytes:
-    """
-    Converte una pagina web in PDF usando pdf.openapi.it
-    """
-    API_KEY = os.getenv("OPENAPI_PDF_TOKEN")  # metti il token nei secrets
+    API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
 
     endpoint = "https://pdf.openapi.it/base"
 
@@ -32,7 +29,7 @@ def generate_pdf_from_url(url: str) -> bytes:
         "format": "A4",
         "margin": "20px",
         "printBackground": True,
-        "waitFor": 2000,  # aspetta 2 secondi per caricare Streamlit
+        "waitFor": 2000
     }
 
     headers = {
@@ -1654,7 +1651,8 @@ def sign_passport_pdf_ses_openapi(
     # --------------------------------------------------
     # 2) Genera PDF del passport (PDF REALE)
     # --------------------------------------------------
-    pdf_bytes = generate_passport_pdf(passport)
+    pdf_bytes = base64.b64decode(passport["pdf_document"])
+
 
     if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
         raise RuntimeError("generate_passport_pdf() did not return valid PDF bytes")
