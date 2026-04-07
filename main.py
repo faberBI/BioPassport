@@ -32,7 +32,6 @@ st.title("🇪🇺 Digital Product Passport")
 # OPENAI CLIENT
 # ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
-
 # ======================================================
 # SESSION STATE INIT
 # ======================================================
@@ -437,10 +436,7 @@ with tabs[2]:
                         signer_name=st.session_state["ses_name"],
                         signer_surname=st.session_state["ses_surname"],
                         signer_email=st.session_state["ses_email"],
-                        signer_mobile=st.session_state["ses_mobile"],
-                        otp_channel=st.session_state["ses_channel"],
-                        signature_mode=st.session_state["ses_mode"],
-                        allow_user_edit=st.session_state["ses_allow_edit"]
+                        signer_mobile=st.session_state["ses_mobile"]
                     )
 
                     services.espr_stamp(
