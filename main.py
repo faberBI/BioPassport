@@ -50,8 +50,6 @@ DEFAULT_STATE = {
 for k, v in DEFAULT_STATE.items():
     st.session_state.setdefault(k, v)
 
-# ✅ PDF DPP finale (immutabile)
-st.session_state.setdefault("final_pdf_path", None)
 # ======================================================
 # PUBLIC VIEW (?passport_id=...)
 # ======================================================
@@ -247,148 +245,138 @@ with tabs[2]:
     # Feature flag
     # --------------------------------------------------
     ENABLE_QESEAL = False   # ✅ Metti True SOLO se hai certificato QeSeal
-    ENABLE_SES = True      # ✅ Firma elettronica semplice (OTP) per demo/test
+    ENABLE_SES = True       # ✅ Firma elettronica semplice (OTP) per demo/test
 
     # --------------------------------------------------
     # Bottone principale: PUBBLICA DPP
     # --------------------------------------------------
     if st.button("🚀 Pubblica Digital Product Passport"):
 
-        with st.spinner("Pubblicazione DPP e generazione PDF finale..."):
+        # ==================================================
+        # 1) CREAZIONE PASSPORT
+        # ==================================================
+        pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
+        passport = services.initialize_passport(pid, tipo, fields)
 
-            # ==================================================
-            # 1) CREAZIONE PASSPORT
-            # ==================================================
-            pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
-            passport = services.initialize_passport(pid, tipo, fields)
+        # ==================================================
+        # 2) URL pubblico + binding fisico-digitale
+        # ==================================================
+        url = f"{st.secrets['APP_URL']}?passport_id={pid}"
+        services.set_physical_binding(
+            passport,
+            public_url=url,
+            carrier="qr",
+            location="product_label",
+            tamper_risk="medium"
+        )
 
-            # ==================================================
-            # 2) URL pubblico + binding fisico-digitale
-            # ==================================================
-            url = f"{st.secrets['APP_URL']}?passport_id={pid}"
-            services.set_physical_binding(
+        # ==================================================
+        # 3) MERGE DATI VALIDATI
+        # ==================================================
+        if tipo == "mobile":
+            services.merge_data_with_ecolabel(
                 passport,
-                public_url=url,
-                carrier="qr",
-                location="product_label",
-                tamper_risk="medium"
+                pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
+                image_data=st.session_state.validated_image,
+                cert_data=None,
+                client=client
+            )
+        else:
+            services.merge_data(
+                passport,
+                st.session_state.validated_pdf,
+                st.session_state.validated_image,
+                None
             )
 
-            # ==================================================
-            # 3) MERGE DATI VALIDATI
-            # ==================================================
-            if tipo == "mobile":
-                services.merge_data_with_ecolabel(
-                    passport,
-                    pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
-                    image_data=st.session_state.validated_image,
-                    cert_data=None,
-                    client=client
+        # ==================================================
+        # 4) IMMAGINI
+        # ==================================================
+        for b in (st.session_state.uploaded_images_bytes or []):
+            services.add_product_image(passport, BytesIO(b))
+
+        # ==================================================
+        # 5) CERTIFICATI + EVIDENZE
+        # ==================================================
+        if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
+            for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
+                parsed = (
+                    st.session_state.validated_cert[i]
+                    if i < len(st.session_state.validated_cert)
+                    else {}
                 )
-            else:
-                services.merge_data(
-                    passport,
-                    st.session_state.validated_pdf,
-                    st.session_state.validated_image,
-                    None
+                fname = (
+                    st.session_state.uploaded_cert_names[i]
+                    if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
+                    else f"cert_{i+1}"
                 )
 
-            # ==================================================
-            # 4) IMMAGINI
-            # ==================================================
-            for b in (st.session_state.uploaded_images_bytes or []):
-                services.add_product_image(passport, BytesIO(b))
+                services.add_certificate_evidence(
+                    passport,
+                    cert_parsed=parsed,
+                    raw_bytes=raw,
+                    filename=fname,
+                    source="uploaded_certificate"
+                )
 
-            # ==================================================
-            # 5) CERTIFICATI + EVIDENZE
-            # ==================================================
-            if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
-                for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
-                    parsed = (
-                        st.session_state.validated_cert[i]
-                        if i < len(st.session_state.validated_cert)
-                        else {}
-                    )
-                    fname = (
-                        st.session_state.uploaded_cert_names[i]
-                        if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
-                        else f"cert_{i+1}"
-                    )
+        # ==================================================
+        # 6) VALIDAZIONE ESPR (BLOCCANTE)
+        # ==================================================
+        check = services.validate_espr_furniture(passport)
 
-                    services.add_certificate_evidence(
-                        passport,
-                        cert_parsed=parsed,
-                        raw_bytes=raw,
-                        filename=fname,
-                        source="uploaded_certificate"
-                    )
+        if check.get("warnings"):
+            st.warning("⚠️ Warning di qualità dati")
+            for w in check["warnings"]:
+                st.write(f"- {w}")
 
-            # ==================================================
-            # 6) VALIDAZIONE ESPR (BLOCCANTE)
-            # ==================================================
-            check = services.validate_espr_furniture(passport)
+        if not check.get("is_compliant", False):
+            st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
+            if check.get("missing_fields"):
+                st.write("### Campi mancanti")
+                for f in check["missing_fields"]:
+                    st.write(f"- {f}")
+            if check.get("missing_blocks"):
+                st.write("### Blocchi mancanti")
+                for b in check["missing_blocks"]:
+                    st.write(f"- {b}")
+            st.stop()
 
-            if check.get("warnings"):
-                st.warning("⚠️ Warning di qualità dati")
-                for w in check["warnings"]:
-                    st.write(f"- {w}")
+        # ==================================================
+        # 7) FINALIZZAZIONE ESPR
+        # ==================================================
+        services.espr_stamp(
+            passport,
+            actor="manufacturer",
+            action="finalize",
+            reason="Final publication (ESPR compliant)"
+        )
 
-            if not check.get("is_compliant", False):
-                st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
-                if check.get("missing_fields"):
-                    st.write("### Campi mancanti")
-                    for f in check["missing_fields"]:
-                        st.write(f"- {f}")
-                if check.get("missing_blocks"):
-                    st.write("### Blocchi mancanti")
-                    for b in check["missing_blocks"]:
-                        st.write(f"- {b}")
-                st.stop()
+        # ==================================================
+        # 8) QeSeal (opzionale, NON bloccante)
+        # ==================================================
+        qeseal_ok = False
+        if ENABLE_QESEAL:
+            with st.spinner("Applico QeSeal..."):
+                try:
+                    services.seal_passport_pdf_qeseal_openapi(passport)
+                    qeseal_ok = True
+                except Exception as e:
+                    st.warning(f"⚠️ QeSeal non applicato: {e}")
 
-            # ==================================================
-            # 7) FINALIZZAZIONE ESPR
-            # ==================================================
-            services.espr_stamp(
-                passport,
-                actor="manufacturer",
-                action="finalize",
-                reason="Final publication (ESPR compliant)"
-            )
-
-            # ==================================================
-            # ✅ 8) GENERAZIONE PDF DPP FINALE (UNA SOLA VOLTA)
-            # ==================================================
-            final_pdf_path = services.generate_final_dpp_pdf(passport)
-            st.session_state["final_pdf_path"] = final_pdf_path
-
-            # ==================================================
-            # 9) QeSeal (opzionale, NON bloccante)
-            # ==================================================
-            qeseal_ok = False
-            if ENABLE_QESEAL:
-                with st.spinner("Applico QeSeal..."):
-                    try:
-                        services.seal_passport_pdf_qeseal_openapi(passport)
-                        qeseal_ok = True
-                    except Exception as e:
-                        st.warning(f"⚠️ QeSeal non applicato: {e}")
-
-            # ==================================================
-            # 10) SALVATAGGI (JSON / Excel – NO PDF)
-            # ==================================================
-            services.save_passport_to_file(passport)
-            services.save_passport_to_excel_append(passport)
-            st.session_state["published_passport"] = passport
+        # ==================================================
+        # 9) SALVATAGGI
+        # ==================================================
+        services.save_passport_to_file(passport)
+        services.save_passport_to_excel_append(passport)
+        st.session_state['published_passport'] = passport
 
         if qeseal_ok:
             st.success("✅ DPP pubblicato e sigillato (QeSeal)")
         else:
-            st.success("✅ DPP pubblicato (PDF finale congelato)")
-
-        st.code(final_pdf_path)
+            st.success("✅ DPP pubblicato (senza QeSeal)")
 
     # ==================================================
-    # 11) OUTPUT PUBBLICO
+    # 10) OUTPUT PUBBLICO
     # ==================================================
     pp = st.session_state.get("published_passport")
     if pp:
@@ -399,53 +387,91 @@ with tabs[2]:
         st.image(qr_img, caption="QR DPP")
 
     # ==================================================
-    # 12) FIRMA ELETTRONICA SEMPLICE (SES/FES)
+    # 11) FIRMA ELETTRONICA SEMPLICE (SES/FES) – DEMO / TEST
     # ==================================================
     if ENABLE_SES:
         st.divider()
         st.subheader("✍️ Firma elettronica semplice (OTP)")
 
-        if not pp or not st.session_state.get("final_pdf_path"):
+        if not pp:
             st.info("Pubblica prima il DPP per poter avviare la firma.")
             st.stop()
 
-        # Stato iniziale
+        # ✅ inizializza stato UNA SOLA VOLTA
         st.session_state.setdefault("ses_name", "Nuvia")
         st.session_state.setdefault("ses_surname", "srls")
         st.session_state.setdefault("ses_email", "informazioni.nuvia@gmail.com")
         st.session_state.setdefault("ses_mobile", "+393296482656")
+        st.session_state.setdefault("ses_channel", "email")
+        st.session_state.setdefault("ses_mode", "typed")
+        st.session_state.setdefault("ses_allow_edit", False)
 
+        # ✅ FORM (evita rerun fastidiosi)
         with st.form("ses_form", clear_on_submit=False):
             col1, col2 = st.columns(2)
 
             with col1:
-                st.text_input("Nome firmatario", key="ses_name")
+                st.text_input("Nome firmatario (persona fisica)", key="ses_name")
                 st.text_input("Cognome firmatario", key="ses_surname")
                 st.text_input("Email OTP", key="ses_email")
 
             with col2:
                 st.text_input("Cellulare OTP", key="ses_mobile")
+                st.selectbox("Canale OTP", ["email", "sms"], key="ses_channel")
+                st.selectbox("Modalità firma", ["typed", "drawn"], key="ses_mode")
+
+            st.checkbox(
+                "Consenti al firmatario di modificare nome/email/cellulare",
+                key="ses_allow_edit"
+            )
 
             submit_ses = st.form_submit_button("Invia richiesta firma SES")
 
+        # ✅ CHIAMATA SES SOLO AL SUBMIT
         if submit_ses:
-            with st.spinner("Invio richiesta firma SES..."):
-                services.sign_passport_pdf_ses_openapi(
-                    pdf_path=st.session_state["final_pdf_path"],
-                    signer_name=st.session_state["ses_name"],
-                    signer_surname=st.session_state["ses_surname"],
-                    signer_email=st.session_state["ses_email"],
-                    signer_mobile=st.session_state["ses_mobile"]
-                )
-                st.success("✅ Richiesta firma SES inviata")
+            with st.spinner("Invio richiesta di firma SES..."):
+                try:
+                    services.sign_passport_pdf_ses_openapi(
+                        pp,
+                        signer_name=st.session_state["ses_name"],
+                        signer_surname=st.session_state["ses_surname"],
+                        signer_email=st.session_state["ses_email"],
+                        signer_mobile=st.session_state["ses_mobile"]
+                    )
+
+                    services.espr_stamp(
+                        pp,
+                        actor="manufacturer",
+                        action="request_ses_signature",
+                        reason="Requested SES (OTP) signature for demo/test"
+                    )
+
+                    services.save_passport_to_file(pp)
+                    services.save_passport_to_excel_append(pp)
+
+                    st.session_state["published_passport"] = pp
+
+                    st.success("✅ Richiesta SES inviata")
+                except Exception as e:
+                    st.error(f"❌ Errore SES: {e}")
+                    st.stop()
+
+        # ✅ MOSTRA LINK DI FIRMA (se presenti)
+        signing_urls = (pp.get("simple_signature") or {}).get("signing_urls") or []
+        signing_urls = [u for u in signing_urls if u]
+
+        if signing_urls:
+            st.markdown("### 🔗 Link firma")
+            for u in signing_urls:
+                st.write(u)
+        elif pp.get("simple_signature"):
+            with st.expander("Debug risposta SES"):
+                st.json(pp["simple_signature"].get("raw_response", {}))
 
         # ==================================================
-        # 13) QR SCARICABILE SOLO SE PDF FIRMATO
+        # 12) QR CODE SCARICABILE SOLO DOPO FIRMA SES
         # ==================================================
-        ses_signed = services.verify_pdf_has_signature(
-            st.session_state["final_pdf_path"]
-        )
-
+        ses_signed = pp.get("simple_signature", {}).get("status") == "signed"
         if ses_signed:
             import io
             buf = io.BytesIO()
@@ -455,7 +481,7 @@ with tabs[2]:
             st.download_button(
                 label="📥 Scarica QR code firmato",
                 data=buf,
-                file_name=f"{pp.get('id')}_qr_signed.png",
+                file_name=f"{pp.get('id', 'passport')}_qr_signed.png",
                 mime="image/png"
             )
         else:
