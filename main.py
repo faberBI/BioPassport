@@ -136,7 +136,7 @@ with tabs[0]:
 # TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
-        if st.session_state.pdf_data and st.session_state.image_data:
+    if st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione PDF")
         st.session_state.validated_pdf = {
             k: {
@@ -165,7 +165,7 @@ with tabs[1]:
 # TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
-        if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
+    if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
