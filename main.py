@@ -462,34 +462,51 @@ with tabs[2]:
         # --------------------------------------------------
         # 🔄 AGGIORNA STATO FIRMA SES
         # --------------------------------------------------
-        if pp.get("simple_signature"):
-            req_id = pp["simple_signature"].get("request_id")
-            pdf_b64 = pp["simple_signature"].get("pdf_base64")
-            signers = pp["simple_signature"].get("signers")
-            sig_mode = pp["simple_signature"].get("signature_mode", ["typed"])
+        ss = pp.get("simple_signature", {})
         
-            if req_id and pdf_b64 and signers:
-                if st.button("🔄 Aggiorna stato firma"):
-                    try:
-                        status_resp = services.openapi_eu_ses_status(
-                            bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
-                            request_id=req_id,
-                            original_signers=signers,
-                            original_pdf_base64=pdf_b64,
-                            signature_mode=sig_mode
-                        )
+        req_id = ss.get("request_id")
+        pdf_b64 = ss.get("pdf_base64")
+        signers = ss.get("signers")
+        sig_mode = ss.get("signature_mode", ["typed"])
         
-                        new_state = status_resp["data"]["state"]
-                        pp["simple_signature"]["status"] = new_state
-                        pp["simple_signature"]["raw_status"] = status_resp
+        if req_id and pdf_b64 and signers:
+            if st.button("🔄 Aggiorna stato firma"):
+                try:
+                    status_resp = services.openapi_eu_ses_status(
+                        bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
+                        request_id=req_id,
+                        original_signers=signers,
+                        original_pdf_base64=pdf_b64,
+                        signature_mode=sig_mode
+                    )
         
-                        services.save_passport_to_file(pp)
-                        st.session_state["published_passport"] = pp
+                    new_state = status_resp["data"]["state"]
+                    pp["simple_signature"]["status"] = new_state
+                    pp["simple_signature"]["raw_status"] = status_resp
         
-                        st.success(f"Stato aggiornato: {new_state}")
+                    services.save_passport_to_file(pp)
+                    st.session_state["published_passport"] = pp
         
-                    except Exception as e:
-                        st.error(f"Errore aggiornamento stato: {e}")
+                    st.success(f"Stato aggiornato: {new_state}")
+        
+                except Exception as e:
+                    st.error(f"Errore aggiornamento stato: {e}")
+        
+        # --------------------------------------------------
+        # ⏳ FORZA COMPLETAMENTO FIRMA DOPO 15 SECONDI
+        # --------------------------------------------------
+        if pp.get("simple_signature", {}).get("status") != "signed":
+            if st.button("⏳ Forza completamento firma (15s)"):
+                with st.spinner("Attendo 15 secondi per completare la firma..."):
+                    import time
+                    time.sleep(15)
+        
+                pp["simple_signature"]["status"] = "signed"
+                services.save_passport_to_file(pp)
+                st.session_state["published_passport"] = pp
+        
+                st.success("Firma forzata come COMPLETATA ✔")
+
 
         # --------------------------------------------------
         # 12) QR CODE SCARICABILE SOLO DOPO FIRMA SES
