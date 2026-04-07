@@ -460,44 +460,26 @@ with tabs[2]:
                 st.json(pp["simple_signature"].get("raw_response", {}))
 
         # --------------------------------------------------
-        # 📥 SCARICA SEMPRE IL QR CODE (robusto)
+        # 📥 SCARICA SEMPRE IL QR CODE (generato localmente)
         # --------------------------------------------------
+        import qrcode
         import io
-        import base64
         from PIL import Image
-        import numpy as np
         
+        # URL del passport
         url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
         
-        qr_img = services.generate_qr_from_url(url)
+        # Genera QR localmente
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
         
-        # --- NORMALIZZAZIONE QR ---
-        def normalize_qr(qr):
-            # Caso 1: già PIL
-            if isinstance(qr, Image.Image):
-                return qr
-        
-            # Caso 2: bytes
-            if isinstance(qr, (bytes, bytearray)):
-                return Image.open(io.BytesIO(qr))
-        
-            # Caso 3: base64 string
-            if isinstance(qr, str):
-                try:
-                    raw = base64.b64decode(qr)
-                    return Image.open(io.BytesIO(raw))
-                except Exception:
-                    pass
-                
-            # Caso 4: numpy array
-            if isinstance(qr, np.ndarray):
-                return Image.fromarray(qr)
-        
-            # Caso 5: fallback → errore leggibile
-            raise TypeError(f"Formato QR non gestito: {type(qr)}")
-        
-        # Normalizza
-        qr_img = normalize_qr(qr_img)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         
         # Buffer per download
         buf = io.BytesIO()
@@ -511,6 +493,7 @@ with tabs[2]:
             file_name=f"{pp.get('id', 'passport')}_qr.png",
             mime="image/png"
         )
+        
 
 # ======================================================
 # TAB 4 — ARCHIVIO
