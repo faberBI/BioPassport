@@ -233,7 +233,8 @@ with tabs[1]:
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabsif not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
+with tabs[2]:
+    if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
