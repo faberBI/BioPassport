@@ -387,17 +387,16 @@ with tabs[2]:
         # ==================================================
         qr = services.generate_qr_from_url(url)
 
-        st.image(qr, caption="QR Code pubblico del Digital Product Passport")
+        st.image(qr, caption="Nuvia QR Code")
 
         # ✅ RESET del buffer (fondamentale)
         qr.seek(0)
 
         st.download_button(
-        label="⬇️ Scarica QR Code (PNG)",
+        label="⬇️ Scarica QR Code",
         data=qr,
         file_name=f"{passport['id']}_qrcode.png",
-        mime="image/png"
-        )
+        mime="image/png")
 
        # ==================================================
     # 11) FIRMA ELETTRONICA SEMPLICE (SES/FES) – DEMO / TEST
