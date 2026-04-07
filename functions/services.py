@@ -1608,80 +1608,45 @@ def sign_passport_pdf_ses_openapi(
     signer_name: str,
     signer_surname: str,
     signer_email: str,
-    signer_mobile: str,
-    otp_channel: str = "email",
-    signature_mode: str = "typed",
-    page: int = 1,
-    x: str = "300",
-    y: str = "100",
-    callback_url: str = "",
-    allow_user_edit: bool = False
+    signer_mobile: str
 ) -> dict:
-    """
-    Genera PDF del DPP e avvia firma SES/OTP (produzione se secrets corretti).
-    """
-    # 1) token OAuth
-    scope = _scope_for_eu_ses()
-    tok = openapi_create_token(scopes=[scope], ttl_seconds=3600)
-    bearer_token = _bearer(tok)
 
-    # 2) genera PDF -> bytes -> base64
+    import streamlit as st
+    import base64
+
+    # ✅ 1) Usa il bearer PROD
+    bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
+
+    # ✅ 2) Genera PDF
     pdf_bytes = generate_passport_pdf(passport)
-    if hasattr(pdf_bytes, "getvalue"):
-        pdf_bytes = pdf_bytes.getvalue()
+
+    # ✅ 3) Base64 PURO (come playground)
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-    # 3) payload firmatari
+    # ✅ 4) Signers
     signers = [
         {
             "name": signer_name,
             "surname": signer_surname,
             "email": signer_email,
             "mobile": signer_mobile,
-            "authentication": [otp_channel],
-            "signatures": [{"page": page, "x": x, "y": y, "name": "Firma"}]
+            "authentication": "sms"
         }
     ]
 
-    user_editable_data = None
-    if allow_user_edit:
-        user_editable_data = {"name": "true", "mobile": "true", "email": "true"}
-
-    # 4) richiesta SES
+    # ✅ 5) Chiamata IDENTICA al playground
     resp = openapi_eu_ses_request(
         bearer_token=bearer_token,
-        input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
+        pdf_base64=pdf_b64,
         signers=signers,
-        signature_mode=[signature_mode],
-        callback_url=callback_url or None,
-        user_editable_data=user_editable_data
+        signature_mode=["typed"]
     )
 
-    # 5) salva sul passport
+    # ✅ 6) Log nel passport
     passport["simple_signature"] = {
         "provider": "OpenAPI",
-        "service": "EU-SES",
-        "requested_at": _utc_now_iso(),
-        "signer": {
-            "name": signer_name,
-            "surname": signer_surname,
-            "email": signer_email,
-            "mobile": signer_mobile,
-            "otp_channel": otp_channel,
-            "signature_mode": signature_mode
-        },
+        "type": "EU-SES",
         "raw_response": resp
     }
 
-    # 6) estrai link di firma (best effort)
-    try:
-        data = resp.get("data", resp)
-        if isinstance(data, dict) and "signers" in data and data["signers"]:
-            passport["simple_signature"]["signing_urls"] = [
-                s.get("url") or s.get("signingUrl") or s.get("link")
-                for s in data["signers"] if isinstance(s, dict)
-            ]
-    except Exception:
-        pass
-
-    return passport["simple_signature"]
+    return resp
