@@ -22,6 +22,9 @@ import streamlit as st
 import base64
 
 def generate_pdf_from_url(url: str) -> bytes:
+    import streamlit as st
+    import requests
+
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
 
     endpoint = "https://pdf.openapi.it/base"
@@ -31,7 +34,10 @@ def generate_pdf_from_url(url: str) -> bytes:
         "format": "A4",
         "margin": "20px",
         "printBackground": True,
-        "waitFor": 2000
+        "fullPage": True,
+        "scrollPage": True,
+        "pageRanges": "1-",
+        "waitFor": 3000
     }
 
     headers = {
@@ -40,11 +46,10 @@ def generate_pdf_from_url(url: str) -> bytes:
     }
 
     resp = requests.post(endpoint, json=payload, headers=headers)
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"PDF generation failed: {resp.text}")
+    resp.raise_for_status()
 
     return resp.content
+
 
 
 
