@@ -168,8 +168,8 @@ def get_default_issuer():
 
         # opzionale ma molto apprezzato
         "contact": {
-            "email": os.getenv("ISSUER_EMAIL", "compliance@nuvia.eu"),
-            "website": os.getenv("ISSUER_WEBSITE", "https://nuvia.eu")
+            "email": os.getenv("ISSUER_EMAIL", "informazioni.nuvia@gmail.com"),
+            "website": os.getenv("ISSUER_WEBSITE", "https://nuviadpp.com")
         }
     }
 
