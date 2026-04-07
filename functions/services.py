@@ -135,8 +135,8 @@ def get_default_issuer():
 
         # opzionale ma molto apprezzato
         "contact": {
-            "email": os.getenv("ISSUER_EMAIL", "informazioni.nuvia@gmail.com"),
-            "website": os.getenv("ISSUER_WEBSITE", "https://nuviadpp.com")
+            "email": os.getenv("ISSUER_EMAIL", "compliance@nuvia.eu"),
+            "website": os.getenv("ISSUER_WEBSITE", "https://nuvia.eu")
         }
     }
 
@@ -880,128 +880,103 @@ def add_product_image(passport: dict, img_file, caption: str = ""):
         raise RuntimeError(f"Errore aggiungendo immagine: {e}")
 
 
-def render_espr_compliance(passport, st=None):(f"- ❌ {f}")
-
-    # ==================================================
-    # 5) CAMPI DEL PASSPORT (IL PEZZO CHIAVE)
-    # ==================================================
-    st.markdown("### 🧾 Campi del Digital Product Passport")
-
-    sections = passport.get("sections", {})
-    if not sections:
-        st.warning("Nessuna sezione presente nel passport")
-        return
-
-    for section_name, fields in sections.items():
-        st.markdown(f"#### 📁 Sezione: {section_name}")
-
-        for field_name, data in fields.items():
-            value = str(data.get("value", "")).strip()
-            confidence = float(data.get("confidence", 0) or 0)
-            explanation = data.get("explanation", "")
-            mandatory = data.get("mandatory", False)
-            priority = data.get("priority", "optional")
-
-            # ---------- CASI ----------
-            if mandatory and not value:
-                st.error(f"❌ **{field_name}** · OBBLIGATORIO → **MANCANTE**")
-            elif mandatory:
-                st.success(f"✅ **{field_name}** · OBBLIGATORIO")
-            elif priority == "strongly_recommended":
-                st.warning(f"⚠️ **{field_name}** · Raccomandato")
-            else:
-                st.info(f"ℹ️ **{field_name}** · Opzionale")
-
-            # dettagli campo
-            cols = st.columns([2, 1])
-            with cols[0]:
-                if value:
-                    st.write(f"**Valore:** {value}")
-                else:
-                    st.write("**Valore:** —")
-
-                if explanation:
-                    st.caption(f"Fonte: {explanation}")
-
-            with cols[1]:
-                st.write(f"**Confidenza:** {round(confidence, 2)}")
-
-        st.divider()
-``
+# ======================================================
+# COMPLIANCE RENDER
+# ======================================================
+def render_espr_compliance(passport, st=None):
     """
-    Render completo della compliance ESPR in Streamlit.
-    Mostra:
-    - issuer
-    - lifecycle
-    - physical binding
-    - esito validazione
-    - TUTTI i campi con evidenza mandatory / optional / mancanti
+    Mostra un riepilogo completo della compliance UE e della sostenibilità.
     """
     if st is None:
         import streamlit as st
 
-    st.subheader("📋 ESPR – Digital Product Passport Compliance")
+    st.subheader("🇪🇺 Compliance e Sostenibilità UE")
+    pdf_section = passport.get("sections", {}).get("PDF", {})
+    ecolabel_section = passport.get("sections", {}).get("Ecolabel_UE", {})
 
-    # ==================================================
-    # 1) ISSUER
-    # ==================================================
-    st.markdown("### 🏭 Issuer (Responsabile del prodotto)")
-    issuer = passport.get("issuer", {})
+    reach_status = ecolabel_section.get("svhc_limitati", False)
+    ecodesign_status = ecolabel_section.get("produzione_basso_impatto", False)
+    gdpr_status = pdf_section.get("Produttore", {}).get("value") is not None
 
-    if issuer:
-        for k, v in issuer.items():
-            st.write(f"**{k}**: {v}")
-    else:
-        st.error("❌ Issuer mancante (bloccante ESPR)")
+    compliance_list = [
+        ("REACH / sostanze pericolose", reach_status),
+        ("Ecodesign / direttive UE", ecodesign_status),
+        ("GDPR", gdpr_status)
+    ]
+    st.markdown("### Normativa e Privacy")
+    for field, status in compliance_list:
+        st.write(f"{'✅' if status else '⚠️'} {field}")
 
-    # ==================================================
-    # 2) PHYSICAL BINDING
-    # ==================================================
-    st.markdown("### 🔗 Physical Binding (legame fisico-digitale)")
-    binding = passport.get("physical_binding", {})
+    st.markdown("### Materiali, Produzione e Riciclo")
+    materiali = pdf_section.get("Materiali/componenti utilizzati", {}).get("value", "non specificato")
+    peso = pdf_section.get("Peso", {}).get("value", "non specificato")
+    dimensioni = pdf_section.get("Dimensioni", {}).get("value", "non specificato")
+    energia = pdf_section.get("Energia", {}).get("value", "non specificato")
+    luogo = pdf_section.get("Luogo di Produzione", {}).get("value", "non specificato")
+    riciclo = ecolabel_section.get("facilmente_smortabile", False)
+    basso_impatto = ecolabel_section.get("produzione_basso_impatto", False)
 
-    if binding:
-        for k, v in binding.items():
-            st.write(f"**{k}**: {v}")
-    else:
-        st.error("❌ Physical binding mancante (bloccante ESPR)")
+    st.write(f"**Materiali/componenti:** {materiali}")
+    st.write(f"**Peso:** {peso}")
+    st.write(f"**Dimensioni:** {dimensioni}")
+    st.write(f"**Energia consumata:** {energia}")
+    st.write(f"**Catena di fornitura / Luogo produzione:** {luogo}")
+    st.write(f"**Facilità di smaltimento / riciclo:** {'✅' if riciclo else '⚠️'}")
+    st.write(f"**Indicatori di basso impatto produzione:** {'✅' if basso_impatto else '⚠️'}")
 
-    # ==================================================
-    # 3) LIFECYCLE
-    # ==================================================
-    st.markdown("### ♻️ Lifecycle")
-    lifecycle = passport.get("lifecycle", {})
+    st.markdown("### Prezzo e Produzione")
+    prezzo = pdf_section.get("Prezzo in euro", {}).get("value", "non specificato")
+    data_prod = pdf_section.get("Data di produzione", {}).get("value", "non specificato")
+    st.write(f"**Prezzo:** {prezzo} €")
+    st.write(f"**Data di produzione:** {data_prod}")
 
-    st.write(f"**Stato attuale**: {lifecycle.get('status', '—')}")
+    st.markdown("### Sicurezza e Versioning")
+    st.write(f"**Crittografia dati sensibili:** {'✅' if passport.get('digital_signature') else '⚠️'}")
+    st.write(f"**Log modifiche / versioning:** {'✅' if passport.get('version') else '⚠️'}")
 
-    events = lifecycle.get("events", [])
-    if events:
-        with st.expander("Eventi lifecycle"):
-            for ev in events:
-                st.write(f"- **{ev.get('event')}** @ {ev.get('timestamp')}")
-    else:
-        st.caption("Nessun evento lifecycle registrato")
+    if passport.get("certificates"):
+        st.markdown("### Certificazioni")
+        for i, cert in enumerate(passport["certificates"],1):
+            tipo = cert.get("tipo_certificato", {}).get("value","non disponibile")
 
-    # ==================================================
-    # 4) VALIDAZIONE ESPR (RISULTATO)
-    # ==================================================
-    st.markdown("### ✅ Esito validazione ESPR")
-    check = validate_espr_furniture(passport)
+# ====================================================== v in header:
+        c.drawString(40, y, f"{k}: {v}")
+        y -= 14
 
-    if check["is_compliant"]:
-        st.success("✅ DPP conforme ai requisiti ESPR (ESSENTIAL)")
-    else:
-        st.error("❌ DPP NON conforme ai requisiti ESPR")
+    y -= 10
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y, "Sezioni")
+    y -= 18
+    c.setFont("Helvetica", 9)
 
-    if check.get("missing_blocks"):
-        st.markdown("**Blocchi obbligatori mancanti:**")
-        for b in check["missing_blocks"]:
-            st.write(f"- ❌ {b}")
+    for sec_name, sec in (passport.get("sections") or {}).items():
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(40, y, f"[{sec_name}]")
+        y -= 14
+        c.setFont("Helvetica", 9)
 
-    if check.get("missing_fields"):
-        st.markdown("**Campi obbligatori mancanti:**")
-        for f in check["missing_fields"]:
+        if isinstance(sec, dict):
+            for fname, f in sec.items():
+                val = f.get("value", "") if isinstance(f, dict) else f
+                line = f"{fname}: {val}"
+                for chunk in [line[i:i+110] for i in range(0, len(line), 110)]:
+                    c.drawString(50, y, chunk)
+                    y -= 12
+                    if y < 50:
+                        c.showPage()
+                        y = h - 40
+                        c.setFont("Helvetica", 9)
 
+        y -= 8
+        if y < 50:
+            c.showPage()
+            y = h - 40
+            c.setFont("Helvetica", 9)
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 # ---------- FUNZIONE PRINCIPALE: quella che chiami dal main ----------
 def sign_passport_pdf_qes_openapi(passport: dict, attach_signed_pdf: bool = True) -> dict:
