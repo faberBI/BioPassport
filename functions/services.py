@@ -1597,13 +1597,15 @@ def sign_passport_pdf_ses_openapi(
     signer_name: str,
     signer_surname: str,
     signer_email: str,
-    signer_mobile: str
+    signer_mobile: str,
+    otp_channel: str = "email",   # "email" oppure "sms"
+    signature_mode: str = "typed" # "typed" oppure "drawn"
 ) -> dict:
     """
-    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
+    Avvia una firma elettronica semplice (EU-SES) sul PDF del DPP.
 
-    - Usa Bearer PROD (identico al playground)
-    - inputDocuments = base64 puro
+    - Firma il PDF reale generato da generate_passport_pdf()
+    - Usa Bearer PROD da Streamlit secrets
     - Aggiorna passport["simple_signature"] in modo coerente con TAB 3
     """
 
@@ -1611,7 +1613,7 @@ def sign_passport_pdf_ses_openapi(
     import base64
 
     # --------------------------------------------------
-    # 1) Bearer token (PROD – già autorizzato EU-SES)
+    # 1) Bearer token (PROD)
     # --------------------------------------------------
     try:
         bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
@@ -1619,40 +1621,41 @@ def sign_passport_pdf_ses_openapi(
         raise RuntimeError("Missing OPENAPI_BEARER_PROD in Streamlit secrets")
 
     # --------------------------------------------------
-    # 2) Genera PDF del passport
+    # 2) Genera PDF del passport (PDF REALE)
     # --------------------------------------------------
     pdf_bytes = generate_passport_pdf(passport)
+
     if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
         raise RuntimeError("generate_passport_pdf() did not return valid PDF bytes")
 
     # --------------------------------------------------
-    # 3) Base64 PURO (NO header data:...)
+    # 3) Base64 puro
     # --------------------------------------------------
     pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
     # --------------------------------------------------
-    # 4) Definizione firmatario (SES / OTP)
+    # 4) Definizione firmatario
     # --------------------------------------------------
     signers = [{
         "name": signer_name,
         "surname": signer_surname,
         "email": signer_email,
         "mobile": signer_mobile,
-        "authentication": "sms"
+        "authentication": otp_channel  # email oppure sms
     }]
 
     # --------------------------------------------------
-    # 5) Chiamata EU-SES
+    # 5) Chiamata EU‑SES
     # --------------------------------------------------
     resp = openapi_eu_ses_request(
         bearer_token=bearer_token,
         pdf_base64=pdf_base64,
         signers=signers,
-        signature_mode=["typed"]
+        signature_mode=[signature_mode]  # typed/drawn
     )
 
     # --------------------------------------------------
-    # 6) Validazione risposta minima
+    # 6) Validazione risposta
     # --------------------------------------------------
     if not isinstance(resp, dict) or "data" not in resp:
         raise RuntimeError(f"Unexpected EU-SES response: {resp}")
@@ -1663,7 +1666,7 @@ def sign_passport_pdf_ses_openapi(
         raise RuntimeError(f"Incomplete EU-SES response data: {data}")
 
     # --------------------------------------------------
-    # 7) Estrazione link di firma (OTP)
+    # 7) Estrazione link OTP
     # --------------------------------------------------
     signing_urls = []
     for s in data.get("signers", []):
@@ -1672,17 +1675,41 @@ def sign_passport_pdf_ses_openapi(
             signing_urls.append(url)
 
     # --------------------------------------------------
-    # 8) Scrittura STRUCTURED nel passport
+    # 8) Scrittura nel passport (STRUTTURATA)
     # --------------------------------------------------
     passport["simple_signature"] = {
         "provider": "OpenAPI",
         "type": "EU-SES",
-        "request_id": data["id"],             # es. 69d4f8d7...
-        "status": data["state"],               # WAIT_VALIDATION / SIGNED
-        "signing_urls": signing_urls,           # link OTP
+        "request_id": data["id"],
+        "status": data["state"],          # WAIT_VALIDATION / SIGNED
+        "signing_urls": signing_urls,
         "created_at": data.get("createdAt"),
-        "raw_response": resp                    # debug / audit
+        "raw_response": resp
     }
 
-    return resp
+    return passport
 
+
+def generate_passport_pdf(passport: dict) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "Digital Product Passport")
+
+    c.setFont("Helvetica", 12)
+    y = 770
+
+    for k, v in passport.items():
+        if isinstance(v, dict):
+            c.drawString(50, y, f"{k}: {json.dumps(v, ensure_ascii=False)[:80]}")
+        else:
+            c.drawString(50, y, f"{k}: {v}")
+        y -= 20
+        if y < 50:
+            c.showPage()
+            y = 800
+
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
