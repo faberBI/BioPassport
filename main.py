@@ -464,13 +464,19 @@ with tabs[2]:
         # --------------------------------------------------
         if pp.get("simple_signature"):
             req_id = pp["simple_signature"].get("request_id")
+            pdf_b64 = pp["simple_signature"].get("pdf_base64")
+            signers = pp["simple_signature"].get("signers")
+            sig_mode = pp["simple_signature"].get("signature_mode", ["typed"])
         
-            if req_id:
+            if req_id and pdf_b64 and signers:
                 if st.button("🔄 Aggiorna stato firma"):
                     try:
                         status_resp = services.openapi_eu_ses_status(
+                            bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
                             request_id=req_id,
-                            bearer_token=st.secrets["OPENAPI_BEARER_PROD"]
+                            original_signers=signers,
+                            original_pdf_base64=pdf_b64,
+                            signature_mode=sig_mode
                         )
         
                         new_state = status_resp["data"]["state"]
@@ -484,6 +490,7 @@ with tabs[2]:
         
                     except Exception as e:
                         st.error(f"Errore aggiornamento stato: {e}")
+
         # --------------------------------------------------
         # 12) QR CODE SCARICABILE SOLO DOPO FIRMA SES
         # --------------------------------------------------
