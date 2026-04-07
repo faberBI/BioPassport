@@ -381,6 +381,23 @@ with tabs[2]:
         # ==================================================
         st.code(url)
         st.image(services.generate_qr_from_url(url))
+        
+        # ==================================================
+        # QR CODE + DOWNLOAD
+        # ==================================================
+        qr = services.generate_qr_from_url(url)
+
+        st.image(qr, caption="QR Code pubblico del Digital Product Passport")
+
+        # ✅ RESET del buffer (fondamentale)
+        qr.seek(0)
+
+        st.download_button(
+        label="⬇️ Scarica QR Code (PNG)",
+        data=qr,
+        file_name=f"{passport['id']}_qrcode.png",
+        mime="image/png"
+        )
 
        # ==================================================
     # 11) FIRMA ELETTRONICA SEMPLICE (SES/FES) – DEMO / TEST
