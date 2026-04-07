@@ -1268,11 +1268,14 @@ def openapi_qes_eseal_sign(bearer_token: str, input_documents: list, signature_t
 
 
 def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False) -> dict:
-    # 1) token OAuth (scopes coerenti col tuo setup)
-    tok = openapi_create_token(scopes=["POST:test.esignature.openapi.com/EU-QES_eseal"], ttl_seconds=3600)
+    """
+    Applica QeSeal (EU-QES) al PDF del passport.
+    """
+    # 1) token OAuth (scope produzione)
+    tok = openapi_create_token(scopes=["POST:esignature.openapi.com/EU-QES_eseal"], ttl_seconds=3600)
     bearer_token = _bearer(tok)
 
-    # 2) pdf -> bytes -> base64
+    # 2) genera PDF -> bytes -> base64
     pdf_bytes = generate_passport_pdf(passport)
     if hasattr(pdf_bytes, "getvalue"):
         pdf_bytes = pdf_bytes.getvalue()
@@ -1301,7 +1304,6 @@ def seal_passport_pdf_qeseal_openapi(passport: dict, attach_signed: bool = False
     }
 
     # 4) opzionale: download documento sigillato (se vuoi)
-    # NB: il server sandbox eSignature è test.esignature.openapi.com 
     # if attach_signed and passport["qualified_seal"].get("seal_id"):
     #     signed_bytes = openapi_get_signed_document(bearer_token, passport["qualified_seal"]["seal_id"])
     #     passport["sealed_document"] = base64.b64encode(signed_bytes).decode("utf-8")
@@ -1607,8 +1609,8 @@ def sign_passport_pdf_ses_openapi(
     signer_surname: str,
     signer_email: str,
     signer_mobile: str,
-    otp_channel: str = "email",          # "email" o "sms"
-    signature_mode: str = "typed",       # "typed" o "drawn"
+    otp_channel: str = "email",
+    signature_mode: str = "typed",
     page: int = 1,
     x: str = "300",
     y: str = "100",
@@ -1616,26 +1618,20 @@ def sign_passport_pdf_ses_openapi(
     allow_user_edit: bool = False
 ) -> dict:
     """
-    Genera un PDF del DPP e avvia una firma FES/SES (OTP) con POST /EU-SES.
-    Salva i metadati in passport["simple_signature"].
-
-    NOTA: NON è QeSeal e NON è firma qualificata.
+    Genera PDF del DPP e avvia firma SES/OTP (produzione se secrets corretti).
     """
-    # 1) token OAuth per scope EU-SES
+    # 1) token OAuth
     scope = _scope_for_eu_ses()
     tok = openapi_create_token(scopes=[scope], ttl_seconds=3600)
     bearer_token = _bearer(tok)
 
-    # 2) genera PDF
+    # 2) genera PDF -> bytes -> base64
     pdf_bytes = generate_passport_pdf(passport)
     if hasattr(pdf_bytes, "getvalue"):
         pdf_bytes = pdf_bytes.getvalue()
-    if not isinstance(pdf_bytes, (bytes, bytearray)):
-        raise TypeError(f"generate_passport_pdf() ha restituito {type(pdf_bytes)} invece di bytes")
-
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-    # 3) signers payload (coerente con doc EU-SES) [1](https://fiberc.sharepoint.com/sites/BIM/Shared%20Documents/Files/NOLAITAV/Bollettini/Bollettini%20digitalizzati/NAT073_BOLDIG_CHIAMATA_1711191_BollettinoDigitale_MAVM250123.pdf?web=1)[2](https://fiberc-my.sharepoint.com/personal/37502468_fibercop_com/Documents/Documents/ERM_FIBERCOP/Documentazione%20Utile/Libri-Articoli%20ML/Esercitazione%20ML%20.ipynb%20-%20Colab.html?web=1)
+    # 3) payload firmatari
     signers = [
         {
             "name": signer_name,
@@ -1643,9 +1639,7 @@ def sign_passport_pdf_ses_openapi(
             "email": signer_email,
             "mobile": signer_mobile,
             "authentication": [otp_channel],
-            "signatures": [
-                {"page": page, "x": x, "y": y, "name": "Firma"}
-            ]
+            "signatures": [{"page": page, "x": x, "y": y, "name": "Firma"}]
         }
     ]
 
@@ -1653,7 +1647,7 @@ def sign_passport_pdf_ses_openapi(
     if allow_user_edit:
         user_editable_data = {"name": "true", "mobile": "true", "email": "true"}
 
-    # 4) request SES
+    # 4) richiesta SES
     resp = openapi_eu_ses_request(
         bearer_token=bearer_token,
         input_documents=[{"sourceType": "base64", "payload": pdf_b64}],
@@ -1679,15 +1673,13 @@ def sign_passport_pdf_ses_openapi(
         "raw_response": resp
     }
 
-    # 6) prova ad estrarre URL di firma (best-effort: struttura può variare)
+    # 6) estrai link di firma (best effort)
     try:
         data = resp.get("data", resp)
-        # spesso ci sono URL dentro signers
         if isinstance(data, dict) and "signers" in data and data["signers"]:
             passport["simple_signature"]["signing_urls"] = [
                 s.get("url") or s.get("signingUrl") or s.get("link")
-                for s in data["signers"]
-                if isinstance(s, dict)
+                for s in data["signers"] if isinstance(s, dict)
             ]
     except Exception:
         pass
