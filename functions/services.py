@@ -1593,97 +1593,85 @@ def openapi_eu_ses_request(
     return r.json()
 
 def sign_passport_pdf_ses_openapi(
-    passport: dict,
+    pdf_path: str,
     signer_name: str,
     signer_surname: str,
     signer_email: str,
     signer_mobile: str
 ) -> dict:
     """
-    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
-
-    - Usa Bearer PROD (identico al playground)
-    - inputDocuments = base64 puro
-    - Aggiorna passport["simple_signature"] in modo coerente con TAB 3
+    Avvia firma SES **sul PDF DPP FINALE già esistente**
     """
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
 
-    import streamlit as st
-    import base64
+    pdf_b64 = base64.b64encode(pdf_bytes).decode()
 
-    # --------------------------------------------------
-    # 1) Bearer token (PROD – già autorizzato EU-SES)
-    # --------------------------------------------------
-    try:
-        bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
-    except KeyError:
-        raise RuntimeError("Missing OPENAPI_BEARER_PROD in Streamlit secrets")
+    tok = openapi_create_token(scopes=[_scope_for_eu_ses()], ttl_seconds=3600)
+    bearer = _bearer(tok)
 
-    # --------------------------------------------------
-    # 2) Genera PDF del passport
-    # --------------------------------------------------
-    pdf_bytes = generate_passport_pdf(passport)
-    if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
-        raise RuntimeError("generate_passport_pdf() did not return valid PDF bytes")
-
-    # --------------------------------------------------
-    # 3) Base64 PURO (NO header data:...)
-    # --------------------------------------------------
-    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-
-    # --------------------------------------------------
-    # 4) Definizione firmatario (SES / OTP)
-    # --------------------------------------------------
-    signers = [{
-        "name": signer_name,
-        "surname": signer_surname,
-        "email": signer_email,
-        "mobile": signer_mobile,
-        "authentication": "sms"
-    }]
-
-    # --------------------------------------------------
-    # 5) Chiamata EU-SES
-    # --------------------------------------------------
     resp = openapi_eu_ses_request(
-        bearer_token=bearer_token,
-        pdf_base64=pdf_base64,
-        signers=signers,
-        signature_mode=["typed"]
+        bearer_token=bearer,
+        pdf_base64=pdf_b64,
+        signers=[{
+            "name": signer_name,
+            "surname": signer_surname,
+            "email": signer_email,
+            "mobile": signer_mobile
+        }]
     )
-
-    # --------------------------------------------------
-    # 6) Validazione risposta minima
-    # --------------------------------------------------
-    if not isinstance(resp, dict) or "data" not in resp:
-        raise RuntimeError(f"Unexpected EU-SES response: {resp}")
-
-    data = resp["data"]
-
-    if "id" not in data or "state" not in data:
-        raise RuntimeError(f"Incomplete EU-SES response data: {data}")
-
-    # --------------------------------------------------
-    # 7) Estrazione link di firma (OTP)
-    # --------------------------------------------------
-    signing_urls = []
-    for s in data.get("signers", []):
-        url = s.get("url")
-        if url:
-            signing_urls.append(url)
-
-    # --------------------------------------------------
-    # 8) Scrittura STRUCTURED nel passport
-    # --------------------------------------------------
-    passport["simple_signature"] = {
-        "provider": "OpenAPI",
-        "type": "EU-SES",
-        "request_id": data["id"],             # es. 69d4f8d7...
-        "status": data["state"],               # WAIT_VALIDATION / SIGNED
-        "signing_urls": signing_urls,           # link OTP
-        "created_at": data.get("createdAt"),
-        "raw_response": resp                    # debug / audit
-    }
 
     return resp
 
+
+def generate_final_dpp_pdf(passport: dict) -> str:
+    """
+    Genera e salva il PDF FINALE del Digital Product Passport.
+    Questo PDF è:
+    - completo
+    - immutabile
+    - firmabile
+    """
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
+    pdf_path = os.path.join(PASSPORT_DIR, f"{passport['id']}_FINAL.pdf")
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    y = height - 40
+    c.setFont("Helvetica", 10)
+
+    c.drawString(40, y, f"Digital Product Passport – ID {passport['id']}")
+    y -= 25
+
+    for k, v in passport.get("sections", {}).items():
+        c.drawString(40, y, f"{k}: {v.get('value','')}")
+        y -= 14
+        if y < 40:
+            c.showPage()
+            y = height - 40
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+
+    with open(pdf_path, "wb") as f:
+        f.write(buf.read())
+
+    return pdf_path
+
+
+def verify_pdf_has_signature(pdf_path: str) -> bool:
+    """
+    Verifica se il PDF contiene almeno una firma digitale.
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        for page in doc:
+            if page.first_annot:
+                return True
+        return False
+    except Exception:
+       
 
