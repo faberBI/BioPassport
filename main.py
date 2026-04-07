@@ -471,7 +471,6 @@ with tabs[2]:
                 if passport.get("simple_signature"):
                     with st.expander("Debug risposta SES (raw_response)"):
                         st.json(passport["simple_signature"].get("raw_response", {}))
-
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
