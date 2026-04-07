@@ -388,7 +388,7 @@ with tabs[2]:
     # ==================================================
     if ENABLE_SES:
         st.divider()
-        st.subheader("✍️ Firma elettronica semplice (OTP) – DEMO / TEST")
+        st.subheader("✍️ Firma elettronica semplice (OTP)")
     
         # ✅ recupera SEMPRE il passport pubblicato dallo state
         pp = st.session_state.get("published_passport")
@@ -398,10 +398,10 @@ with tabs[2]:
             st.stop()
     
         # ✅ inizializza stato UNA SOLA VOLTA
-        st.session_state.setdefault("ses_name", "Mario")
-        st.session_state.setdefault("ses_surname", "Rossi")
-        st.session_state.setdefault("ses_email", "mario.rossi@test.it")
-        st.session_state.setdefault("ses_mobile", "+39333111222")
+        st.session_state.setdefault("ses_name", "Nuvia")
+        st.session_state.setdefault("ses_surname", "srls")
+        st.session_state.setdefault("ses_email", "informazioni.nuvia@gmail.com")
+        st.session_state.setdefault("ses_mobile", "+393296482656")
         st.session_state.setdefault("ses_channel", "email")
         st.session_state.setdefault("ses_mode", "typed")
         st.session_state.setdefault("ses_allow_edit", False)
