@@ -437,9 +437,9 @@ with tabs[2]:
         if submit_ses:
             with st.spinner("Invio richiesta di firma SES..."):
                 try:
-                    pdf_bytes = base64.b64decode(pp["pdf_document"])
+                    
                     services.sign_passport_pdf_ses_openapi(
-                        pdf_bytes,
+                        pp,
                         signer_name=st.session_state["ses_name"],
                         signer_surname=st.session_state["ses_surname"],
                         signer_email=st.session_state["ses_email"],
