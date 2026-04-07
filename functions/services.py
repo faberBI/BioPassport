@@ -1751,3 +1751,16 @@ def generate_passport_pdf(passport: dict) -> bytes:
     c.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+def openapi_eu_ses_status(request_id: str, bearer_token: str):
+    endpoint = f"{st.secrets['OPENAPI_ESIGN_BASE_URL']}/EU-SES/{request_id}"
+
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "accept": "application/json"
+    }
+
+    resp = requests.get(endpoint, headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
