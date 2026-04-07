@@ -875,12 +875,82 @@ def add_product_image(passport: dict, img_file, caption: str = ""):
         raise RuntimeError(f"Errore aggiungendo immagine: {e}")
 
 
-def render_espr_compliance(passport, st=None):(f"- ❌ {f}")
+def render_espr_compliance(passport, st=None):
+    """
+    Render completo della compliance ESPR in Streamlit.
+    Mostra:
+    - issuer
+    - physical binding
+    - lifecycle
+    - esito validazione
+    - tutti i campi con evidenza mandatory / optional / mancanti
+    """
+    if st is None:
+        import streamlit as st
+
+    st.subheader("📋 ESPR – Digital Product Passport Compliance")
+
+    # ==================================================
+    # 1) ISSUER
+    # ==================================================
+    st.markdown("### 🏭 Issuer (Responsabile del prodotto)")
+    issuer = passport.get("issuer", {})
+    if issuer:
+        for k, v in issuer.items():
+            st.write(f"**{k}**: {v}")
+    else:
+        st.error("❌ Issuer mancante (bloccante ESPR)")
+
+    # ==================================================
+    # 2) PHYSICAL BINDING
+    # ==================================================
+    st.markdown("### 🔗 Physical Binding")
+    binding = passport.get("physical_binding", {})
+    if binding:
+        for k, v in binding.items():
+            st.write(f"**{k}**: {v}")
+    else:
+        st.error("❌ Physical binding mancante (bloccante ESPR)")
+
+    # ==================================================
+    # 3) LIFECYCLE
+    # ==================================================
+    st.markdown("### ♻️ Lifecycle")
+    lifecycle = passport.get("lifecycle", {})
+    st.write(f"**Stato attuale**: {lifecycle.get('status', '—')}")
+
+    events = lifecycle.get("events", [])
+    if events:
+        with st.expander("Eventi lifecycle"):
+            for ev in events:
+                st.write(f"- **{ev.get('event')}** @ {ev.get('timestamp')}")
+    else:
+        st.caption("Nessun evento lifecycle registrato")
+
+    # ==================================================
+    # 4) VALIDAZIONE ESPR
+    # ==================================================
+    st.markdown("### ✅ Esito validazione ESPR")
+    check = validate_espr_furniture(passport)
+
+    if check.get("is_compliant"):
+        st.success("✅ DPP conforme ai requisiti ESPR (ESSENTIAL)")
+    else:
+        st.error("❌ DPP NON conforme ai requisiti ESPR")
+
+    if check.get("missing_blocks"):
+        st.markdown("**Blocchi obbligatori mancanti:**")
+        for b in check["missing_blocks"]:
+            st.write(f"- ❌ {b}")
+
+    if check.get("missing_fields"):
+        st.markdown("**Campi obbligatori mancanti:**")
+        for f in check["missing_fields"]:
+            st.write(f"- ❌ {f}")
 
     # ==================================================
     # 5) CAMPI DEL PASSPORT (IL PEZZO CHIAVE)
     # ==================================================
-    
     st.markdown("### 🧾 Campi del Digital Product Passport")
 
     sections = passport.get("sections", {})
@@ -898,9 +968,8 @@ def render_espr_compliance(passport, st=None):(f"- ❌ {f}")
             mandatory = data.get("mandatory", False)
             priority = data.get("priority", "optional")
 
-            # ---------- CASI ----------
             if mandatory and not value:
-                st.error(f"❌ **{field_name}** · OBBLIGATORIO → **MANCANTE**")
+                st.error(f"❌ **{field_name}** · OBBLIGATORIO → MANCANTE")
             elif mandatory:
                 st.success(f"✅ **{field_name}** · OBBLIGATORIO")
             elif priority == "strongly_recommended":
@@ -908,94 +977,14 @@ def render_espr_compliance(passport, st=None):(f"- ❌ {f}")
             else:
                 st.info(f"ℹ️ **{field_name}** · Opzionale")
 
-            # dettagli campo
             cols = st.columns([2, 1])
-            with cols[0]:
-                if value:
-                    st.write(f"**Valore:** {value}")
-                else:
-                    st.write("**Valore:** —")
-
+            with colsst.write(f"**Valore:** {value or '—'}")
                 if explanation:
                     st.caption(f"Fonte: {explanation}")
 
-            with cols[1]:
-                st.write(f"**Confidenza:** {round(confidence, 2)}")
+            with colsst.write(f"**Confidenza:** {round(confidence, 2)}")
 
         st.divider()
-    """
-    Render completo della compliance ESPR in Streamlit.
-    Mostra:
-    - issuer
-    - lifecycle
-    - physical binding
-    - esito validazione
-    - TUTTI i campi con evidenza mandatory / optional / mancanti
-    """
-    if st is None:
-        import streamlit as st
-
-    st.subheader("📋 ESPR – Digital Product Passport Compliance")
-
-    # ==================================================
-    # 1) ISSUER
-    # ==================================================
-    st.markdown("### 🏭 Issuer (Responsabile del prodotto)")
-    issuer = passport.get("issuer", {})
-
-    if issuer:
-        for k, v in issuer.items():
-            st.write(f"**{k}**: {v}")
-    else:
-        st.error("❌ Issuer mancante (bloccante ESPR)")
-
-    # ==================================================
-    # 2) PHYSICAL BINDING
-    # ==================================================
-    st.markdown("### 🔗 Physical Binding (legame fisico-digitale)")
-    binding = passport.get("physical_binding", {})
-
-    if binding:
-        for k, v in binding.items():
-            st.write(f"**{k}**: {v}")
-    else:
-        st.error("❌ Physical binding mancante (bloccante ESPR)")
-
-    # ==================================================
-    # 3) LIFECYCLE
-    # ==================================================
-    st.markdown("### ♻️ Lifecycle")
-    lifecycle = passport.get("lifecycle", {})
-
-    st.write(f"**Stato attuale**: {lifecycle.get('status', '—')}")
-
-    events = lifecycle.get("events", [])
-    if events:
-        with st.expander("Eventi lifecycle"):
-            for ev in events:
-                st.write(f"- **{ev.get('event')}** @ {ev.get('timestamp')}")
-    else:
-        st.caption("Nessun evento lifecycle registrato")
-
-    # ==================================================
-    # 4) VALIDAZIONE ESPR (RISULTATO)
-    # ==================================================
-    st.markdown("### ✅ Esito validazione ESPR")
-    check = validate_espr_furniture(passport)
-
-    if check["is_compliant"]:
-        st.success("✅ DPP conforme ai requisiti ESPR (ESSENTIAL)")
-    else:
-        st.error("❌ DPP NON conforme ai requisiti ESPR")
-
-    if check.get("missing_blocks"):
-        st.markdown("**Blocchi obbligatori mancanti:**")
-        for b in check["missing_blocks"]:
-            st.write(f"- ❌ {b}")
-
-    if check.get("missing_fields"):
-        st.markdown("**Campi obbligatori mancanti:**")
-        for f in check["missing_fields"]:
 
 
 # ---------- FUNZIONE PRINCIPALE: quella che chiami dal main ----------
