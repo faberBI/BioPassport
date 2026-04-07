@@ -880,7 +880,8 @@ def render_espr_compliance(passport, st=None):(f"- ❌ {f}")
     # ==================================================
     # 5) CAMPI DEL PASSPORT (IL PEZZO CHIAVE)
     # ==================================================
-    #st.markdown("### 🧾 Campi del Digital Product Passport")
+    
+    st.markdown("### 🧾 Campi del Digital Product Passport")
 
     sections = passport.get("sections", {})
     if not sections:
