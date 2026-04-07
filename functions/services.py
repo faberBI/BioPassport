@@ -1752,15 +1752,29 @@ def generate_passport_pdf(passport: dict) -> bytes:
     buffer.seek(0)
     return buffer.getvalue()
 
-def openapi_eu_ses_status(request_id: str, bearer_token: str):
-    endpoint = f"{st.secrets['OPENAPI_ESIGN_BASE_URL']}/EU-SES/{request_id}"
+def openapi_eu_ses_status(request_id: str, bearer_token: str) -> dict:
+    """
+    Refresh stato SES usando lo stesso endpoint POST /EU-SES
+    passando solo il request_id.
+    """
+    import requests
+
+    url = "https://esignature.openapi.com/EU-SES"
+
+    payload = {
+        "requestId": request_id
+    }
 
     headers = {
         "Authorization": f"Bearer {bearer_token}",
-        "accept": "application/json"
+        "Accept": "application/json",
+        "Content-Type": "application/json"
     }
 
-    resp = requests.get(endpoint, headers=headers)
-    resp.raise_for_status()
-    return resp.json()
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"EU-SES STATUS ERROR {r.status_code}: {r.text}")
+
+    return r.json()
+
 
