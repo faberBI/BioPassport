@@ -464,7 +464,7 @@ with tabs[2]:
         # --------------------------------------------------
         if pp.get("simple_signature"):
             req_id = pp["simple_signature"].get("request_id")
-
+        
             if req_id:
                 if st.button("🔄 Aggiorna stato firma"):
                     try:
@@ -472,19 +472,18 @@ with tabs[2]:
                             request_id=req_id,
                             bearer_token=st.secrets["OPENAPI_BEARER_PROD"]
                         )
-
+        
                         new_state = status_resp["data"]["state"]
                         pp["simple_signature"]["status"] = new_state
                         pp["simple_signature"]["raw_status"] = status_resp
-
+        
                         services.save_passport_to_file(pp)
                         st.session_state["published_passport"] = pp
-
+        
                         st.success(f"Stato aggiornato: {new_state}")
-
+        
                     except Exception as e:
                         st.error(f"Errore aggiornamento stato: {e}")
-
         # --------------------------------------------------
         # 12) QR CODE SCARICABILE SOLO DOPO FIRMA SES
         # --------------------------------------------------
