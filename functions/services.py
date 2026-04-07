@@ -1754,5 +1754,84 @@ def openapi_eu_ses_status(
 
     return r.json()
 
+def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
+    sections_html = ""
+
+    for section, fields in passport.get("sections", {}).items():
+        rows = ""
+        for k, v in fields.items():
+            rows += f"""
+                <tr>
+                    <td style='padding:6px 10px; border:1px solid #ddd;'><b>{k}</b></td>
+                    <td style='padding:6px 10px; border:1px solid #ddd;'>{v.get('value','')}</td>
+                </tr>
+            """
+        sections_html += f"""
+            <h2 style='margin-top:40px; color:#333;'>{section}</h2>
+            <table style='width:100%; border-collapse:collapse; margin-top:10px;'>
+                {rows}
+            </table>
+        """
+
+    images_html = ""
+    for img in passport.get("images", []):
+        images_html += f"""
+            <div style='margin:10px 0;'>
+                <img src="data:image/jpeg;base64,{img['file_base64']}" style="max-width:300px; border:1px solid #ccc;"/>
+                <p style='font-size:12px; color:#555;'>{img.get('caption','')}</p>
+            </div>
+        """
+
+    qr_html = f"<img src='data:image/png;base64,{qr_base64}' style='width:180px;'/>" if qr_base64 else ""
+
+    html = f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                color: #222;
+            }}
+            h1 {{
+                color: #0A4A9A;
+                border-bottom: 2px solid #0A4A9A;
+                padding-bottom: 10px;
+            }}
+            h2 {{
+                color: #0A4A9A;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+            }}
+            td {{
+                border: 1px solid #ddd;
+                padding: 8px;
+            }}
+        </style>
+    </head>
+    <body>
+
+        <h1>Digital Product Passport</h1>
+
+        <h2>Metadata</h2>
+        <p><b>ID:</b> {passport.get("id")}</p>
+        <p><b>Tipo:</b> {passport.get("product_type")}</p>
+        <p><b>Versione:</b> {passport.get("version")}</p>
+
+        <h2>QR Code</h2>
+        {qr_html}
+
+        {sections_html}
+
+        <h2>Immagini prodotto</h2>
+        {images_html}
+
+    </body>
+    </html>
+    """
+    return html
 
 
