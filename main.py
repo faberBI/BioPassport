@@ -10,6 +10,7 @@ from openai import OpenAI
 # funzioni custom
 from functions import services
 
+
 # ======================================================
 # CONFIG STREAMLIT
 # ======================================================
@@ -41,7 +42,7 @@ DEFAULT_STATE = {
     "uploaded_pdf_bytes": None,
     "uploaded_images_bytes": None,
     "uploaded_cert_bytes": None,
-    "uploaded_cert_names": None,  # ✅ NEW
+    "uploaded_cert_names": None,
     "pdf_data": None,
     "image_data": None,
     "cert_data": None,
@@ -74,25 +75,6 @@ if passport_id:
 """
     )
 
-    # --- Sigillo QeSeal (preferito) ---
-    if passport.get("qualified_seal"):
-        seal = passport["qualified_seal"]
-        st.subheader("🔐 Sigillo elettronico qualificato (QeSeal)")
-        st.write(f"Provider: {seal.get('provider')}")
-        st.write(f"Servizio: {seal.get('service')}")
-        st.write(f"Seal ID: {seal.get('seal_id')}")
-        st.write(f"Stato: {seal.get('state')}")
-    elif passport.get("qualified_signature"):
-        qs = passport["qualified_signature"]
-        st.subheader("🔐 Firma qualificata (QES)")
-        st.write(f"Provider: {qs.get('provider')}")
-        st.write(f"Servizio: {qs.get('service')}")
-        st.write(f"Signature ID: {qs.get('signature_id')}")
-        st.write(f"Stato: {qs.get('state')}")
-    else:
-        st.info("Nessun sigillo/firma qualificata presente")
-
-    # --- Legame fisico-digitale ---
     if passport.get("physical_binding"):
         pb = passport["physical_binding"]
         st.subheader("🔗 Legame fisico‑digitale")
@@ -100,44 +82,6 @@ if passport_id:
         st.write(f"Location: {pb.get('location')}")
         st.write(f"URL: {pb.get('public_url')}")
         st.write(f"Tamper risk: {pb.get('tamper_risk')}")
-
-    # --- Sezioni DPP ---
-    st.subheader("🧩 Contenuti (sezioni)")
-    for sec_name, sec in passport.get("sections", {}).items():
-        st.markdown(f"### {sec_name}")
-        if isinstance(sec, dict):
-            for fname, f in sec.items():
-                val = f.get("value") if isinstance(f, dict) else f
-                conf = f.get("confidence", 0) if isinstance(f, dict) else 0
-                exp = f.get("explanation", "") if isinstance(f, dict) else ""
-                st.write(f"**{fname}**: {val}  _(conf: {conf})_")
-                if conf is not None and float(conf) < 0.5:
-                    st.caption("⚠️ Bassa confidenza")
-                if exp:
-                    st.caption(exp)
-
-    # --- Certificati + evidence hash ---
-    if passport.get("certificates"):
-        st.subheader("📜 Certificati (verificabili)")
-        for idx, cert in enumerate(passport["certificates"], start=1):
-            st.markdown(f"**Certificato {idx}**")
-            if isinstance(cert, dict) and cert.get("evidence"):
-                ev = cert["evidence"]
-                st.caption(f"Evidence ID: {ev.get('evidence_id')}")
-                st.caption(f"Evidence hash: {str(ev.get('hash',''))[:16]}…")
-            for k, v in (cert.items() if isinstance(cert, dict) else []):
-                if k == "evidence":
-                    continue
-                if isinstance(v, dict):
-                    st.write(f"- {k}: {v.get('value','')}")
-                else:
-                    st.write(f"- {k}: {v}")
-
-    # --- Immagini ---
-    if passport.get("images"):
-        st.subheader("🖼️ Immagini")
-        for img in passport.get("images", []):
-            st.image(f"data:image/jpeg;base64,{img['file_base64']}", caption=img.get("caption", ""))
 
     st.divider()
     services.render_espr_compliance(passport)
@@ -154,8 +98,7 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🚀 Pubblica", "�
 # ======================================================
 # TAB 1 — UPLOAD & AI
 # ======================================================
-with tabs[0]:
-    pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
+with tabspdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
     cert_files = st.file_uploader("Certificati", type=["pdf", "jpg", "png"], accept_multiple_files=True)
 
@@ -168,7 +111,9 @@ with tabs[0]:
         st.session_state.uploaded_images_bytes = [i.read() for i in image_files]
 
         st.session_state.uploaded_cert_bytes = [c.read() for c in (cert_files or [])]
-        st.session_state.uploaded_cert_names = [getattr(c, "name", f"cert_{i+1}") for i, c in enumerate(cert_files or [])]
+        st.session_state.uploaded_cert_names = [
+            getattr(c, "name", f"cert_{i+1}") for i, c in enumerate(cert_files or [])
+        ]
 
         with st.spinner("Analisi in corso..."):
             pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
@@ -189,8 +134,7 @@ with tabs[0]:
 # ======================================================
 # TAB 2 — VALIDAZIONE
 # ======================================================
-with tabs[1]:
-    if st.session_state.pdf_data and st.session_state.image_data:
+with tabsif st.session_state.pdf_data and st.session_state.image_data:
         st.subheader("Validazione PDF")
         st.session_state.validated_pdf = {
             k: {
@@ -211,22 +155,6 @@ with tabs[1]:
             for k, v in st.session_state.image_data.items()
         }
 
-        if st.session_state.cert_data:
-            st.subheader("Certificati")
-            validated = []
-            for i, cert in enumerate(st.session_state.cert_data):
-                st.markdown(f"**Certificato {i+1}**")
-                row = {}
-                for k, v in cert.items():
-                    val = v.get("value", "") if isinstance(v, dict) else v
-                    row[k] = {
-                        "value": st.text_input(f"CERT {i+1} · {k}", val, key=f"c{i}_{k}"),
-                        "confidence": v.get("confidence", 0) if isinstance(v, dict) else 0,
-                        "explanation": v.get("explanation", "") if isinstance(v, dict) else ""
-                    }
-                validated.append(row)
-            st.session_state.validated_cert = validated
-
         st.success("Validazione pronta ✅")
     else:
         st.info("Esegui prima l’analisi")
@@ -234,29 +162,17 @@ with tabs[1]:
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabs[2]:
-    #--------------------------------------------------
-    # Guard-rail: serve prima validazione completata
-    # --------------------------------------------------
-    if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
+with tabsif not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
-    # --------------------------------------------------
-    # Feature flag
-    # --------------------------------------------------
     ENABLE_QESEAL = False
     ENABLE_SES = True
 
-    # --------------------------------------------------
-    # Bottone principale: PUBBLICA DPP
-    # --------------------------------------------------
     if st.button("🚀 Pubblica Digital Product Passport"):
-
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
         passport = services.initialize_passport(pid, tipo, fields)
 
-        # URL + binding
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
         services.set_physical_binding(
             passport,
@@ -266,60 +182,17 @@ with tabs[2]:
             tamper_risk="medium"
         )
 
-        # merge dati
-        if tipo == "mobile":
-            services.merge_data_with_ecolabel(
-                passport,
-                pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
-                image_data=st.session_state.validated_image,
-                cert_data=None,
-                client=client
-            )
-        else:
-            services.merge_data(
-                passport,
-                st.session_state.validated_pdf,
-                st.session_state.validated_image,
-                None
-            )
+        services.merge_data(
+            passport,
+            st.session_state.validated_pdf,
+            st.session_state.validated_image,
+            None
+        )
 
-        # immagini
-        for b in (st.session_state.uploaded_images_bytes or []):
-            services.add_product_image(passport, BytesIO(b))
-
-        # certificati
-        if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
-            for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
-                parsed = (
-                    st.session_state.validated_cert[i]
-                    if i < len(st.session_state.validated_cert)
-                    else {}
-                )
-                fname = (
-                    st.session_state.uploaded_cert_names[i]
-                    if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
-                    else f"cert_{i+1}"
-                )
-                services.add_certificate_evidence(
-                    passport,
-                    cert_parsed=parsed,
-                    raw_bytes=raw,
-                    filename=fname,
-                    source="uploaded_certificate"
-                )
-
-        # validazione ESPR
         check = services.validate_espr_furniture(passport)
         if not check.get("is_compliant", False):
             st.error("❌ DPP NON conforme")
             st.stop()
-
-        services.espr_stamp(
-            passport,
-            actor="manufacturer",
-            action="finalize",
-            reason="Final publication (ESPR compliant)"
-        )
 
         services.save_passport_to_file(passport)
         services.save_passport_to_excel_append(passport)
@@ -327,9 +200,6 @@ with tabs[2]:
 
         st.success("✅ DPP pubblicato")
 
-        # --------------------------------------------------
-        # OUTPUT PUBBLICO + QR + DOWNLOAD
-        # --------------------------------------------------
         st.code(url)
 
         qr = services.generate_qr_from_url(url)
@@ -343,9 +213,6 @@ with tabs[2]:
             mime="image/png"
         )
 
-    # ==================================================
-    # 11) FIRMA ELETTRONICA SEMPLICE (SES/FES)
-    # ==================================================
     if ENABLE_SES:
         st.divider()
         st.subheader("✍️ Firma elettronica semplice (OTP) – DEMO / TEST")
@@ -361,7 +228,6 @@ with tabs[2]:
         st.session_state.setdefault("ses_mobile", "+39333111222")
         st.session_state.setdefault("ses_channel", "email")
         st.session_state.setdefault("ses_mode", "typed")
-        st.session_state.setdefault("ses_allow_edit", False)
 
         with st.form("ses_form"):
             col1, col2 = st.columns(2)
@@ -387,6 +253,10 @@ with tabs[2]:
                 signature_mode=st.session_state["ses_mode"]
             )
             st.success("✅ Richiesta SES inviata")
+# ======================================================
+# TAB 4 — ARCHIVIO
+# ======================================================
+with tabsst.header("📚 Archivio Passport")
 
 # ======================================================
 # TAB 4 — ARCHIVIO
