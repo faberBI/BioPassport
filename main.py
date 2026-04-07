@@ -234,7 +234,8 @@ with tabs[1]:
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
-with tabs# --------------------------------------------------
+with tabs[2]:
+    #--------------------------------------------------
     # Guard-rail: serve prima validazione completata
     # --------------------------------------------------
     if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
