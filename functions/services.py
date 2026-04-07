@@ -104,6 +104,7 @@ def match_field(input_key, field_names):
     matches = get_close_matches(norm_input, norm_fields.keys(), n=1, cutoff=0.8)
     return norm_fields[matches[0]] if matches else None
 
+
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -185,6 +186,8 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dic
 
     return passport
 
+
+
 def _norm_field(x, field_name=None, default_conf=0.0):
     if isinstance(x, dict):
         value = "" if x.get("value") is None else str(x.get("value"))
@@ -219,6 +222,7 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
         for k in expected_fields:
             out[k] = _norm_field(payload.get(k, out[k]), field_name=k)
     return out
+
 
 
 def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
@@ -314,6 +318,7 @@ def passport_meta_row(passport: dict) -> dict:
         "binding_generated_at": pb.get("generated_at"),
         "binding_tamper_risk": pb.get("tamper_risk"),
     }
+
 
 # ======================================================
 # PDF / IMAGE UTILITIES
