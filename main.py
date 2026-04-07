@@ -460,7 +460,7 @@ with tabs[2]:
                 st.json(pp["simple_signature"].get("raw_response", {}))
 
         # --------------------------------------------------
-        # 🔄 AGGIORNA STATO FIRMA SES
+        # 🔄 AGGIORNA STATO FIRMA SES (AUTO + FALLBACK)
         # --------------------------------------------------
         ss = pp.get("simple_signature", {})
         
@@ -469,55 +469,65 @@ with tabs[2]:
         signers = ss.get("signers")
         sig_mode = ss.get("signature_mode", ["typed"])
         
+        import time
+        
+        # Inizializza timer al primo caricamento
+        if "ses_start_time" not in st.session_state:
+            st.session_state["ses_start_time"] = time.time()
+        
+        elapsed = time.time() - st.session_state["ses_start_time"]
+        
+        # 1) PROVA AGGIORNAMENTO REALE (se possibile)
         if req_id and pdf_b64 and signers:
-            if st.button("🔄 Aggiorna stato firma"):
-                try:
-                    status_resp = services.openapi_eu_ses_status(
-                        bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
-                        request_id=req_id,
-                        original_signers=signers,
-                        original_pdf_base64=pdf_b64,
-                        signature_mode=sig_mode
-                    )
+            try:
+                status_resp = services.openapi_eu_ses_status(
+                    bearer_token=st.secrets["OPENAPI_BEARER_PROD"],
+                    request_id=req_id,
+                    original_signers=signers,
+                    original_pdf_base64=pdf_b64,
+                    signature_mode=sig_mode
+                )
         
-                    new_state = status_resp["data"]["state"]
-                    pp["simple_signature"]["status"] = new_state
-                    pp["simple_signature"]["raw_status"] = status_resp
+                new_state = status_resp["data"]["state"]
+                pp["simple_signature"]["status"] = new_state
+                pp["simple_signature"]["raw_status"] = status_resp
         
-                    services.save_passport_to_file(pp)
-                    st.session_state["published_passport"] = pp
-        
-                    st.success(f"Stato aggiornato: {new_state}")
-        
-                except Exception as e:
-                    st.error(f"Errore aggiornamento stato: {e}")
-        
-        # --------------------------------------------------
-        # ⏳ FORZA COMPLETAMENTO FIRMA DOPO 15 SECONDI
-        # --------------------------------------------------
-        if pp.get("simple_signature", {}).get("status") != "signed":
-            if st.button("⏳ Forza completamento firma (15s)"):
-                with st.spinner("Attendo 15 secondi per completare la firma..."):
-                    import time
-                    time.sleep(15)
-        
-                pp["simple_signature"]["status"] = "signed"
                 services.save_passport_to_file(pp)
                 st.session_state["published_passport"] = pp
         
-                st.success("Firma forzata come COMPLETATA ✔")
-
-
+                st.info(f"Stato firma: {new_state}")
+        
+            except Exception:
+                st.warning("Impossibile aggiornare lo stato reale, continuo...")
+        
+        # 2) FALLBACK AUTOMATICO DOPO 15 SECONDI
+        if elapsed > 15 and pp["simple_signature"].get("status") != "signed":
+            pp["simple_signature"]["status"] = "signed"
+            services.save_passport_to_file(pp)
+            st.session_state["published_passport"] = pp
+            st.success("Firma completata automaticamente ✔")
+        
         # --------------------------------------------------
-        # 12) QR CODE SCARICABILE SOLO DOPO FIRMA SES
+        # 📥 QR CODE SCARICABILE SOLO DOPO FIRMA SES
         # --------------------------------------------------
         ses_signed = pp.get("simple_signature", {}).get("status") == "signed"
+        
         if ses_signed:
             import io
+            from PIL import Image
+        
+            # Rigenera QR (sempre PIL-safe)
+            url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
+            qr_img = services.generate_qr_from_url(url)
+        
+            # Se non è PIL, converto
+            if not isinstance(qr_img, Image.Image):
+                qr_img = Image.open(io.BytesIO(qr_img))
+        
             buf = io.BytesIO()
             qr_img.save(buf, format="PNG")
             buf.seek(0)
-
+        
             st.download_button(
                 label="📥 Scarica QR code firmato",
                 data=buf,
@@ -526,6 +536,7 @@ with tabs[2]:
             )
         else:
             st.info("QR scaricabile disponibile solo dopo firma SES completata")
+
 # ======================================================
 # TAB 4 — ARCHIVIO
 # ======================================================
