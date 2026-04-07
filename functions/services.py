@@ -893,6 +893,7 @@ def render_espr_compliance(passport, st=None):
     - esito validazione
     - campi mandatory / raccomandati / opzionali
     """
+
     if st is None:
         import streamlit as st
 
@@ -931,7 +932,7 @@ def render_espr_compliance(passport, st=None):
     if events:
         with st.expander("Eventi lifecycle"):
             for ev in events:
-                st.write(f"- **{ev.get('event')}** @ {ev.get('timestamp')}")
+                st.write(f"- **{ev.get('event', '—')}** @ {ev.get('timestamp', '—')}")
     else:
         st.caption("Nessun evento lifecycle")
 
@@ -970,6 +971,16 @@ def render_espr_compliance(passport, st=None):
         st.markdown(f"#### 📁 Sezione: {section_name}")
 
         for field_name, data in fields.items():
+            # Normalizzazione: se non è dict → trasformalo
+            if not isinstance(data, dict):
+                data = {
+                    "value": data,
+                    "confidence": 0,
+                    "explanation": "",
+                    "mandatory": False,
+                    "priority": "optional"
+                }
+
             value = str(data.get("value", "")).strip()
             confidence = float(data.get("confidence", 0) or 0)
             explanation = data.get("explanation", "")
