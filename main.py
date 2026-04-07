@@ -356,9 +356,17 @@ with tabs[2]:
         public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
         st.info("Generazione PDF ufficiale del DPP in corso...")
 
-        pdf_bytes = services.generate_pdf_from_url(public_url)
-        passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
+        # Genera QR base64 per inserirlo nel PDF
+        qr_buf = services.generate_qr_from_url(public_url)
+        qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
 
+        # Genera HTML statico del DPP
+        html = services.generate_passport_html(passport, qr_base64=qr_base64)
+
+        # Converte HTML → PDF multipagina
+        pdf_bytes = services.generate_pdf_from_html(html)
+
+        passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
         services.save_passport_to_file(passport)
 
         if qeseal_ok:
