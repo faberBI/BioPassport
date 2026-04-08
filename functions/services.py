@@ -21,19 +21,16 @@ import os
 import streamlit as st
 import base64
 
-def generate_pdf_from_url(url: str) -> bytes:
-    import requests
+def generate_pdf_from_html(html: str) -> bytes:
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
-
     endpoint = "https://pdf.openapi.it/base"
 
     payload = {
-        "url": url,
+        "html": html,
         "format": "A4",
         "margin": "20px",
         "printBackground": True,
-        "pageRanges": "1-",
-        "waitFor": 3000
+        "pageRanges": "1-"
     }
 
     headers = {
@@ -43,12 +40,7 @@ def generate_pdf_from_url(url: str) -> bytes:
 
     resp = requests.post(endpoint, json=payload, headers=headers)
     resp.raise_for_status()
-
     return resp.content
-
-
-
-
 
 # ======================================================
 # CONFIG
@@ -1857,15 +1849,18 @@ def generate_pdf_from_html(html: str) -> bytes:
     return resp.content
 
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
-    # --- SEZIONI ---
+    # --- SEZIONI (come in Streamlit: passport["sections"]) ---
     sections_html = ""
-    for section, fields in passport.get("sections", {}).items():
+    for section, fields in (passport.get("sections") or {}).items():
+        if not isinstance(fields, dict):
+            continue
         rows = ""
         for k, v in fields.items():
+            val = v.get("value", "") if isinstance(v, dict) else v
             rows += f"""
                 <tr>
                     <td class='field-name'>{k}</td>
-                    <td class='field-value'>{v.get('value','')}</td>
+                    <td class='field-value'>{val}</td>
                 </tr>
             """
         sections_html += f"""
@@ -1875,20 +1870,96 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             </table>
         """
 
-    # --- IMMAGINI ---
+    # --- CERTIFICATI (passport["certificates"]) ---
+    certs_html = ""
+    for cert in passport.get("certificates", []):
+        if not isinstance(cert, dict):
+            continue
+        rows = ""
+        for k, v in cert.items():
+            if k == "evidence":
+                continue
+            val = v.get("value", "") if isinstance(v, dict) else v
+            rows += f"""
+                <tr>
+                    <td class='field-name'>{k}</td>
+                    <td class='field-value'>{val}</td>
+                </tr>
+            """
+        certs_html += f"""
+            <table class='data-table'>
+                {rows}
+            </table>
+            <br/>
+        """
+    if certs_html:
+        certs_html = f"<h2>Certificati</h2>{certs_html}"
+
+    # --- LIFECYCLE EVENTS (passport["lifecycle"]["events"]) ---
+    lifecycle_html = ""
+    lifecycle = passport.get("lifecycle") or {}
+    events = lifecycle.get("events") or []
+    if events:
+        rows = ""
+        for ev in events:
+            rows += f"""
+                <tr>
+                    <td class='field-name'>{ev.get('event')}</td>
+                    <td class='field-value'>
+                        <b>{ev.get('timestamp','')}</b><br/>
+                        <pre style="white-space:pre-wrap; margin:0;">{json.dumps(ev.get('data', {}), ensure_ascii=False)}</pre>
+                    </td>
+                </tr>
+            """
+        lifecycle_html = f"""
+            <h2>Lifecycle events</h2>
+            <table class='data-table'>
+                {rows}
+            </table>
+        """
+
+    # --- CHANGE LOG (passport["change_log"]) ---
+    changelog_html = ""
+    if passport.get("change_log"):
+        rows = ""
+        for log in passport["change_log"]:
+            rows += f"""
+                <tr>
+                    <td class='field-name'>v{log.get('version')}</td>
+                    <td class='field-value'>
+                        <b>{log.get('timestamp','')}</b><br/>
+                        Actor: {log.get('actor','')}<br/>
+                        Action: {log.get('action','')}<br/>
+                        Reason: {log.get('reason','')}
+                    </td>
+                </tr>
+            """
+        changelog_html = f"""
+            <h2>Change log</h2>
+            <table class='data-table'>
+                {rows}
+            </table>
+        """
+
+    # --- IMMAGINI (passport["images"]) ---
     images_html = ""
     for img in passport.get("images", []):
+        b64 = img.get("file_base64")
+        if not b64:
+            continue
         images_html += f"""
             <div class='image-block'>
-                <img src="data:image/jpeg;base64,{img['file_base64']}" />
+                <img src="data:image/jpeg;base64,{b64}" />
                 <p class='caption'>{img.get('caption','')}</p>
             </div>
         """
+    if images_html:
+        images_html = f"<h2>Immagini prodotto</h2>{images_html}"
 
-    # --- QR ---
+    # --- QR (URL Streamlit) ---
     qr_html = f"<img class='qr' src='data:image/png;base64,{qr_base64}' />" if qr_base64 else ""
 
-    # --- HTML COMPLETO ---
+    # --- HTML COMPLETO (struttura tipo Streamlit, ma PDF-friendly) ---
     html = f"""
     <html>
     <head>
@@ -1900,15 +1971,29 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 color: #222;
             }}
 
-            .header {{
-                text-align: center;
-                padding-bottom: 20px;
-                border-bottom: 3px solid #0A4A9A;
+            /* Watermark Nuvia */
+            body::after {{
+                content: "NUVIA";
+                position: fixed;
+                top: 40%;
+                left: 10%;
+                font-size: 120px;
+                color: rgba(0,0,0,0.04);
+                transform: rotate(-30deg);
+                z-index: -1;
             }}
 
-            .header img {{
-                width: 180px;
-                margin-bottom: 10px;
+            .header {{
+                text-align: left;
+                padding-bottom: 10px;
+                border-bottom: 3px solid #0A4A9A;
+                margin-bottom: 20px;
+            }}
+
+            .header-title {{
+                font-size: 22px;
+                color: #0A4A9A;
+                margin: 0;
             }}
 
             @page {{
@@ -1919,12 +2004,12 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
             h1 {{
                 color: #0A4A9A;
-                margin-top: 40px;
+                margin-top: 0;
             }}
 
             h2 {{
                 color: #0A4A9A;
-                margin-top: 40px;
+                margin-top: 30px;
                 border-bottom: 1px solid #ccc;
                 padding-bottom: 5px;
             }}
@@ -1938,6 +2023,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             .data-table td {{
                 border: 1px solid #ddd;
                 padding: 8px;
+                vertical-align: top;
             }}
 
             .field-name {{
@@ -1956,7 +2042,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             }}
 
             .qr {{
-                width: 180px;
+                width: 160px;
                 margin-top: 10px;
             }}
 
@@ -1965,52 +2051,44 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 color: #555;
             }}
 
-            .cover {{
-                text-align: center;
-                margin-top: 120px;
+            .meta-block p {{
+                margin: 2px 0;
             }}
-
-            .cover h1 {{
-                font-size: 32px;
-                color: #0A4A9A;
-            }}
-
-            .cover p {{
-                font-size: 18px;
-                margin-top: 10px;
-            }}
-
         </style>
     </head>
     <body>
 
-        <div class="cover">
-            <h1>Digital Product Passport</h1>
-            <p><b>ID:</b> {passport.get("id")}</p>
+        <!-- HEADER come in Streamlit: titolo + QR -->
+        <div class="header">
+            <p class="header-title">Digital Product Passport</p>
+        </div>
+
+        <div class="meta-block">
+            <h1>{passport.get("id")}</h1>
             <p><b>Tipo:</b> {passport.get("product_type")}</p>
             <p><b>Versione:</b> {passport.get("version")}</p>
-            <br/>
+            <p><b>Stato lifecycle:</b> {(passport.get("lifecycle") or {}).get("status","")}</p>
             {qr_html}
         </div>
 
-        <div style="page-break-after: always;"></div>
-
-        <div class="header">
-            <h1>Digital Product Passport</h1>
-        </div>
-
-        <h2>Metadata</h2>
-        <p><b>ID:</b> {passport.get("id")}</p>
-        <p><b>Tipo:</b> {passport.get("product_type")}</p>
-        <p><b>Versione:</b> {passport.get("version")}</p>
-
+        <!-- SEZIONI (equivalente ai blocchi Streamlit) -->
         {sections_html}
 
-        <h2>Immagini prodotto</h2>
+        <!-- CERTIFICATI -->
+        {certs_html}
+
+        <!-- LIFECYCLE EVENTS -->
+        {lifecycle_html}
+
+        <!-- CHANGE LOG -->
+        {changelog_html}
+
+        <!-- IMMAGINI -->
         {images_html}
 
     </body>
     </html>
     """
     return html
+
 
