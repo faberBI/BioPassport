@@ -88,7 +88,7 @@ if passport_id:
         st.write(f"Signature ID: {qs.get('signature_id')}")
         st.write(f"Stato: {qs.get('state')}")
     else:
-        st.info("Nessun sigillo/firma qualificata presente")
+        st.info("Firma elettronica semplice presente")
 
     # --- Legame fisico-digitale ---
     if passport.get("physical_binding"):
