@@ -1622,10 +1622,14 @@ def sign_passport_pdf_ses_openapi(
     signer_name: str,
     signer_surname: str,
     signer_email: str,
-    signer_mobile: str
+    signer_mobile: str,
+    page: int = 6,
+    x: int = 430,
+    y: int = 324
 ) -> dict:
     """
-    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP.
+    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP,
+    con posizione firma personalizzata.
     """
 
     import streamlit as st
@@ -1647,7 +1651,14 @@ def sign_passport_pdf_ses_openapi(
         "surname": signer_surname,
         "email": signer_email,
         "mobile": signer_mobile,
-        "authentication": "sms"
+        "authentication": "sms",
+
+        # 🔥 POSIZIONE FIRMA
+        "signatureAppearance": {
+            "page": page,
+            "x": x,
+            "y": y
+        }
     }]
 
     # 4) Chiamata EU-SES
@@ -1685,6 +1696,7 @@ def sign_passport_pdf_ses_openapi(
     })
 
     return resp
+
 
 def generate_passport_pdf(passport: dict) -> bytes:
     buffer = BytesIO()
