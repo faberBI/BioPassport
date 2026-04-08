@@ -356,17 +356,20 @@ with tabs[2]:
         public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
         st.info("Generazione PDF ufficiale del DPP in corso...")
 
-        # Genera QR base64 per inserirlo nel PDF
+        # 1) Genera QR code (stesso URL della pagina Streamlit)
         qr_buf = services.generate_qr_from_url(public_url)
         qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
 
-        # Genera HTML statico del DPP
+        # 2) Genera HTML identico alla pagina Streamlit (stessa struttura, stessi contenuti)
         html = services.generate_passport_html(passport, qr_base64=qr_base64)
 
-        # Converte HTML → PDF multipagina
+        # 3) Converte HTML → PDF multipagina professionale
         pdf_bytes = services.generate_pdf_from_html(html)
 
+        # 4) Salva PDF nel passport
         passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
+
+        # 5) Salva il passport aggiornato
         services.save_passport_to_file(passport)
 
         if qeseal_ok:
