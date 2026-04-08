@@ -1838,11 +1838,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
     return html
 
-Ti tengo la stessa struttura e gli stessi contenuti, ma con una grafica molto più “Nuvia style”, usando il tuo logo locale `functions/logo_nuvia.jpeg`.
 
-Incolla questa versione al posto della tua `generate_passport_html`:
-
-```python
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     import json
 
