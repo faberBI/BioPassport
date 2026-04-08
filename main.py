@@ -532,7 +532,6 @@ with tabs[3]:
             .tail(1)
         )
 
-        st.subheader("📊 Elenco Passport (ultima versione)")
         st.dataframe(df_latest, use_container_width=True)
 
         selected_id = st.selectbox("Seleziona Passport", df_latest["id"])
@@ -561,10 +560,12 @@ with tabs[3]:
 
         st.subheader("🖼️ Immagini prodotto")
         imgs = df_images[df_images["passport_id"] == selected_id]
+        unique_imgs = imgs.drop_duplicates(subset=["file_base64"])
+        
         if imgs.empty:
             st.info("Nessuna immagine associata")
         else:
-            for _, row in imgs.iterrows():
+            for _, row in unique_imgs.iterrows():
                 st.image(f"data:image/jpeg;base64,{row['file_base64']}", caption=row.get("caption", ""))
 
     except Exception as e:
