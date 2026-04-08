@@ -1826,28 +1826,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
     return html
 
-def generate_pdf_from_html(html: str) -> bytes:
-    API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
-    endpoint = "https://pdf.openapi.it/base"
-
-    payload = {
-        "html": html,
-        "format": "A4",
-        "margin": "20px",
-        "printBackground": True,
-        "pageRanges": "1-"
-    }
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    resp = requests.post(endpoint, json=payload, headers=headers)
-    resp.raise_for_status()
-
-    return resp.content
-
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     # --- SEZIONI ---
     sections_html = ""
@@ -1961,14 +1939,14 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     # --- QR ---
     qr_html = f"<img class='qr' src='data:image/png;base64,{qr_base64}' />" if qr_base64 else ""
 
-    # --- PAGINA FINALE ABOUT NUVIA ---
+    # --- PAGINA ABOUT NUVIA ---
     about_html = """
         <div style='page-break-before: always;'></div>
         <div class='about'>
             <h1>About Nuvia</h1>
             <p>Nuvia è un’azienda italiana specializzata in soluzioni digitali per la tracciabilità, la sostenibilità e la conformità dei prodotti.</p>
 
-            <p>Il nostro obiettivo è fornire strumenti innovativi per supportare produttori, distributori e consumatori nella gestione del <b>Digital Product Passport (DPP)</b> secondo il Regolamento Europeo <b>ESPR 2024/1781</b>.</p>
+            <p>Il nostro obiettivo è supportare produttori, distributori e consumatori nella gestione del <b>Digital Product Passport (DPP)</b> secondo il Regolamento Europeo <b>ESPR 2024/1781</b>.</p>
 
             <h2>Mission</h2>
             <p>Promuovere trasparenza, sostenibilità e responsabilità lungo l’intero ciclo di vita del prodotto.</p>
@@ -1976,10 +1954,27 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             <h2>Contatti</h2>
             <p><b>Email:</b> informazioni.nuvia@gmail.com</p>
             <p><b>Sito web:</b> https://nuviadpp.com</p>
+        </div>
+    """
 
-            <p style='margin-top:40px; font-size:12px; color:#666;'>
-                Documento generato automaticamente dal sistema DPP Nuvia.
-            </p>
+    # --- PAGINA FINALE LEGAL NOTICE ---
+    legal_html = """
+        <div style='page-break-before: always;'></div>
+        <div class='legal'>
+            <h1>Legal Notice</h1>
+
+            <p>Questo documento è stato generato automaticamente dal sistema Nuvia Digital Product Passport.</p>
+
+            <p>Il contenuto del presente DPP è fornito dal produttore sotto la propria esclusiva responsabilità, in conformità al Regolamento Europeo <b>ESPR 2024/1781</b>.</p>
+
+            <p>Nuvia non è responsabile per eventuali errori, omissioni o inesattezze nei dati forniti dal produttore.</p>
+
+            <h2>Diritti</h2>
+            <p>© 2024 Nuvia S.r.l. – Tutti i diritti riservati.</p>
+
+            <h2>Contatti legali</h2>
+            <p><b>Email:</b> informazioni.nuvia@gmail.com</p>
+            <p><b>Sito web:</b> https://nuviadpp.com</p>
         </div>
     """
 
@@ -2006,6 +2001,18 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 color: rgba(10, 74, 154, 0.03);
                 transform: rotate(-30deg);
                 z-index: -1;
+            }}
+
+            /* Footer con logo */
+            @page {{
+                @bottom-left {{
+                    content: "Nuvia Digital Product Passport System";
+                    font-size: 10px;
+                    color: #0A4A9A;
+                }}
+                @bottom-right {{
+                    content: "Pagina " counter(page);
+                }}
             }}
 
             /* Header */
@@ -2105,11 +2112,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 border-radius: 6px;
             }}
 
-            /* About page */
-            .about {{
-                margin-top: 40px;
-            }}
-
         </style>
     </head>
     <body>
@@ -2131,11 +2133,13 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         {images_html}
 
         {about_html}
+        {legal_html}
 
     </body>
     </html>
     """
     return html
+
 
 
 
