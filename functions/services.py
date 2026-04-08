@@ -1856,3 +1856,161 @@ def generate_pdf_from_html(html: str) -> bytes:
 
     return resp.content
 
+def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
+    # --- SEZIONI ---
+    sections_html = ""
+    for section, fields in passport.get("sections", {}).items():
+        rows = ""
+        for k, v in fields.items():
+            rows += f"""
+                <tr>
+                    <td class='field-name'>{k}</td>
+                    <td class='field-value'>{v.get('value','')}</td>
+                </tr>
+            """
+        sections_html += f"""
+            <h2>{section}</h2>
+            <table class='data-table'>
+                {rows}
+            </table>
+        """
+
+    # --- IMMAGINI ---
+    images_html = ""
+    for img in passport.get("images", []):
+        images_html += f"""
+            <div class='image-block'>
+                <img src="data:image/jpeg;base64,{img['file_base64']}" />
+                <p class='caption'>{img.get('caption','')}</p>
+            </div>
+        """
+
+    # --- QR ---
+    qr_html = f"<img class='qr' src='data:image/png;base64,{qr_base64}' />" if qr_base64 else ""
+
+    # --- HTML COMPLETO ---
+    html = f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                color: #222;
+            }}
+
+            .header {{
+                text-align: center;
+                padding-bottom: 20px;
+                border-bottom: 3px solid #0A4A9A;
+            }}
+
+            .header img {{
+                width: 180px;
+                margin-bottom: 10px;
+            }}
+
+            @page {{
+                @bottom-center {{
+                    content: "Pagina " counter(page);
+                }}
+            }}
+
+            h1 {{
+                color: #0A4A9A;
+                margin-top: 40px;
+            }}
+
+            h2 {{
+                color: #0A4A9A;
+                margin-top: 40px;
+                border-bottom: 1px solid #ccc;
+                padding-bottom: 5px;
+            }}
+
+            .data-table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }}
+
+            .data-table td {{
+                border: 1px solid #ddd;
+                padding: 8px;
+            }}
+
+            .field-name {{
+                background: #f5f7fa;
+                font-weight: bold;
+                width: 30%;
+            }}
+
+            .image-block {{
+                margin: 20px 0;
+            }}
+
+            .image-block img {{
+                max-width: 300px;
+                border: 1px solid #ccc;
+            }}
+
+            .qr {{
+                width: 180px;
+                margin-top: 10px;
+            }}
+
+            .caption {{
+                font-size: 12px;
+                color: #555;
+            }}
+
+            .cover {{
+                text-align: center;
+                margin-top: 120px;
+            }}
+
+            .cover h1 {{
+                font-size: 32px;
+                color: #0A4A9A;
+            }}
+
+            .cover p {{
+                font-size: 18px;
+                margin-top: 10px;
+            }}
+
+        </style>
+    </head>
+    <body>
+
+        <div class="cover">
+            <h1>Digital Product Passport</h1>
+            <p><b>ID:</b> {passport.get("id")}</p>
+            <p><b>Tipo:</b> {passport.get("product_type")}</p>
+            <p><b>Versione:</b> {passport.get("version")}</p>
+            <br/>
+            {qr_html}
+        </div>
+
+        <div style="page-break-after: always;"></div>
+
+        <div class="header">
+            <h1>Digital Product Passport</h1>
+        </div>
+
+        <h2>Metadata</h2>
+        <p><b>ID:</b> {passport.get("id")}</p>
+        <p><b>Tipo:</b> {passport.get("product_type")}</p>
+        <p><b>Versione:</b> {passport.get("version")}</p>
+
+        {sections_html}
+
+        <h2>Immagini prodotto</h2>
+        {images_html}
+
+    </body>
+    </html>
+    """
+    return html
+
