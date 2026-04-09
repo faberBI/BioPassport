@@ -507,7 +507,7 @@ with tabs[2]:
         
 
 # ======================================================
-# TAB 4 — ARCHIVIO (ENTERPRISE GRADE)
+# TAB 4 — ARCHIVIO (ENTERPRISE GRADE - REFACTORED)
 # ======================================================
 with tabs[3]:
     st.header("📚 Passport Archive")
@@ -523,7 +523,7 @@ with tabs[3]:
         st.stop()
 
     # =========================
-    # CACHE-READY LOADING
+    # CACHE LOADING
     # =========================
     @st.cache_data(show_spinner=False)
     def load_data(path):
@@ -539,7 +539,7 @@ with tabs[3]:
         st.stop()
 
     # =========================
-    # NORMALIZATION LAYER (CRITICAL)
+    # NORMALIZATION
     # =========================
     def normalize(df, col):
         if col in df.columns:
@@ -552,7 +552,9 @@ with tabs[3]:
 
     df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
 
-    # latest snapshot per passport
+    # =========================
+    # LATEST SNAPSHOT
+    # =========================
     df_latest = (
         df_passport.sort_values(["id", "version"])
         .groupby("id", as_index=False)
@@ -561,7 +563,7 @@ with tabs[3]:
     )
 
     # =========================
-    # SESSION STATE (ENTERPRISE NAV)
+    # SESSION STATE
     # =========================
     if "selected_passport" not in st.session_state:
         st.session_state.selected_passport = None
@@ -574,37 +576,36 @@ with tabs[3]:
         }
 
     # =========================
-    # SIDEBAR — CONTROL PLANE
+    # SIDEBAR FILTERS
     # =========================
     st.sidebar.subheader("🔎 Control Panel")
 
-    st.session_state.filters["search"] = st.sidebar.text_input(
+    f = st.session_state.filters
+
+    f["search"] = st.sidebar.text_input(
         "Search (ID / type)",
-        value=st.session_state.filters["search"]
+        value=f["search"]
     )
 
-    st.session_state.filters["type"] = st.sidebar.selectbox(
+    f["type"] = st.sidebar.selectbox(
         "Product type",
         ["ALL"] + sorted(df_latest["product_type"].dropna().unique().tolist())
     )
 
-    lifecycle_col = "lifecycle"
     lifecycle_values = (
-        df_latest[lifecycle_col].dropna().unique().tolist()
-        if lifecycle_col in df_latest.columns else []
+        df_latest["lifecycle"].dropna().unique().tolist()
+        if "lifecycle" in df_latest.columns else []
     )
 
-    st.session_state.filters["lifecycle"] = st.sidebar.selectbox(
+    f["lifecycle"] = st.sidebar.selectbox(
         "Lifecycle",
         ["ALL"] + sorted(lifecycle_values)
     )
 
     # =========================
-    # QUERY ENGINE (FILTER PIPELINE)
+    # FILTER PIPELINE
     # =========================
     df_view = df_latest.copy()
-
-    f = st.session_state.filters
 
     if f["search"]:
         df_view = df_view[
@@ -618,133 +619,122 @@ with tabs[3]:
     if f["lifecycle"] != "ALL" and "lifecycle" in df_view.columns:
         df_view = df_view[df_view["lifecycle"] == f["lifecycle"]]
 
-    # =========================
-    # AUTO SELECTION STRATEGY
-    # =========================
     if df_view.empty:
         st.warning("Nessun risultato per i filtri correnti")
         st.stop()
 
+    # =========================
+    # AUTO SELECT
+    # =========================
     if st.session_state.selected_passport not in df_view["id"].values:
         st.session_state.selected_passport = df_view.iloc[0]["id"]
 
     selected_id = str(st.session_state.selected_passport)
 
-    # =========================
-    # LAYOUT (MASTER / DETAIL)
-    # =========================
-    col_master, col_detail = st.columns([2.4, 1])
-
     # ======================================================
-    # MASTER — ENTERPRISE LIST (VIRTUALIZED STYLE)
+    # MASTER LIST (TOP)
     # ======================================================
-    with col_master:
-        st.subheader("📦 Passports")
+    st.subheader("📦 Passports")
 
-        # compact table (performance + UX)
-        st.dataframe(
-            df_view[["id", "product_type", "version"]],
-            use_container_width=True,
-            hide_index=True
-        )
+    st.dataframe(
+        df_view[["id", "product_type", "version"]],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.divider()
+
+    for _, row in df_view.head(200).iterrows():
+        pid = row["id"]
+        is_selected = (pid == selected_id)
+
+        if is_selected:
+            st.markdown(f"### 🟢 {pid}")
+        else:
+            st.markdown(f"*{pid}*")
+
+        c1, c2, c3 = st.columns([2, 1, 1])
+        c1.write(f"Type: {row.get('product_type', '-')}")
+        c2.write(f"v{row.get('version', '-')}")
+        c3.write("")
+
+        if st.button("Open", key=f"open_{pid}"):
+            st.session_state.selected_passport = pid
 
         st.divider()
 
-        # card navigation (explicit selection)
-        for _, row in df_view.head(200).iterrows():  # safety cap enterprise
-            pid = row["id"]
-
-            is_selected = (pid == selected_id)
-
-            if is_selected:
-                st.markdown(f"### 🟢 {pid}")
-            else:
-                st.markdown(f"*{pid}*")
-
-            c1, c2, c3 = st.columns([2, 1, 1])
-
-            c1.write(f"Type: {row.get('product_type', '-')}")
-            c2.write(f"v{row.get('version', '-')}")
-            c3.write("")
-
-            if st.button("Open", key=f"open_{pid}"):
-                st.session_state.selected_passport = pid
-
-            st.divider()
-
     # ======================================================
-    # DETAIL — ENTERPRISE DRAWER (SIMULATED)
-    # ======================================================
-    passport = services.load_passport_from_file(selected_id)
-
-    with col_detail:
-        st.subheader("🔎 Detail View")
-
-        if not passport:
-            st.error("Passport non trovato")
-            st.stop()
-
-        # HEADER
-        st.markdown(f"## 📦 {passport.get('id')}")
-
-        # KPI ROW
-        k1, k2 = st.columns(2)
-        k1.metric("Version", passport.get("version"))
-        k2.metric("Type", passport.get("product_type"))
-
-        st.divider()
-
-        # STATUS BLOCK
-        lifecycle = (passport.get("lifecycle") or {}).get("status")
-        st.write("### Lifecycle Status")
-        st.success(lifecycle if lifecycle else "unknown")
-
-        st.write("### Evidences")
-        st.info(len(passport.get("evidences", [])))
-
-        # SECURITY BLOCK
-        st.divider()
-        st.write("### 🔐 Security Layer")
-
-        st.json(passport.get("digital_signature"))
-        st.json(passport.get("qualified_seal"))
-
-        # QUICK ACTIONS (enterprise pattern)
-        st.divider()
-        st.write("### ⚡ Actions")
-
-        colA, colB = st.columns(2)
-
-        with colA:
-            st.button("Validate", use_container_width=True)
-
-        with colB:
-            st.button("Export", use_container_width=True)
-
-    # ======================================================
-    # SECONDARY DATA (FULL WIDTH)
+    # DETAIL (FULL WIDTH)
     # ======================================================
     st.divider()
 
-    st.subheader("🧩 Fields Registry")
+    passport = services.load_passport_from_file(selected_id)
 
-    df_f = df_fields[df_fields["passport_id"] == selected_id]
-    st.dataframe(df_f, use_container_width=True, hide_index=True)
+    st.subheader("🔎 Passport Detail")
 
-    st.subheader("🖼️ Media Assets")
+    if not passport:
+        st.error("Passport non trovato")
+        st.stop()
 
-    imgs = df_images[df_images["passport_id"] == selected_id]
-    imgs = imgs.drop_duplicates(subset=["file_base64"])
+    # HEADER
+    st.markdown(f"## 📦 {passport.get('id')}")
 
-    if imgs.empty:
-        st.info("No media attached")
-    else:
-        cols = st.columns(5)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Version", passport.get("version"))
+    c2.metric("Type", passport.get("product_type"))
+    c3.metric(
+        "Lifecycle",
+        (passport.get("lifecycle") or {}).get("status", "unknown")
+    )
 
-        for i, (_, row) in enumerate(imgs.iterrows()):
-            with cols[i % 5]:
-                st.image(
-                    f"data:image/jpeg;base64,{row['file_base64']}",
-                    caption=row.get("caption", ""),
-                    use_container_width=True
-                )
+    # ACTIONS
+    colA, colB = st.columns(2)
+    colA.button("✅ Validate", use_container_width=True)
+    colB.button("📤 Export", use_container_width=True)
+
+    st.divider()
+
+    # =========================
+    # TABS (ENTERPRISE UX)
+    # =========================
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Overview",
+        "Security",
+        "Fields",
+        "Media"
+    ])
+
+    # OVERVIEW
+    with tab1:
+        st.write("### Evidences")
+        st.info(len(passport.get("evidences", [])))
+
+    # SECURITY
+    with tab2:
+        st.write("### Digital Signature")
+        st.json(passport.get("digital_signature"))
+
+        st.write("### Qualified Seal")
+        st.json(passport.get("qualified_seal"))
+
+    # FIELDS
+    with tab3:
+        df_f = df_fields[df_fields["passport_id"] == selected_id]
+        st.dataframe(df_f, use_container_width=True, hide_index=True)
+
+    # MEDIA
+    with tab4:
+        imgs = df_images[df_images["passport_id"] == selected_id]
+        imgs = imgs.drop_duplicates(subset=["file_base64"])
+
+        if imgs.empty:
+            st.info("No media attached")
+        else:
+            cols = st.columns(5)
+            for i, (_, row) in enumerate(imgs.iterrows()):
+                with cols[i % 5]:
+                    st.image(
+                        f"data:image/jpeg;base64,{row['file_base64']}",
+                        caption=row.get("caption", ""),
+                        use_container_width=True
+                    )
