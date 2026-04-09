@@ -1862,7 +1862,9 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         }
         val_key = str(value).lower()
         color = color_map.get(val_key, "#36120D")  # default dark
-        return f"<span style='display:inline-block;width:12px;height:12px;border-radius:50%;background:{color};margin-right:6px;'></span>{value}"
+        # Cerchietto + testo colorato
+        return f"<span style='display:inline-block;width:12px;height:12px;border-radius:50%;background:{color};margin-right:6px;'></span>" \
+               f"<span style='color:{color}; font-weight:bold'>{value}</span>"
 
     # --- COVER ---
     cover_html = f"""
