@@ -2079,41 +2079,56 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
     return html
 
+def safe_get(passport, section, field, default=""):
+    """
+    Recupera un campo in modo sicuro:
+    - se la sezione non esiste → default
+    - se il campo non esiste → default
+    - se il campo è None → default
+    - se il campo è un dict → prende .get("value")
+    """
+    sec = passport.get("sections", {}).get(section, {})
+    raw = sec.get(field, default)
+
+    if isinstance(raw, dict):
+        return raw.get("value", default) or default
+
+    return raw or default
+
+
 def compute_pef_score(passport: dict) -> int:
     """
     Calcola un punteggio ambientale ispirato al modello PEF (0–100).
-    Usa i campi del DPP già estratti e validati.
+    Funziona anche se TUTTI i campi sono null o mancanti.
     """
-
-    sections = passport.get("sections", {})
-    pdf = sections.get("PDF", {})
-    eco = sections.get("Ecolabel_UE", {})
 
     score = 0
 
     # ---------------------------------------------------------
     # 1) MATERIALI & RICICLATO (30 punti)
     # ---------------------------------------------------------
-    riciclato = pdf.get("Percentuale di contenuto riciclato", {}).get("value", "")
+    riciclato = safe_get(passport, "PDF", "Percentuale di contenuto riciclato", "0")
+
     try:
-        riciclato_val = float(str(riciclato).replace("%","").strip())
+        riciclato_val = float(str(riciclato).replace("%", "").strip())
     except:
         riciclato_val = 0
 
-    score += min(30, riciclato_val * 0.3)  # max 30 punti
+    score += min(30, riciclato_val * 0.3)
 
-    sostanze = pdf.get("Sostanze preoccupanti", {}).get("value", "").lower()
-    if "nessuna" in sostanze or sostanze.strip() == "":
+    sostanze = safe_get(passport, "PDF", "Sostanze preoccupanti", "").lower()
+    if not sostanze or sostanze in ["nessuna", "no", "none"]:
         score += 10
     else:
-        score -= 10  # penalità SVHC
+        score -= 10
 
     # ---------------------------------------------------------
     # 2) ENERGIA & PRODUZIONE (20 punti)
     # ---------------------------------------------------------
-    energia = pdf.get("Energia consumata", {}).get("value", "")
+    energia = safe_get(passport, "PDF", "Energia consumata", "")
+
     try:
-        energia_val = float(str(energia).replace("kwh","").strip())
+        energia_val = float(str(energia).replace("kwh", "").strip())
     except:
         energia_val = None
 
@@ -2125,45 +2140,45 @@ def compute_pef_score(passport: dict) -> int:
         else:
             score += 2
 
-    luogo = pdf.get("Luogo di Produzione", {}).get("value", "").lower()
-    if any(x in luogo for x in ["italia","eu","europe"]):
+    luogo = safe_get(passport, "PDF", "Luogo di Produzione", "").lower()
+    if any(x in luogo for x in ["italia", "eu", "europe"]):
         score += 5
 
     # ---------------------------------------------------------
     # 3) DURABILITÀ & RIPARABILITÀ (20 punti)
     # ---------------------------------------------------------
-    dur = pdf.get("Durabilità", {}).get("value", "").lower()
+    dur = safe_get(passport, "PDF", "Durabilità", "").lower()
     if "alta" in dur or "elevata" in dur:
         score += 10
 
-    rip = pdf.get("Istruzioni di riparazione", {}).get("value", "")
-    if rip and rip.strip():
+    rip = safe_get(passport, "PDF", "Istruzioni di riparazione", "")
+    if rip:
         score += 5
 
-    parti = pdf.get("Parti sostituibili", {}).get("value", "")
-    if parti and parti.strip():
+    parti = safe_get(passport, "PDF", "Parti sostituibili", "")
+    if parti:
         score += 5
 
     # ---------------------------------------------------------
     # 4) FINE VITA (15 punti)
     # ---------------------------------------------------------
-    smalt = pdf.get("Indicazioni di smaltimento", {}).get("value", "")
-    if smalt and smalt.strip():
+    smalt = safe_get(passport, "PDF", "Indicazioni di smaltimento", "")
+    if smalt:
         score += 10
 
-    fine_vita = pdf.get("Fine vita", {}).get("value", "").lower()
+    fine_vita = safe_get(passport, "PDF", "Fine vita", "").lower()
     if "riciclabile" in fine_vita:
         score += 5
 
     # ---------------------------------------------------------
     # 5) CERTIFICAZIONI & ECOLABEL (15 punti)
     # ---------------------------------------------------------
-    cert = pdf.get("Certificazioni", {}).get("value", "")
-    if cert and cert.strip():
+    cert = safe_get(passport, "PDF", "Certificazioni", "")
+    if cert:
         score += 10
 
-    if eco:
-        # ogni campo ecolabel conforme vale 1 punto (max 5)
+    eco = passport.get("sections", {}).get("Ecolabel_UE", {})
+    if isinstance(eco, dict):
         eco_points = sum(1 for v in eco.values() if v is True)
         score += min(5, eco_points)
 
