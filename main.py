@@ -275,6 +275,7 @@ with tabs[2]:
                 cert_data=None,
                 client=client
             )
+            services.compute_pef_score(passport)
         else:
             services.merge_data(
                 passport,
@@ -282,6 +283,7 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
+            services.compute_pef_score(passport)
 
         # 4) IMMAGINI
         for b in (st.session_state.uploaded_images_bytes or []):
