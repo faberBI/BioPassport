@@ -1624,8 +1624,8 @@ def sign_passport_pdf_ses_openapi(
     signer_email: str,
     signer_mobile: str,
     page: int = 6,
-    x: int = 430,
-    y: int = 324
+    x: int = 420,
+    y: int = 8
 ) -> dict:
     """
     Avvia una firma elettronica semplice (EU-SES) su PDF del DPP,
