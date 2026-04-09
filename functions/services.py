@@ -2079,5 +2079,101 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
     return html
 
+def compute_pef_score(passport: dict) -> int:
+    """
+    Calcola un punteggio ambientale ispirato al modello PEF (0–100).
+    Usa i campi del DPP già estratti e validati.
+    """
+
+    sections = passport.get("sections", {})
+    pdf = sections.get("PDF", {})
+    eco = sections.get("Ecolabel_UE", {})
+
+    score = 0
+
+    # ---------------------------------------------------------
+    # 1) MATERIALI & RICICLATO (30 punti)
+    # ---------------------------------------------------------
+    riciclato = pdf.get("Percentuale di contenuto riciclato", {}).get("value", "")
+    try:
+        riciclato_val = float(str(riciclato).replace("%","").strip())
+    except:
+        riciclato_val = 0
+
+    score += min(30, riciclato_val * 0.3)  # max 30 punti
+
+    sostanze = pdf.get("Sostanze preoccupanti", {}).get("value", "").lower()
+    if "nessuna" in sostanze or sostanze.strip() == "":
+        score += 10
+    else:
+        score -= 10  # penalità SVHC
+
+    # ---------------------------------------------------------
+    # 2) ENERGIA & PRODUZIONE (20 punti)
+    # ---------------------------------------------------------
+    energia = pdf.get("Energia consumata", {}).get("value", "")
+    try:
+        energia_val = float(str(energia).replace("kwh","").strip())
+    except:
+        energia_val = None
+
+    if energia_val is not None:
+        if energia_val < 10:
+            score += 15
+        elif energia_val < 50:
+            score += 8
+        else:
+            score += 2
+
+    luogo = pdf.get("Luogo di Produzione", {}).get("value", "").lower()
+    if any(x in luogo for x in ["italia","eu","europe"]):
+        score += 5
+
+    # ---------------------------------------------------------
+    # 3) DURABILITÀ & RIPARABILITÀ (20 punti)
+    # ---------------------------------------------------------
+    dur = pdf.get("Durabilità", {}).get("value", "").lower()
+    if "alta" in dur or "elevata" in dur:
+        score += 10
+
+    rip = pdf.get("Istruzioni di riparazione", {}).get("value", "")
+    if rip and rip.strip():
+        score += 5
+
+    parti = pdf.get("Parti sostituibili", {}).get("value", "")
+    if parti and parti.strip():
+        score += 5
+
+    # ---------------------------------------------------------
+    # 4) FINE VITA (15 punti)
+    # ---------------------------------------------------------
+    smalt = pdf.get("Indicazioni di smaltimento", {}).get("value", "")
+    if smalt and smalt.strip():
+        score += 10
+
+    fine_vita = pdf.get("Fine vita", {}).get("value", "").lower()
+    if "riciclabile" in fine_vita:
+        score += 5
+
+    # ---------------------------------------------------------
+    # 5) CERTIFICAZIONI & ECOLABEL (15 punti)
+    # ---------------------------------------------------------
+    cert = pdf.get("Certificazioni", {}).get("value", "")
+    if cert and cert.strip():
+        score += 10
+
+    if eco:
+        # ogni campo ecolabel conforme vale 1 punto (max 5)
+        eco_points = sum(1 for v in eco.values() if v is True)
+        score += min(5, eco_points)
+
+    # ---------------------------------------------------------
+    # NORMALIZZAZIONE
+    # ---------------------------------------------------------
+    score = max(0, min(100, int(score)))
+
+    passport["sustainability_score"] = score
+    return score
+
 
 
