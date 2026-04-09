@@ -468,43 +468,7 @@ with tabs[2]:
                 st.write(u)
         elif pp.get("simple_signature"):
             with st.expander("Debug risposta SES"):
-                st.json(pp["simple_signature"].get("raw_response", {}))
-
-        # --------------------------------------------------
-        # 📥 SCARICA SEMPRE IL QR CODE (generato localmente)
-        # --------------------------------------------------
-        import qrcode
-        import io
-        from PIL import Image
-        
-        # URL del passport
-        url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
-        
-        # Genera QR localmente
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_H,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(url)
-        qr.make(fit=True)
-        
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        
-        # Buffer per download
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        buf.seek(0)
-        
-        # Bottone download
-        st.download_button(
-            label="📥 Scarica QR code",
-            data=buf,
-            file_name=f"{pp.get('id', 'passport')}_qr.png",
-            mime="image/png"
-        )
-        
+                st.json(pp["simple_signature"].get("raw_response", {}))        
 
 # ======================================================
 # TAB 4 — ARCHIVIO (ENTERPRISE GRADE - REFACTORED)
