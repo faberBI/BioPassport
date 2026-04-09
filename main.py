@@ -188,46 +188,90 @@ with tabs[0]:
 # TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
+
     if st.session_state.pdf_data and st.session_state.image_data:
+
+        # --------------------------------------------------
+        # VALIDAZIONE PDF
+        # --------------------------------------------------
         st.subheader("Validazione PDF")
-        st.session_state.validated_pdf = {
-            k: {
-                "value": st.text_input(f"PDF · {k}", v.get("value", ""), help=v.get("explanation", "")),
-                "confidence": v.get("confidence", 0),
+        validated_pdf = {}
+
+        for k, v in st.session_state.pdf_data.items():
+            original_val = v.get("value", "")
+            user_val = st.text_input(
+                f"PDF · {k}",
+                value=original_val,
+                help=v.get("explanation", ""),
+                key=f"pdf_{k}"
+            )
+
+            validated_pdf[k] = {
+                "value": user_val,
+                "confidence": 1.0 if user_val != original_val else v.get("confidence", 0),
                 "explanation": v.get("explanation", "")
             }
-            for k, v in st.session_state.pdf_data.items()
-        }
 
+        st.session_state.validated_pdf = validated_pdf
+
+        # --------------------------------------------------
+        # VALIDAZIONE IMMAGINI
+        # --------------------------------------------------
         st.subheader("Validazione Immagini")
-        st.session_state.validated_image = {
-            k: {
-                "value": st.text_input(f"IMG · {k}", v.get("value", ""), help=v.get("explanation", "")),
-                "confidence": v.get("confidence", 0),
+        validated_image = {}
+
+        for k, v in st.session_state.image_data.items():
+            original_val = v.get("value", "")
+            user_val = st.text_input(
+                f"IMG · {k}",
+                value=original_val,
+                help=v.get("explanation", ""),
+                key=f"img_{k}"
+            )
+
+            validated_image[k] = {
+                "value": user_val,
+                "confidence": 1.0 if user_val != original_val else v.get("confidence", 0),
                 "explanation": v.get("explanation", "")
             }
-            for k, v in st.session_state.image_data.items()
-        }
 
+        st.session_state.validated_image = validated_image
+
+        # --------------------------------------------------
+        # VALIDAZIONE CERTIFICATI
+        # --------------------------------------------------
         if st.session_state.cert_data:
             st.subheader("Certificati")
-            validated = []
+            validated_cert = []
+
             for i, cert in enumerate(st.session_state.cert_data):
                 st.markdown(f"**Certificato {i+1}**")
                 row = {}
+
                 for k, v in cert.items():
-                    val = v.get("value", "") if isinstance(v, dict) else v
+                    original_val = v.get("value", "") if isinstance(v, dict) else v
+
+                    user_val = st.text_input(
+                        f"CERT {i+1} · {k}",
+                        value=original_val,
+                        key=f"cert_{i}_{k}"
+                    )
+
                     row[k] = {
-                        "value": st.text_input(f"CERT {i+1} · {k}", val, key=f"c{i}_{k}"),
-                        "confidence": v.get("confidence", 0) if isinstance(v, dict) else 0,
+                        "value": user_val,
+                        "confidence": 1.0 if user_val != original_val else (v.get("confidence", 0) if isinstance(v, dict) else 0),
                         "explanation": v.get("explanation", "") if isinstance(v, dict) else ""
                     }
-                validated.append(row)
-            st.session_state.validated_cert = validated
+
+                validated_cert.append(row)
+
+            st.session_state.validated_cert = validated_cert
 
         st.success("Validazione pronta ✅")
+
     else:
         st.info("Esegui prima l’analisi")
+
 
 # ======================================================
 # TAB 3 — PUBBLICA
