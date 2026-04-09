@@ -1,7 +1,7 @@
 import os
 import json
 import base64
-import fitz  # PyMuPDF
+#import fitz  # PyMuPDF
 import pdfplumber
 import unicodedata
 from difflib import get_close_matches
