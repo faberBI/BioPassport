@@ -250,7 +250,7 @@ with tabs[2]:
     # --------------------------------------------------
     # Bottone principale: PUBBLICA DPP
     # --------------------------------------------------
-    if st.button("🚀 Pubblica Digital Product Passport"):
+    if st.button("🚀 Finalizza e pubblica DPP"):
 
         # 1) CREAZIONE PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
@@ -393,7 +393,7 @@ with tabs[2]:
     # --------------------------------------------------
     if ENABLE_SES:
         st.divider()
-        st.subheader("✍️ Firma elettronica semplice (OTP)")
+        st.subheader("✍️ Firma DPP")
 
         if not pp:
             st.info("Pubblica prima il DPP per poter avviare la firma.")
