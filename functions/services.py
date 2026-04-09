@@ -1981,7 +1981,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         elif s >= 41:
             return "#F6C23C", "Medium impact"
         else:
-            return "#C0392B", "High impact"
+            return "#E63946", "High impact"
 
     color, label = traffic_light_from_score(sustainability_score)
     angle = int((sustainability_score / 100) * 360)
