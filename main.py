@@ -386,7 +386,7 @@ with tabs[2]:
         st.code(url)
 
         qr_img = services.generate_qr_from_url(url)
-        st.image(qr_img, caption="QR DPP")
+        #st.image(qr_img, caption="QR DPP")
 
     # --------------------------------------------------
     # 11) FIRMA ELETTRONICA SEMPLICE (SES)
