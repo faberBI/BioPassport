@@ -636,20 +636,35 @@ def initialize_passport(pid, tipo, fields):
 def merge_data(passport, pdf_data=None, image_data=None, cert_data=None):
     changed = False
 
+    # --- PDF (deep merge) ---
     if pdf_data:
-        passport["sections"].setdefault("PDF", {}).update(pdf_data)
+        passport["sections"].setdefault("PDF", {})
+        for field, newdata in pdf_data.items():
+            old = passport["sections"]["PDF"].get(field, {})
+            passport["sections"]["PDF"][field] = {
+                "value": newdata.get("value", old.get("value")),
+                "confidence": newdata.get("confidence", old.get("confidence")),
+                "explanation": newdata.get("explanation", old.get("explanation")),
+            }
         changed = True
+
+    # --- IMMAGINI ---
     if image_data:
         passport["sections"]["Images"] = image_data
         changed = True
+
+    # --- CERTIFICATI ---
     if cert_data is not None:
         passport["certificates"] = cert_data
         changed = True
 
+    # --- VERSIONING ---
     if changed:
         append_lifecycle_event(passport, "updated", {"what": "merge_data"})
         espr_stamp(passport, actor="manufacturer", action="data_merge", reason="Merged validated data")
+
     return passport
+
 
 def save_passport_to_file(passport: dict):
     os.makedirs(PASSPORT_DIR, exist_ok=True)
