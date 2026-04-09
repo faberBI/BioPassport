@@ -12,4 +12,5 @@ PyMuPDF
 openpyxl
 cryptography
 playwright
+weasyprint 
 
