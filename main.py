@@ -383,7 +383,7 @@ with tabs[2]:
     pp = st.session_state.get("published_passport")
     if pp:
         url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
-        st.code(url)
+        #st.code(url)
 
         qr_img = services.generate_qr_from_url(url)
         #st.image(qr_img, caption="QR DPP")
