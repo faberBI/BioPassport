@@ -215,28 +215,32 @@ with tabs[1]:
         st.session_state.validated_pdf = validated_pdf
 
         # --------------------------------------------------
-        # VALIDAZIONE IMMAGINI
+        # VALIDAZIONE IMMAGINI (versione pulita)
         # --------------------------------------------------
         st.subheader("Validazione Immagini")
         validated_image = {}
-
+        
         for k, v in st.session_state.image_data.items():
-            original_val = v.get("value", "")
+        
+            # Titolo del campo (pulito)
+            st.markdown(f"**{k}**")
+        
+            # Campo editabile (solo valore)
             user_val = st.text_input(
-                f"IMG · {k}",
-                value=original_val,
+                "",
+                value=v.get("value", ""),
                 help=v.get("explanation", ""),
                 key=f"img_{k}"
             )
-
+        
+            # Salvataggio
             validated_image[k] = {
                 "value": user_val,
-                "confidence": 1.0 if user_val != original_val else v.get("confidence", 0),
+                "confidence": 1.0 if user_val != v.get("value") else v.get("confidence", 0),
                 "explanation": v.get("explanation", "")
             }
-
+        
         st.session_state.validated_image = validated_image
-
         # --------------------------------------------------
         # VALIDAZIONE CERTIFICATI
         # --------------------------------------------------
@@ -326,9 +330,7 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
-
-        
-        st.write("DEBUG PDF DATA:", passport["sections"].get("PDF"))
+            
         # Calcolo PEF + breakdown
         services.compute_pef_score(passport)
 
