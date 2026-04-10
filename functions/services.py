@@ -1976,6 +1976,31 @@ def compute_pef_score(passport: dict) -> int:
 
     return score
 
+
+
+def missing_pef_fields(passport):
+    required = [
+        "Percentuale di contenuto riciclato",
+        "Sostanze preoccupanti",
+        "Energia consumata",
+        "Luogo di Produzione",
+        "Durabilità",
+        "Istruzioni di riparazione",
+        "Parti sostituibili",
+        "Indicazioni di smaltimento",
+        "Fine vita",
+        "Certificazioni"
+    ]
+
+    missing = []
+    for field in required:
+        val = safe_get(passport, "PDF", field, "")
+        if not val:
+            missing.append(field)
+
+    return missing
+
+
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     import json
     from datetime import datetime
@@ -2059,7 +2084,23 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         </table>
     </div>
     """
+    # ---------------------------------------------------------
+    # BREAKDOWN PEF
+    # ---------------------------------------------------------
+    break = passport.get("sustainability_breakdown", {})
+    break_rows = "".join(
+        f"<tr><td class='field-name'>{k}</td><td>{v}</td></tr>"
+        for k, v in break.items()
+    )
 
+    breakdown_html = f"""
+    <div class="section">
+        <h2>Environmental Impact Breakdown</h2>
+        <table class="data-table">
+            {break_rows}
+        </table>
+    </div>
+    """  
     # ---------------------------------------------------------
     # QR INLINE
     # ---------------------------------------------------------
@@ -2275,6 +2316,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     <body>
         {cover_html}
         {summary_html}
+        {breakdown_html}
         {qr_inline}
         {sections_html}
         {certs_html}
