@@ -366,45 +366,37 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
 
 
 
-def gpt_extract_from_pdf(pdf_text, client, product_type, fields):
+def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list):
     """
-    Estrazione PREMIUM e stabile dei campi da PDF.
-    - Funziona con qualsiasi template
-    - Riconosce sinonimi
-    - Interpreta frasi discorsive
-    - Deduce valori impliciti
-    - Normalizza automaticamente
-    - JSON sempre valido
+    Estrae i campi dal PDF in modo flessibile:
+    - accetta nomi simili
+    - accetta sinonimi
+    - accetta varianti (es. 'Percentuale riciclato' vs '% di contenuto riciclato')
+    - restituisce sempre un dizionario con tutti i campi richiesti
     """
 
     prompt = f"""
-Sei un estrattore di dati. Analizza il testo seguente e compila SOLO i campi richiesti.
+Sei un estrattore di dati per un Digital Product Passport.
 
-TESTO PDF:
---------------------
-{pdf_text}
---------------------
-
-CAMPi DA ESTRARRE:
+Devi estrarre i seguenti campi, ANCHE SE nel PDF i nomi non coincidono esattamente:
 {fields}
 
-ISTRUZIONI:
-- Cerca ogni campo anche se scritto in modo diverso (sinonimi, abbreviazioni).
-- Se il valore è esplicito, estrailo.
-- Se è implicito, deducilo.
-- Se è discorsivo, interpretalo.
-- Se non trovi nulla, lascia value = "".
-- Rispondi SOLO in JSON valido, senza testo fuori dal JSON.
+Regole:
+- Se un campo è presente con un nome simile, estrai il valore.
+- Se un campo non è presente, restituisci stringa vuota.
+- Non inventare valori.
+- Rispondi in JSON puro.
 
-FORMATO OBBLIGATORIO:
+Testo PDF:
+\"\"\"{pdf_text}\"\"\"
+
+Rispondi con un JSON nel formato:
 {{
-  "Nome campo": {{
-    "value": "...",
-    "confidence": 0.0-1.0,
-    "explanation": "Motivo della scelta"
-  }}
+  "Campo1": {{"value": "...", "confidence": 0.9, "explanation": "..."}},
+  "Campo2": {{"value": "...", "confidence": 0.9, "explanation": "..."}},
+  ...
 }}
-"""
+    """
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -412,22 +404,23 @@ FORMATO OBBLIGATORIO:
         temperature=0
     )
 
-    # Parsing robusto
     try:
         data = json.loads(response.choices[0].message["content"])
     except Exception:
-        data = {}
+        return {}
 
-    # Fallback: garantisce che TUTTI i campi esistano
-    clean = {}
+    # Normalizza output
+    result = {}
     for f in fields:
-        clean[f] = data.get(f, {
-            "value": "",
-            "confidence": 0,
-            "explanation": ""
-        })
+        entry = data.get(f, {})
+        result[f] = {
+            "value": entry.get("value", ""),
+            "confidence": entry.get("confidence", 0),
+            "explanation": entry.get("explanation", "")
+        }
 
-    return clean
+    return result
+
 
 
 
