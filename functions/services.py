@@ -21,6 +21,88 @@ import os
 import streamlit as st
 import base64
 
+def normalize_pdf_fields(pdf_data: dict) -> dict:
+    """
+    Normalizza i nomi dei campi PDF in modo che compute_pef_score
+    trovi sempre i campi canonici, indipendentemente da come GPT li ha estratti.
+    """
+
+    FIELD_MAP = {
+        "Percentuale di contenuto riciclato": [
+            "Percentuale di contenuto riciclato",
+            "Percentuale riciclato",
+            "% di contenuto riciclato",
+            "% riciclato",
+            "Contenuto riciclato"
+        ],
+        "Sostanze preoccupanti": [
+            "Sostanze preoccupanti",
+            "Sostanze pericolose",
+            "Sostanze"
+        ],
+        "Energia consumata": [
+            "Energia consumata",
+            "Consumo energetico",
+            "Energia"
+        ],
+        "Luogo di Produzione": [
+            "Luogo di Produzione",
+            "Luogo di produzione",
+            "Produzione",
+            "Made in",
+            "Prodotto in"
+        ],
+        "Durabilità": [
+            "Durabilità",
+            "Durata",
+            "Resistenza"
+        ],
+        "Istruzioni di riparazione": [
+            "Istruzioni di riparazione",
+            "Riparabilità",
+            "Riparazione"
+        ],
+        "Parti sostituibili": [
+            "Parti sostituibili",
+            "Componenti sostituibili",
+            "Parti di ricambio"
+        ],
+        "Indicazioni di smaltimento": [
+            "Indicazioni di smaltimento",
+            "Smaltimento",
+            "Disposal"
+        ],
+        "Fine vita": [
+            "Fine vita",
+            "End of life",
+            "Riciclabile"
+        ],
+        "Certificazioni": [
+            "Certificazioni",
+            "Certificato",
+            "Certificazione"
+        ]
+    }
+
+    normalized = {}
+
+    for canonical, variants in FIELD_MAP.items():
+        found = False
+        for v in variants:
+            if v in pdf_data and pdf_data[v].get("value") not in ["", None]:
+                normalized[canonical] = pdf_data[v]
+                found = True
+                break
+
+        if not found:
+            normalized[canonical] = {
+                "value": "",
+                "confidence": 0.0,
+                "explanation": ""
+            }
+
+    return normalized
+
 def generate_pdf_from_html(html: str) -> bytes:
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
     endpoint = "https://pdf.openapi.it/base"
@@ -54,10 +136,45 @@ TRUSTED_ISSUERS = ["Chambersign","InfoCert","Aruba PEC","GlobalSign EU","D-Trust
 PRODUCT_FIELDS = {
     "mobile": {
         "pdf": [
-            "Nome prodotto","Numero di modello","Produttore","Materiali/componenti utilizzati",
-            "% di contenuto riciclato","Sostanze preoccupanti","Conformità tecnica",
-            "Prezzo in euro","Luogo di Produzione","Data di produzione","Dimensioni",
-            "Peso","Energia consumata"
+            # --- Campi generali ---
+            "Nome prodotto",
+            "Numero di modello",
+            "Produttore",
+            "Materiali/componenti utilizzati",
+            "Conformità tecnica",
+            "Prezzo in euro",
+            "Data di produzione",
+            "Dimensioni",
+            "Peso",
+
+            # --- Campi PEF (fondamentali) ---
+            "Percentuale riciclato",
+            "Percentuale di contenuto riciclato",   # variante
+            "% di contenuto riciclato",            # variante
+            "Sostanze preoccupanti",
+            "Energia consumata",
+            "Luogo di produzione",
+            "Luogo di Produzione",                 # variante
+            "Durabilità",
+            "Istruzioni di riparazione",
+            "Parti sostituibili",
+            "Indicazioni di smaltimento",
+            "Fine vita",
+            "Certificazioni",
+
+            # --- Campi aggiuntivi già presenti ---
+            "descrizione_prodotto",
+            "svhc_limitati",
+            "clp_conformita",
+            "legno_certificato",
+            "plastica_conforme",
+            "metallo_conforme",
+            "rivestimenti_ok",
+            "formaldeide_bassa",
+            "voc_bassi",
+            "facilmente_smortabile",
+            "produzione_basso_impatto",
+            "info_consumatore_ok"
         ],
         "image": ["Colore","Condizioni"]
     }
@@ -812,16 +929,15 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
 
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
     """
-    Versione robusta e coerente con merge_data:
-    - deep merge dei campi
-    - i valori manuali sovrascrivono quelli AI
-    - nessuna perdita di dati
-    - integrazione Ecolabel + PDF + immagini + certificati
+    Versione robusta:
+    - Estrae PDF + Ecolabel
+    - Normalizza i nomi dei campi PDF
+    - Deep merge coerente
+    - Prepara i dati per il PEF
     """
 
     changed = False
 
-    # Assicura struttura
     passport.setdefault("sections", {})
     passport["sections"].setdefault("PDF", {})
     passport["sections"].setdefault("Images", {})
@@ -835,12 +951,17 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
         passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
-        # Estrazione PDF flessibile
+        # Estrazione testo PDF
         pdf_text = extract_text_from_pdf(pdf_file)
+
+        # Estrazione GPT
         pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
 
+        # 🔥 NORMALIZZAZIONE (fondamentale per il PEF)
+        normalized_pdf = normalize_pdf_fields(pdf_text_data)
+
         # Deep merge PDF
-        for field, newdata in pdf_text_data.items():
+        for field, newdata in normalized_pdf.items():
             old = passport["sections"]["PDF"].get(field, {})
             passport["sections"]["PDF"][field] = {
                 "value": newdata.get("value", old.get("value", "")),
@@ -867,7 +988,6 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
     # 3) CERTIFICATI
     # -------------------------
     if cert_data:
-        passport.setdefault("certificates", {})
         for field, newdata in cert_data.items():
             old = passport["certificates"].get(field, {})
             passport["certificates"][field] = {
@@ -890,7 +1010,6 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
         )
 
     return passport
-
 
 # ======================================================
 # EXCEL
