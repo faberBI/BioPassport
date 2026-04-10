@@ -368,124 +368,42 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
 
 def gpt_extract_from_pdf(pdf_text, client, product_type, fields):
     """
-    Estrazione ULTRA-PREMIUM dei campi da PDF.
+    Estrazione PREMIUM e stabile dei campi da PDF.
     - Funziona con qualsiasi template
-    - Riconosce sinonimi e varianti
+    - Riconosce sinonimi
     - Interpreta frasi discorsive
     - Deduce valori impliciti
-    - Normalizza automaticamente i concetti
-    - Gestisce PDF disordinati, tabellari, narrativi, misti
-    - Include esempi few-shot per massima accuratezza
-    - Garantisce SEMPRE un dizionario completo (mai {})
+    - Normalizza automaticamente
+    - JSON sempre valido
     """
 
     prompt = f"""
-Sei un estrattore di dati altamente intelligente e specializzato nell'analisi di documenti PDF
-con formati diversi, anche non strutturati.
+Sei un estrattore di dati. Analizza il testo seguente e compila SOLO i campi richiesti.
 
-Il tuo compito è estrarre informazioni dal seguente testo:
-
+TESTO PDF:
 --------------------
 {pdf_text}
 --------------------
 
-Devi estrarre ESATTAMENTE questi campi:
+CAMPi DA ESTRARRE:
 {fields}
 
-===========================
-ESEMPI FEW-SHOT (molto importanti)
-===========================
+ISTRUZIONI:
+- Cerca ogni campo anche se scritto in modo diverso (sinonimi, abbreviazioni).
+- Se il valore è esplicito, estrailo.
+- Se è implicito, deducilo.
+- Se è discorsivo, interpretalo.
+- Se non trovi nulla, lascia value = "".
+- Rispondi SOLO in JSON valido, senza testo fuori dal JSON.
 
-ESEMPIO 1 — estrazione da testo strutturato:
-Testo:
-"Durabilità: Alta
-Fine vita: Riciclabile
-Certificazioni: FSC"
-
-Output:
-{{
-  "Durabilità": {{
-    "value": "Alta",
-    "confidence": 0.95,
-    "explanation": "Valore esplicito nel testo."
-  }},
-  "Fine vita": {{
-    "value": "Riciclabile",
-    "confidence": 0.95,
-    "explanation": "Valore esplicito nel testo."
-  }},
-  "Certificazioni": {{
-    "value": "FSC",
-    "confidence": 0.95,
-    "explanation": "Valore esplicito nel testo."
-  }}
-}}
-
-ESEMPIO 2 — estrazione da testo discorsivo:
-Testo:
-"Questo mobile è progettato per durare molti anni ed è facile da riparare."
-
-Output:
-{{
-  "Durabilità": {{
-    "value": "Alta",
-    "confidence": 0.90,
-    "explanation": "La frase indica lunga durata."
-  }},
-  "Istruzioni di riparazione": {{
-    "value": "Disponibili",
-    "confidence": 0.85,
-    "explanation": "Il testo indica che è facile da riparare."
-  }}
-}}
-
-ESEMPIO 3 — estrazione da testo implicito:
-Testo:
-"Non contiene sostanze pericolose note."
-
-Output:
-{{
-  "Sostanze preoccupanti": {{
-    "value": "Nessuna",
-    "confidence": 0.90,
-    "explanation": "Il testo indica assenza di sostanze pericolose."
-  }}
-}}
-
-ESEMPIO 4 — estrazione da testo con sinonimi:
-Testo:
-"Materiale riciclabile al 100%."
-
-Output:
-{{
-  "Fine vita": {{
-    "value": "Riciclabile",
-    "confidence": 0.90,
-    "explanation": "Sinonimo diretto."
-  }}
-}}
-
-===========================
-LINEE GUIDA PREMIUM
-===========================
-
-1) Cerca ogni campo anche se scritto in modo diverso (sinonimi, abbreviazioni, varianti).
-2) Se il valore è espresso in forma discorsiva, interpretalo.
-3) Se il valore è implicito ma deducibile, deducilo.
-4) Normalizza concetti vaghi in valori standard.
-5) Funziona anche senza "campo: valore".
-6) NON inventare valori non supportati dal testo.
-7) Rispondi SOLO in JSON nel formato:
-
+FORMATO OBBLIGATORIO:
 {{
   "Nome campo": {{
     "value": "...",
     "confidence": 0.0-1.0,
-    "explanation": "Perché hai scelto questo valore"
+    "explanation": "Motivo della scelta"
   }}
 }}
-
-Ora estrai i campi richiesti.
 """
 
     response = client.chat.completions.create(
@@ -494,17 +412,13 @@ Ora estrai i campi richiesti.
         temperature=0
     )
 
-    # ============================
-    # PARSING ROBUSTO DEL JSON
-    # ============================
+    # Parsing robusto
     try:
         data = json.loads(response.choices[0].message["content"])
     except Exception:
         data = {}
 
-    # ============================
-    # FALLBACK: garantisce che TUTTI i campi esistano SEMPRE
-    # ============================
+    # Fallback: garantisce che TUTTI i campi esistano
     clean = {}
     for f in fields:
         clean[f] = data.get(f, {
