@@ -310,7 +310,7 @@ with tabs[2]:
             tamper_risk="medium"
         )
 
-        # 3) MERGE DATI VALIDATI
+        # 3) MERGE DATI VALIDATI + PEF
         if tipo == "mobile":
             services.merge_data_with_ecolabel(
                 passport,
@@ -319,7 +319,6 @@ with tabs[2]:
                 cert_data=None,
                 client=client
             )
-            services.compute_pef_score(passport)
         else:
             services.merge_data(
                 passport,
@@ -327,7 +326,19 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
-            services.compute_pef_score(passport)
+
+        # Calcolo PEF + breakdown
+        services.compute_pef_score(passport)
+
+        # 3b) Campi mancanti per PEF
+        if hasattr(services, "missing_pef_fields"):
+            missing_pef = services.missing_pef_fields(passport)
+        else:
+            missing_pef = []
+        if missing_pef:
+            st.warning("⚠️ Campi mancanti per il calcolo PEF")
+            for m in missing_pef:
+                st.write(f"- {m}")
 
         # 4) IMMAGINI
         for b in (st.session_state.uploaded_images_bytes or []):
@@ -406,7 +417,7 @@ with tabs[2]:
         qr_buf = services.generate_qr_from_url(public_url)
         qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
 
-        # 2) Genera HTML identico alla pagina Streamlit (stessa struttura, stessi contenuti)
+        # 2) Genera HTML
         html = services.generate_passport_html(passport, qr_base64=qr_base64)
 
         # 3) Converte HTML → PDF multipagina professionale
@@ -424,15 +435,19 @@ with tabs[2]:
             st.success("✅ DPP pubblicato (senza QeSeal)")
 
     # --------------------------------------------------
-    # 10) OUTPUT PUBBLICO
+    # 10) OUTPUT PUBBLICO + BREAKDOWN PEF
     # --------------------------------------------------
     pp = st.session_state.get("published_passport")
     if pp:
         url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
-        #st.code(url)
-
         qr_img = services.generate_qr_from_url(url)
-        #st.image(qr_img, caption="QR DPP")
+
+        # Breakdown PEF
+        breakdown = pp.get("sustainability_breakdown") or {}
+        if breakdown:
+            st.subheader("🔍 Breakdown PEF")
+            for k, v in breakdown.items():
+                st.write(f"**{k}**: {v}")
 
     # --------------------------------------------------
     # 11) FIRMA ELETTRONICA SEMPLICE (SES)
@@ -514,7 +529,8 @@ with tabs[2]:
                 st.write(u)
         elif pp.get("simple_signature"):
             with st.expander("Debug risposta SES"):
-                st.json(pp["simple_signature"].get("raw_response", {}))        
+                st.json(pp["simple_signature"].get("raw_response", {}))
+
 
 # ======================================================
 # TAB 4 — ARCHIVIO (ENTERPRISE GRADE - REFACTORED)
