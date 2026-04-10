@@ -2084,23 +2084,25 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         </table>
     </div>
     """
+
     # ---------------------------------------------------------
-    # BREAKDOWN PEF
+    # BREAKDOWN PEF (corretto)
     # ---------------------------------------------------------
-    break = passport.get("sustainability_breakdown", {})
-    break_rows = "".join(
+    pef_breakdown = passport.get("sustainability_breakdown", {})
+    pef_rows = "".join(
         f"<tr><td class='field-name'>{k}</td><td>{v}</td></tr>"
-        for k, v in break.items()
+        for k, v in pef_breakdown.items()
     )
 
     breakdown_html = f"""
     <div class="section">
         <h2>Environmental Impact Breakdown</h2>
         <table class="data-table">
-            {break_rows}
+            {pef_rows}
         </table>
     </div>
-    """  
+    """
+
     # ---------------------------------------------------------
     # QR INLINE
     # ---------------------------------------------------------
@@ -2330,6 +2332,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     return html
+
 
 
 
