@@ -2331,14 +2331,16 @@ def compute_pef_score(passport: dict) -> int:
 
 def missing_pef_fields(passport):
     """
-    Versione flessibile: controlla i campi richiesti usando varianti dei nomi.
+    Versione flessibile e coerente con normalize_pdf_fields + compute_pef_score.
+    Controlla SOLO i campi canonici richiesti dal PEF.
     Restituisce SOLO i campi realmente mancanti.
     """
 
-    FIELD_MAP = {
+    REQUIRED_FIELDS = {
         "Percentuale di contenuto riciclato": [
             "Percentuale di contenuto riciclato",
             "Percentuale riciclato",
+            "% di contenuto riciclato",
             "% riciclato",
             "Contenuto riciclato"
         ],
@@ -2394,14 +2396,18 @@ def missing_pef_fields(passport):
     pdf = passport.get("sections", {}).get("PDF", {})
     missing = []
 
-    for canonical_name, variants in FIELD_MAP.items():
+    for canonical, variants in REQUIRED_FIELDS.items():
         found = False
+
         for v in variants:
-            if v in pdf and pdf[v].get("value", "") not in ["", None]:
-                found = True
-                break
+            if v in pdf:
+                val = pdf[v].get("value", "")
+                if val not in ["", None]:
+                    found = True
+                    break
+
         if not found:
-            missing.append(canonical_name)
+            missing.append(canonical)
 
     return missing
 
