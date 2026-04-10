@@ -327,6 +327,8 @@ with tabs[2]:
                 None
             )
 
+        
+        st.write("DEBUG PDF DATA:", passport["sections"].get("PDF"))
         # Calcolo PEF + breakdown
         services.compute_pef_score(passport)
 
