@@ -682,51 +682,36 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
 
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    import base64
     campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
-
-    # Converti immagine in base64
-    b64 = base64.b64encode(image_file.read()).decode()
-
     prompt = f"""
-Analizza l'immagine di un prodotto {tipo}.
-Estrai SOLO questi campi: {campi}.
-Usa SOLO ciò che vedi nell'immagine.
-Non inventare nulla.
-Rispondi SOLO in JSON valido.
+Analizza immagine prodotto {tipo}.
+Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
+Rispondi con JSON valido.
+Usa null se non determinabile.
 """
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "input_image", "image": b64}
-                ]
-            }
-        ],
-        temperature=0
-    )
-
-    # Parsing robusto
+    def safe_json_parse(text):
+        if text.startswith("```"):
+            text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
+        first,last = text.find("{"), text.rfind("}")
+        return json.loads(text[first:last+1])
     try:
-        data_raw = json.loads(response.choices[0].message["content"])
-    except:
-        data_raw = {}
-
-    result = {}
-    for c in campi:
-        val = data_raw.get(c, "")
-        result[c.capitalize()] = {
-            "value": val if val else "",
-            "confidence": 0.9 if val else 0.0,
-            "explanation": data_raw.get(f"{c}_explanation", "")
-        }
-
-    return result
-
+        file_id = upload_image_to_openai(image_file, client)
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
+        )
+        data_raw = safe_json_parse(resp.output_text.strip())
+        result = {}
+        for c in campi:
+            val = data_raw.get(c, None)
+            result[c.capitalize()] = {
+                "value": val if val not in [None,"","null"] else "non rilevato",
+                "confidence": 0.7 if val not in [None,"","null"] else 0.0,
+                "explanation": "Dato estratto da immagine" if val not in [None,"","null"] else "Non rilevabile"
+            }
+        return result
+    except Exception:
+        return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
 
 def upload_image_to_openai(image_file, client: OpenAI):
     resized = resize_image_for_vision(image_file)
