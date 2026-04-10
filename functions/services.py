@@ -366,61 +366,60 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
 
 
 
-def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list):
+def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
     """
-    Estrae i campi dal PDF in modo flessibile:
-    - accetta nomi simili
-    - accetta sinonimi
-    - accetta varianti (es. 'Percentuale riciclato' vs '% di contenuto riciclato')
-    - restituisce sempre un dizionario con tutti i campi richiesti
+    Estrae campi dal testo PDF e ritorna SEMPRE un dict:
+    {field: {value, confidence, explanation}}
     """
+    if not pdf_text:
+        return {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
 
-    prompt = f"""
-Sei un estrattore di dati per un Digital Product Passport.
+    # template output
+    template = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
 
-Devi estrarre i seguenti campi, ANCHE SE nel PDF i nomi non coincidono esattamente:
-{fields}
+    system = (
+        "You are a strict information extraction engine.\n"
+        "Return ONLY JSON, no markdown, no commentary.\n"
+        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
+        "If a field is unknown, leave value empty and confidence 0.\n"
+    )
 
-Regole:
-- Se un campo è presente con un nome simile, estrai il valore.
-- Se un campo non è presente, restituisci stringa vuota.
-- Non inventare valori.
-- Rispondi in JSON puro.
-
-Testo PDF:
-\"\"\"{pdf_text}\"\"\"
-
-Rispondi con un JSON nel formato:
-{{
-  "Campo1": {{"value": "...", "confidence": 0.9, "explanation": "..."}},
-  "Campo2": {{"value": "...", "confidence": 0.9, "explanation": "..."}},
-  ...
-}}
-    """
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
+    user = (
+        f"Extract product passport fields for product_type={tipo}.\n"
+        "Use the following JSON template and populate fields from the text.\n"
+        "Return ONLY JSON.\n\n"
+        f"TEMPLATE:\n{json.dumps(template, ensure_ascii=False)}\n\n"
+        f"PDF_TEXT:\n{pdf_text[:20000]}"
     )
 
     try:
-        data = json.loads(response.choices[0].message["content"])
-    except Exception:
-        return {}
+        resp = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
 
-    # Normalizza output
-    result = {}
-    for f in fields:
-        entry = data.get(f, {})
-        result[f] = {
-            "value": entry.get("value", ""),
-            "confidence": entry.get("confidence", 0),
-            "explanation": entry.get("explanation", "")
-        }
+        content = resp.choices[0].message.content or "{}"
 
-    return result
+        # parse JSON robusto
+        try:
+            data = json.loads(content)
+        except Exception:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                data = json.loads(content[start:end+1])
+            else:
+                data = {}
 
+        return _norm_payload_pdf(data, fields)
+
+    except Exception as e:
+        # fallback senza crash
+        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
 
 
 
