@@ -170,6 +170,7 @@ with tabs[0]:
 
         with st.spinner("Analisi in corso..."):
             pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
+            st.write("DEBUG RAW PDF TEXT:", pdf_text[:2000])
             st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
 
             img_data = {}
