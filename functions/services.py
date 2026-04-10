@@ -955,7 +955,9 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
         pdf_text = extract_text_from_pdf(pdf_file)
 
         # Estrazione GPT
-        pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
+        fields_to_extract = PRODUCT_FIELDS.get("mobile", {}).get("pdf", [])
+        pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", fields_to_extract)
+
 
         # 🔥 NORMALIZZAZIONE (fondamentale per il PEF)
         normalized_pdf = normalize_pdf_fields(pdf_text_data)
