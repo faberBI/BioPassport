@@ -215,29 +215,29 @@ with tabs[1]:
         st.session_state.validated_pdf = validated_pdf
 
         # --------------------------------------------------
-        # VALIDAZIONE IMMAGINI (versione pulita)
+        # VALIDAZIONE IMMAGINI (solo explanation)
         # --------------------------------------------------
         st.subheader("Validazione Immagini")
         validated_image = {}
         
         for k, v in st.session_state.image_data.items():
         
-            # Titolo del campo (pulito)
+            # Titolo del campo
             st.markdown(f"**{k}**")
         
-            # Campo editabile (solo valore)
-            user_val = st.text_input(
+            # Mostra SOLO l'explanation come testo editabile
+            user_val = st.text_area(
                 "",
-                value=v.get("value", ""),
-                help=v.get("explanation", ""),
+                value=v.get("explanation", ""),
+                help="Spiegazione AI",
                 key=f"img_{k}"
             )
         
-            # Salvataggio
+            # Salvataggio: explanation = valore inserito
             validated_image[k] = {
-                "value": user_val,
-                "confidence": 1.0 if user_val != v.get("value") else v.get("confidence", 0),
-                "explanation": v.get("explanation", "")
+                "value": user_val,               # ora il valore è l'explanation
+                "confidence": v.get("confidence", 0),
+                "explanation": user_val          # explanation = valore inserito
             }
         
         st.session_state.validated_image = validated_image
