@@ -376,6 +376,7 @@ def gpt_extract_from_pdf(pdf_text, client, product_type, fields):
     - Normalizza automaticamente i concetti
     - Gestisce PDF disordinati, tabellari, narrativi, misti
     - Include esempi few-shot per massima accuratezza
+    - Garantisce SEMPRE un dizionario completo (mai {})
     """
 
     prompt = f"""
@@ -468,27 +469,13 @@ Output:
 LINEE GUIDA PREMIUM
 ===========================
 
-1) **Riconoscimento flessibile dei campi**
-   - Cerca ogni campo anche se scritto in modo diverso.
-   - Riconosci sinonimi, abbreviazioni, varianti linguistiche.
-
-2) **Interpretazione semantica**
-   - Se il valore è espresso in forma discorsiva, interpretalo.
-
-3) **Deduzione implicita**
-   - Se il valore non è esplicito ma è deducibile, deducilo.
-
-4) **Normalizzazione dei valori**
-   - Converti concetti vaghi in valori standardizzati.
-
-5) **Estrazione da qualsiasi formato**
-   - Funziona anche senza "campo: valore".
-
-6) **Nessuna invenzione**
-   - Se un valore NON è supportato dal testo, restituisci stringa vuota.
-
-7) **Output rigorosamente in JSON**
-   - Formato obbligatorio:
+1) Cerca ogni campo anche se scritto in modo diverso (sinonimi, abbreviazioni, varianti).
+2) Se il valore è espresso in forma discorsiva, interpretalo.
+3) Se il valore è implicito ma deducibile, deducilo.
+4) Normalizza concetti vaghi in valori standard.
+5) Funziona anche senza "campo: valore".
+6) NON inventare valori non supportati dal testo.
+7) Rispondi SOLO in JSON nel formato:
 
 {{
   "Nome campo": {{
@@ -507,10 +494,27 @@ Ora estrai i campi richiesti.
         temperature=0
     )
 
+    # ============================
+    # PARSING ROBUSTO DEL JSON
+    # ============================
     try:
-        return json.loads(response.choices[0].message["content"])
-    except:
-        return {}
+        data = json.loads(response.choices[0].message["content"])
+    except Exception:
+        data = {}
+
+    # ============================
+    # FALLBACK: garantisce che TUTTI i campi esistano SEMPRE
+    # ============================
+    clean = {}
+    for f in fields:
+        clean[f] = data.get(f, {
+            "value": "",
+            "confidence": 0,
+            "explanation": ""
+        })
+
+    return clean
+
 
 
 def passport_meta_row(passport: dict) -> dict:
