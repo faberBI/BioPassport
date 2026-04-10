@@ -2163,6 +2163,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             rows += f"<tr><td>{ev.get('event')}</td><td>{ev.get('timestamp')}</td><td><pre>{json.dumps(ev.get('data', {}), ensure_ascii=False, indent=2)}</pre></td></tr>"
 
         lifecycle_html = f"""
+        <div class="page-break"></div>
         <div class="section">
             <h2>Lifecycle Events</h2>
             <table class="data-table">
@@ -2209,11 +2210,13 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
     if images_html:
         images_html = f"""
+        <div class="page-break"></div>
         <div class="section">
             <h2>Product Visual Documentation</h2>
             <div class="image-grid">{images_html}</div>
         </div>
         """
+
 
     # ---------------------------------------------------------
     # ABOUT + LEGAL
