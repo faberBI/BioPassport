@@ -267,15 +267,19 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         "For each field return an object with keys: value, confidence (0..1), explanation.\n"
         "If a field is unknown, leave value empty and confidence 0.\n"
     )
-
+    
     user = (
-        f"Extract product passport fields for product_type={tipo}.\n"
-        "Use the following JSON template and populate fields from the text.\n"
-        "Return ONLY JSON.\n\n"
+        f"Sei un estrattore di dati per un Digital Product Passport.\n"
+        f"Estrai i seguenti campi anche se nel PDF i nomi non coincidono esattamente:\n"
+        f"{fields}\n\n"
+        "Regole:\n"
+        "- Se un campo è presente con un nome simile, estrai il valore.\n"
+        "- Se un campo non è presente, lascia value=\"\" e confidence=0.\n"
+        "- NON inventare valori.\n"
+        "- Usa solo il JSON del template.\n\n"
         f"TEMPLATE:\n{json.dumps(template, ensure_ascii=False)}\n\n"
         f"PDF_TEXT:\n{pdf_text[:20000]}"
     )
-
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -434,9 +438,12 @@ def verify_passport_signature(passport: dict, key: bytes):
 
 def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
     """
-    Estrae info da certificati (PDF o immagine) e restituisce SEMPRE
-    un dict normalizzato: {campo: {value, confidence, explanation}}
+    Estrazione certificati flessibile:
+    - accetta nomi diversi
+    - accetta PDF o immagini
+    - restituisce SEMPRE {campo: {value, confidence, explanation}}
     """
+
     # ---------- 1) leggi bytes ----------
     if hasattr(file_like, "read"):
         raw = file_like.read()
@@ -454,14 +461,17 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
             text = extract_text_from_pdf(BytesIO(raw))
         except Exception:
             text = ""
+
         input_block = {
             "type": "text",
             "text": (
-                "You are extracting structured fields from a certificate document.\n"
-                "Return ONLY valid JSON.\n\n"
+                "Sei un estrattore di dati da certificati.\n"
+                "Estrai i campi anche se i nomi non coincidono esattamente.\n"
+                "Rispondi SOLO con JSON.\n\n"
                 f"CERTIFICATE_TEXT:\n{text[:20000]}"
             )
         }
+
     else:
         try:
             img = Image.open(BytesIO(raw))
@@ -471,13 +481,13 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
 
         if img_b64:
             input_block = [
-                {"type": "text", "text": "Extract certificate fields. Return ONLY JSON."},
+                {"type": "text", "text": "Estrai i campi del certificato. Rispondi SOLO con JSON."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
             ]
         else:
             input_block = {
                 "type": "text",
-                "text": "Extract certificate fields. Return ONLY JSON. If impossible return {}."
+                "text": "Estrai i campi del certificato. Rispondi SOLO con JSON. Se impossibile restituisci {}."
             }
 
     # ---------- 3) schema output ----------
@@ -493,21 +503,23 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
         "note": {"value": "", "confidence": 0.0, "explanation": ""}
     }
 
+    # ---------- 4) prompt flessibile ----------
     system = (
-        "You are a strict information extraction engine.\n"
+        "You are a strict certificate information extractor.\n"
         "Return ONLY JSON, no markdown, no commentary.\n"
-        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
         "If a field is unknown, leave value empty and confidence 0.\n"
+        "Do NOT invent values.\n"
     )
 
     user = (
-        "Extract certificate information. Use this JSON structure as output template:\n"
+        "Estrai i campi del certificato anche se i nomi non coincidono esattamente.\n"
+        "Usa SOLO questo template JSON:\n"
         f"{json.dumps(schema_hint, ensure_ascii=False)}\n"
-        "Populate what you can from the document.\n"
-        "IMPORTANT: return ONLY JSON.\n"
+        "Popola solo ciò che è realmente presente.\n"
+        "IMPORTANTE: restituisci SOLO JSON.\n"
     )
 
-    # ---------- 4) call OpenAI ----------
+    # ---------- 5) call OpenAI ----------
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -521,60 +533,138 @@ def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini"):
 
         content = resp.choices[0].message.content or "{}"
 
-        # ---------- 5) parse JSON robusto ----------
+        # ---------- 6) parse JSON robusto ----------
         try:
             data = json.loads(content)
         except Exception:
             start = content.find("{")
             end = content.rfind("}")
             if start != -1 and end != -1 and end > start:
-                data = json.loads(content[start:end+1])
+                try:
+                    data = json.loads(content[start:end+1])
+                except:
+                    data = {}
             else:
                 data = {}
 
-        # ✅ FIX: qui prima avevi _norm_payload_cert(data)(data) (sbagliato) [1](https://outlook.office365.com/owa/?ItemID=AAMkADc1NjAzMWI0LWVkZjUtNGNiYS1iZTc1LTk5Zjc2YTM0MmU0OABGAAAAAAC6gddaoK7mQ4ywo%2fiCrZUSBwAcOa%2fcmRsdS5%2fe2FZINWcxAAAAAAEMAAAcOa%2fcmRsdS5%2fe2FZINWcxAABcFD4yAAA%3d&exvsurl=1&viewmodel=ReadMessageItem)
-        normalized = _norm_payload_cert(data)
-
-        # completa campi mancanti
+        # ---------- 7) normalizzazione ----------
+        normalized = {}
         for k in schema_hint.keys():
-            normalized.setdefault(k, {"value": "", "confidence": 0.0, "explanation": ""})
+            entry = data.get(k, {})
+            normalized[k] = {
+                "value": entry.get("value", ""),
+                "confidence": entry.get("confidence", 0.0),
+                "explanation": entry.get("explanation", "")
+            }
 
         return normalized
 
     except Exception as e:
-        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in schema_hint.keys()}
+        return {
+            k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"}
+            for k in schema_hint.keys()
+        }
 
-def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
+
+def gpt_analyze_image(image_file, client: OpenAI, tipo: str, model: str = "gpt-4o-mini"):
+    """
+    Analisi immagine flessibile per DPP:
+    - accetta sinonimi e varianti
+    - non inventa valori
+    - restituisce sempre {Campo: {value, confidence, explanation}}
+    """
+
+    # Campi da estrarre (coerenti con TAB 2)
+    campi = ["colore", "condizioni", "materiale_probabile", "categoria_visiva", "segni_usura"]
+
+    # Template JSON che GPT deve rispettare
+    template = {
+        c: {"value": "", "confidence": 0.0, "explanation": ""}
+        for c in campi
+    }
+
     prompt = f"""
-Analizza immagine prodotto {tipo}.
-Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
-Rispondi con JSON valido.
-Usa null se non determinabile.
+Sei un estrattore di dati da immagini per un Digital Product Passport.
+
+Estrai i seguenti campi anche se non sono nominati esattamente:
+{campi}
+
+Regole:
+- Se un campo è visibile, estrai il valore.
+- Se non è visibile, lascia value="" e confidence=0.
+- NON inventare valori.
+- Usa SOLO il JSON del template.
+- Le spiegazioni devono essere brevi.
+
+TEMPLATE:
+{json.dumps(template, ensure_ascii=False)}
 """
+
+    # Funzione robusta per estrarre JSON anche se GPT aggiunge testo extra
     def safe_json_parse(text):
-        if text.startswith("```"):
-            text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
-        first,last = text.find("{"), text.rfind("}")
-        return json.loads(text[first:last+1])
+        try:
+            return json.loads(text)
+        except:
+            # fallback: estrai solo la parte tra { ... }
+            first, last = text.find("{"), text.rfind("}")
+            if first != -1 and last != -1 and last > first:
+                try:
+                    return json.loads(text[first:last+1])
+                except:
+                    return {}
+            return {}
+
     try:
+        # Carica immagine su OpenAI
         file_id = upload_image_to_openai(image_file, client)
+
+        # Chiamata GPT
         resp = client.responses.create(
-            model="gpt-4o",
-            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
+            model=model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_image", "file_id": file_id}
+                    ]
+                }
+            ]
         )
-        data_raw = safe_json_parse(resp.output_text.strip())
+
+        raw = resp.output_text.strip()
+        data_raw = safe_json_parse(raw)
+
+        # Normalizzazione output
         result = {}
         for c in campi:
-            val = data_raw.get(c, None)
-            result[c.capitalize()] = {
-                "value": val if val not in [None,"","null"] else "non rilevato",
-                "confidence": 0.7 if val not in [None,"","null"] else 0.0,
-                "explanation": "Dato estratto da immagine" if val not in [None,"","null"] else "Non rilevabile"
-            }
+            entry = data_raw.get(c, None)
+
+            if entry in [None, "", "null"]:
+                result[c.capitalize()] = {
+                    "value": "non rilevato",
+                    "confidence": 0.0,
+                    "explanation": "Non rilevabile dall'immagine"
+                }
+            else:
+                result[c.capitalize()] = {
+                    "value": entry,
+                    "confidence": 0.7,
+                    "explanation": "Dato estratto dall'immagine"
+                }
+
         return result
-    except Exception:
-        return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
+
+    except Exception as e:
+        # fallback totale
+        return {
+            c.capitalize(): {
+                "value": "non rilevato",
+                "confidence": 0.0,
+                "explanation": f"Errore analisi immagine: {e}"
+            }
+            for c in campi
+        }
 
 def upload_image_to_openai(image_file, client: OpenAI):
     resized = resize_image_for_vision(image_file)
@@ -721,29 +811,86 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
     return ecolabel_data
 
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
+    """
+    Versione robusta e coerente con merge_data:
+    - deep merge dei campi
+    - i valori manuali sovrascrivono quelli AI
+    - nessuna perdita di dati
+    - integrazione Ecolabel + PDF + immagini + certificati
+    """
+
     changed = False
 
+    # Assicura struttura
+    passport.setdefault("sections", {})
+    passport["sections"].setdefault("PDF", {})
+    passport["sections"].setdefault("Images", {})
+    passport.setdefault("certificates", {})
+
+    # -------------------------
+    # 1) PDF + ECOLABEL
+    # -------------------------
     if pdf_file:
+        # Estrazione Ecolabel
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
         passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
+        # Estrazione PDF flessibile
         pdf_text = extract_text_from_pdf(pdf_file)
         pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", ECOLABEL_FIELDS)
-        passport["sections"]["PDF"] = pdf_text_data
+
+        # Deep merge PDF
+        for field, newdata in pdf_text_data.items():
+            old = passport["sections"]["PDF"].get(field, {})
+            passport["sections"]["PDF"][field] = {
+                "value": newdata.get("value", old.get("value", "")),
+                "confidence": newdata.get("confidence", old.get("confidence", 0)),
+                "explanation": newdata.get("explanation", old.get("explanation", "")),
+            }
+
         changed = True
 
+    # -------------------------
+    # 2) IMMAGINI
+    # -------------------------
     if image_data:
-        passport["sections"]["Images"] = image_data
+        for field, newdata in image_data.items():
+            old = passport["sections"]["Images"].get(field, {})
+            passport["sections"]["Images"][field] = {
+                "value": newdata.get("value", old.get("value", "")),
+                "confidence": newdata.get("confidence", old.get("confidence", 0)),
+                "explanation": newdata.get("explanation", old.get("explanation", "")),
+            }
         changed = True
 
-    if cert_data is not None:
-        passport["certificates"] = cert_data
+    # -------------------------
+    # 3) CERTIFICATI
+    # -------------------------
+    if cert_data:
+        passport.setdefault("certificates", {})
+        for field, newdata in cert_data.items():
+            old = passport["certificates"].get(field, {})
+            passport["certificates"][field] = {
+                "value": newdata.get("value", old.get("value", "")),
+                "confidence": newdata.get("confidence", old.get("confidence", 0)),
+                "explanation": newdata.get("explanation", old.get("explanation", "")),
+            }
         changed = True
 
+    # -------------------------
+    # 4) EVENTO LIFECYCLE
+    # -------------------------
     if changed:
         append_lifecycle_event(passport, "updated", {"what": "merge_data_with_ecolabel"})
-        espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
+        espr_stamp(
+            passport,
+            actor="manufacturer",
+            action="data_merge_ecolabel",
+            reason="Merged validated data + ecolabel"
+        )
+
     return passport
+
 
 # ======================================================
 # EXCEL
@@ -1877,6 +2024,14 @@ def safe_get(passport, section, field, default=""):
 
 
 def compute_pef_score(passport: dict) -> int:
+    """
+    Versione robusta:
+    - gestisce valori mancanti
+    - gestisce formati strani
+    - non crasha mai
+    - breakdown sempre coerente
+    """
+
     breakdown = {
         "Materiali & riciclato": 0,
         "Energia & produzione": 0,
@@ -1887,27 +2042,35 @@ def compute_pef_score(passport: dict) -> int:
 
     score = 0
 
+    # Helper robusto
+    def get_pdf(field, default=""):
+        return safe_get(passport, "PDF", field, default) or default
+
+    # -----------------------------
     # 1) MATERIALI & RICICLATO (30)
-    riciclato = safe_get(passport, "PDF", "Percentuale di contenuto riciclato", "0")
+    # -----------------------------
+    riciclato = get_pdf("Percentuale di contenuto riciclato", "0")
     try:
         riciclato_val = float(str(riciclato).replace("%", "").strip())
     except:
         riciclato_val = 0
 
-    pts = min(30, riciclato_val * 0.3)
+    pts = min(30, max(0, riciclato_val * 0.3))
     breakdown["Materiali & riciclato"] += pts
     score += pts
 
-    sostanze = safe_get(passport, "PDF", "Sostanze preoccupanti", "").lower()
-    if not sostanze or sostanze in ["nessuna", "no", "none"]:
+    sostanze = str(get_pdf("Sostanze preoccupanti", "")).lower()
+    if sostanze in ["", "nessuna", "no", "none", "n/a"]:
         breakdown["Materiali & riciclato"] += 10
         score += 10
     else:
         breakdown["Materiali & riciclato"] -= 10
         score -= 10
 
+    # -----------------------------
     # 2) ENERGIA & PRODUZIONE (20)
-    energia = safe_get(passport, "PDF", "Energia consumata", "")
+    # -----------------------------
+    energia = get_pdf("Energia consumata", "")
     try:
         energia_val = float(str(energia).replace("kwh", "").strip())
     except:
@@ -1915,53 +2078,59 @@ def compute_pef_score(passport: dict) -> int:
 
     if energia_val is not None:
         if energia_val < 10:
-            breakdown["Energia & produzione"] += 15
-            score += 15
+            pts = 15
         elif energia_val < 50:
-            breakdown["Energia & produzione"] += 8
-            score += 8
+            pts = 8
         else:
-            breakdown["Energia & produzione"] += 2
-            score += 2
+            pts = 2
+        breakdown["Energia & produzione"] += pts
+        score += pts
 
-    luogo = safe_get(passport, "PDF", "Luogo di Produzione", "").lower()
-    if any(x in luogo for x in ["italia", "eu", "europe"]):
+    luogo = str(get_pdf("Luogo di Produzione", "")).lower()
+    if any(x in luogo for x in ["italia", "eu", "europe", "ue", "european"]):
         breakdown["Energia & produzione"] += 5
         score += 5
 
+    # -----------------------------
     # 3) DURABILITÀ & RIPARABILITÀ (20)
-    dur = safe_get(passport, "PDF", "Durabilità", "").lower()
-    if "alta" in dur or "elevata" in dur:
+    # -----------------------------
+    dur = str(get_pdf("Durabilità", "")).lower()
+    if any(x in dur for x in ["alta", "elevata", "buona", "robusta"]):
         breakdown["Durabilità & riparabilità"] += 10
         score += 10
 
-    rip = safe_get(passport, "PDF", "Istruzioni di riparazione", "")
-    if rip:
+    rip = get_pdf("Istruzioni di riparazione", "")
+    if rip not in ["", "no", "none", "n/a"]:
         breakdown["Durabilità & riparabilità"] += 5
         score += 5
 
-    parti = safe_get(passport, "PDF", "Parti sostituibili", "")
-    if parti:
+    parti = get_pdf("Parti sostituibili", "")
+    if parti not in ["", "no", "none", "n/a"]:
         breakdown["Durabilità & riparabilità"] += 5
         score += 5
 
+    # -----------------------------
     # 4) FINE VITA (15)
-    smalt = safe_get(passport, "PDF", "Indicazioni di smaltimento", "")
-    if smalt:
+    # -----------------------------
+    smalt = get_pdf("Indicazioni di smaltimento", "")
+    if smalt not in ["", "n/a", "none"]:
         breakdown["Fine vita"] += 10
         score += 10
 
-    fine_vita = safe_get(passport, "PDF", "Fine vita", "").lower()
-    if "riciclabile" in fine_vita:
+    fine_vita = str(get_pdf("Fine vita", "")).lower()
+    if "riciclabile" in fine_vita or "recyclable" in fine_vita:
         breakdown["Fine vita"] += 5
         score += 5
 
+    # -----------------------------
     # 5) CERTIFICAZIONI (15)
-    cert = safe_get(passport, "PDF", "Certificazioni", "")
-    if cert:
+    # -----------------------------
+    cert = get_pdf("Certificazioni", "")
+    if cert not in ["", "n/a", "none"]:
         breakdown["Certificazioni"] += 10
         score += 10
 
+    # Ecolabel UE
     eco = passport.get("sections", {}).get("Ecolabel_UE", {})
     if isinstance(eco, dict):
         eco_points = sum(1 for v in eco.values() if v is True)
@@ -1969,12 +2138,16 @@ def compute_pef_score(passport: dict) -> int:
         breakdown["Certificazioni"] += pts
         score += pts
 
+    # -----------------------------
+    # NORMALIZZAZIONE FINALE
+    # -----------------------------
     score = max(0, min(100, int(score)))
 
     passport["sustainability_score"] = score
     passport["sustainability_breakdown"] = breakdown
 
     return score
+
 
 
 
