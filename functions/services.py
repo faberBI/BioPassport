@@ -368,45 +368,137 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
 
 def gpt_extract_from_pdf(pdf_text, client, product_type, fields):
     """
-    Estrazione UNIVERSALE dei campi da PDF.
-    Funziona con qualsiasi template, qualsiasi formato, qualsiasi ordine.
-    - Riconosce sinonimi
+    Estrazione ULTRA-PREMIUM dei campi da PDF.
+    - Funziona con qualsiasi template
+    - Riconosce sinonimi e varianti
     - Interpreta frasi discorsive
     - Deduce valori impliciti
-    - Gestisce testi non strutturati
-    - Normalizza automaticamente i valori
+    - Normalizza automaticamente i concetti
+    - Gestisce PDF disordinati, tabellari, narrativi, misti
+    - Include esempi few-shot per massima accuratezza
     """
 
     prompt = f"""
-Sei un estrattore di dati altamente intelligente.
+Sei un estrattore di dati altamente intelligente e specializzato nell'analisi di documenti PDF
+con formati diversi, anche non strutturati.
 
-Analizza il seguente testo del PDF:
+Il tuo compito è estrarre informazioni dal seguente testo:
 
 --------------------
 {pdf_text}
 --------------------
 
-Devi estrarre i seguenti campi:
+Devi estrarre ESATTAMENTE questi campi:
 {fields}
 
-REGOLE DI ESTRAZIONE:
-- Cerca il campo anche se scritto in modo diverso (sinonimi, varianti, abbreviazioni).
-- Se il campo è espresso come "campo: valore", estrai il valore.
-- Se il campo è espresso in forma discorsiva, interpretalo.
-- Se il valore è implicito, deducilo.
-- Se il valore è un concetto (es. "molto resistente"), normalizzalo (es. "Alta durabilità").
-- Se il valore è un sinonimo (es. "Riciclabile"), mappalo al campo corretto.
-- Se non trovi nulla, restituisci stringa vuota.
-- NON inventare valori non supportati dal testo.
-- Rispondi SOLO in JSON nel formato:
+===========================
+ESEMPI FEW-SHOT (molto importanti)
+===========================
+
+ESEMPIO 1 — estrazione da testo strutturato:
+Testo:
+"Durabilità: Alta
+Fine vita: Riciclabile
+Certificazioni: FSC"
+
+Output:
+{{
+  "Durabilità": {{
+    "value": "Alta",
+    "confidence": 0.95,
+    "explanation": "Valore esplicito nel testo."
+  }},
+  "Fine vita": {{
+    "value": "Riciclabile",
+    "confidence": 0.95,
+    "explanation": "Valore esplicito nel testo."
+  }},
+  "Certificazioni": {{
+    "value": "FSC",
+    "confidence": 0.95,
+    "explanation": "Valore esplicito nel testo."
+  }}
+}}
+
+ESEMPIO 2 — estrazione da testo discorsivo:
+Testo:
+"Questo mobile è progettato per durare molti anni ed è facile da riparare."
+
+Output:
+{{
+  "Durabilità": {{
+    "value": "Alta",
+    "confidence": 0.90,
+    "explanation": "La frase indica lunga durata."
+  }},
+  "Istruzioni di riparazione": {{
+    "value": "Disponibili",
+    "confidence": 0.85,
+    "explanation": "Il testo indica che è facile da riparare."
+  }}
+}}
+
+ESEMPIO 3 — estrazione da testo implicito:
+Testo:
+"Non contiene sostanze pericolose note."
+
+Output:
+{{
+  "Sostanze preoccupanti": {{
+    "value": "Nessuna",
+    "confidence": 0.90,
+    "explanation": "Il testo indica assenza di sostanze pericolose."
+  }}
+}}
+
+ESEMPIO 4 — estrazione da testo con sinonimi:
+Testo:
+"Materiale riciclabile al 100%."
+
+Output:
+{{
+  "Fine vita": {{
+    "value": "Riciclabile",
+    "confidence": 0.90,
+    "explanation": "Sinonimo diretto."
+  }}
+}}
+
+===========================
+LINEE GUIDA PREMIUM
+===========================
+
+1) **Riconoscimento flessibile dei campi**
+   - Cerca ogni campo anche se scritto in modo diverso.
+   - Riconosci sinonimi, abbreviazioni, varianti linguistiche.
+
+2) **Interpretazione semantica**
+   - Se il valore è espresso in forma discorsiva, interpretalo.
+
+3) **Deduzione implicita**
+   - Se il valore non è esplicito ma è deducibile, deducilo.
+
+4) **Normalizzazione dei valori**
+   - Converti concetti vaghi in valori standardizzati.
+
+5) **Estrazione da qualsiasi formato**
+   - Funziona anche senza "campo: valore".
+
+6) **Nessuna invenzione**
+   - Se un valore NON è supportato dal testo, restituisci stringa vuota.
+
+7) **Output rigorosamente in JSON**
+   - Formato obbligatorio:
 
 {{
   "Nome campo": {{
     "value": "...",
     "confidence": 0.0-1.0,
-    "explanation": "..."
+    "explanation": "Perché hai scelto questo valore"
   }}
 }}
+
+Ora estrai i campi richiesti.
 """
 
     response = client.chat.completions.create(
