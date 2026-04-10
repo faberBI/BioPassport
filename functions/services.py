@@ -1877,36 +1877,37 @@ def safe_get(passport, section, field, default=""):
 
 
 def compute_pef_score(passport: dict) -> int:
-    """
-    Calcola un punteggio ambientale ispirato al modello PEF (0–100).
-    Funziona anche se TUTTI i campi sono null o mancanti.
-    """
+    breakdown = {
+        "Materiali & riciclato": 0,
+        "Energia & produzione": 0,
+        "Durabilità & riparabilità": 0,
+        "Fine vita": 0,
+        "Certificazioni": 0
+    }
 
     score = 0
 
-    # ---------------------------------------------------------
-    # 1) MATERIALI & RICICLATO (30 punti)
-    # ---------------------------------------------------------
+    # 1) MATERIALI & RICICLATO (30)
     riciclato = safe_get(passport, "PDF", "Percentuale di contenuto riciclato", "0")
-
     try:
         riciclato_val = float(str(riciclato).replace("%", "").strip())
     except:
         riciclato_val = 0
 
-    score += min(30, riciclato_val * 0.3)
+    pts = min(30, riciclato_val * 0.3)
+    breakdown["Materiali & riciclato"] += pts
+    score += pts
 
     sostanze = safe_get(passport, "PDF", "Sostanze preoccupanti", "").lower()
     if not sostanze or sostanze in ["nessuna", "no", "none"]:
+        breakdown["Materiali & riciclato"] += 10
         score += 10
     else:
+        breakdown["Materiali & riciclato"] -= 10
         score -= 10
 
-    # ---------------------------------------------------------
-    # 2) ENERGIA & PRODUZIONE (20 punti)
-    # ---------------------------------------------------------
+    # 2) ENERGIA & PRODUZIONE (20)
     energia = safe_get(passport, "PDF", "Energia consumata", "")
-
     try:
         energia_val = float(str(energia).replace("kwh", "").strip())
     except:
@@ -1914,60 +1915,65 @@ def compute_pef_score(passport: dict) -> int:
 
     if energia_val is not None:
         if energia_val < 10:
+            breakdown["Energia & produzione"] += 15
             score += 15
         elif energia_val < 50:
+            breakdown["Energia & produzione"] += 8
             score += 8
         else:
+            breakdown["Energia & produzione"] += 2
             score += 2
 
     luogo = safe_get(passport, "PDF", "Luogo di Produzione", "").lower()
     if any(x in luogo for x in ["italia", "eu", "europe"]):
+        breakdown["Energia & produzione"] += 5
         score += 5
 
-    # ---------------------------------------------------------
-    # 3) DURABILITÀ & RIPARABILITÀ (20 punti)
-    # ---------------------------------------------------------
+    # 3) DURABILITÀ & RIPARABILITÀ (20)
     dur = safe_get(passport, "PDF", "Durabilità", "").lower()
     if "alta" in dur or "elevata" in dur:
+        breakdown["Durabilità & riparabilità"] += 10
         score += 10
 
     rip = safe_get(passport, "PDF", "Istruzioni di riparazione", "")
     if rip:
+        breakdown["Durabilità & riparabilità"] += 5
         score += 5
 
     parti = safe_get(passport, "PDF", "Parti sostituibili", "")
     if parti:
+        breakdown["Durabilità & riparabilità"] += 5
         score += 5
 
-    # ---------------------------------------------------------
-    # 4) FINE VITA (15 punti)
-    # ---------------------------------------------------------
+    # 4) FINE VITA (15)
     smalt = safe_get(passport, "PDF", "Indicazioni di smaltimento", "")
     if smalt:
+        breakdown["Fine vita"] += 10
         score += 10
 
     fine_vita = safe_get(passport, "PDF", "Fine vita", "").lower()
     if "riciclabile" in fine_vita:
+        breakdown["Fine vita"] += 5
         score += 5
 
-    # ---------------------------------------------------------
-    # 5) CERTIFICAZIONI & ECOLABEL (15 punti)
-    # ---------------------------------------------------------
+    # 5) CERTIFICAZIONI (15)
     cert = safe_get(passport, "PDF", "Certificazioni", "")
     if cert:
+        breakdown["Certificazioni"] += 10
         score += 10
 
     eco = passport.get("sections", {}).get("Ecolabel_UE", {})
     if isinstance(eco, dict):
         eco_points = sum(1 for v in eco.values() if v is True)
-        score += min(5, eco_points)
+        pts = min(5, eco_points)
+        breakdown["Certificazioni"] += pts
+        score += pts
 
-    # ---------------------------------------------------------
-    # NORMALIZZAZIONE
-    # ---------------------------------------------------------
     score = max(0, min(100, int(score)))
 
     passport["sustainability_score"] = score
+    passport["sustainability_breakdown"] = breakdown
+
     return score
 
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
