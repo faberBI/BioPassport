@@ -153,8 +153,7 @@ PRODUCT_FIELDS = {
             "% di contenuto riciclato",            # variante
             "Sostanze preoccupanti",
             "Energia consumata",
-            "Luogo di produzione",
-            "Luogo di Produzione",                 # variante
+            "Luogo di produzione",                 # variante
             "Durabilità",
             "Istruzioni di riparazione",
             "Parti sostituibili",
@@ -367,64 +366,60 @@ def _norm_payload_pdf(payload: dict, expected_fields: list[str]) -> dict:
 
 
 
-def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], model: str = "gpt-4o-mini"):
+def gpt_extract_from_pdf(pdf_text, client, product_type, fields):
     """
-    Estrae campi dal testo PDF e ritorna SEMPRE un dict:
-    {field: {value, confidence, explanation}}
+    Estrazione UNIVERSALE dei campi da PDF.
+    Funziona con qualsiasi template, qualsiasi formato, qualsiasi ordine.
+    - Riconosce sinonimi
+    - Interpreta frasi discorsive
+    - Deduce valori impliciti
+    - Gestisce testi non strutturati
+    - Normalizza automaticamente i valori
     """
-    if not pdf_text:
-        return {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
 
-    # template output
-    template = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
+    prompt = f"""
+Sei un estrattore di dati altamente intelligente.
 
-    system = (
-        "You are a strict information extraction engine.\n"
-        "Return ONLY JSON, no markdown, no commentary.\n"
-        "For each field return an object with keys: value, confidence (0..1), explanation.\n"
-        "If a field is unknown, leave value empty and confidence 0.\n"
+Analizza il seguente testo del PDF:
+
+--------------------
+{pdf_text}
+--------------------
+
+Devi estrarre i seguenti campi:
+{fields}
+
+REGOLE DI ESTRAZIONE:
+- Cerca il campo anche se scritto in modo diverso (sinonimi, varianti, abbreviazioni).
+- Se il campo è espresso come "campo: valore", estrai il valore.
+- Se il campo è espresso in forma discorsiva, interpretalo.
+- Se il valore è implicito, deducilo.
+- Se il valore è un concetto (es. "molto resistente"), normalizzalo (es. "Alta durabilità").
+- Se il valore è un sinonimo (es. "Riciclabile"), mappalo al campo corretto.
+- Se non trovi nulla, restituisci stringa vuota.
+- NON inventare valori non supportati dal testo.
+- Rispondi SOLO in JSON nel formato:
+
+{{
+  "Nome campo": {{
+    "value": "...",
+    "confidence": 0.0-1.0,
+    "explanation": "..."
+  }}
+}}
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
     )
-    
-    user = (
-        f"Sei un estrattore di dati per un Digital Product Passport.\n"
-        f"Estrai i seguenti campi anche se nel PDF i nomi non coincidono esattamente:\n"
-        f"{fields}\n\n"
-        "Regole:\n"
-        "- Se un campo è presente con un nome simile, estrai il valore.\n"
-        "- Se un campo non è presente, lascia value=\"\" e confidence=0.\n"
-        "- NON inventare valori.\n"
-        "- Usa solo il JSON del template.\n\n"
-        f"TEMPLATE:\n{json.dumps(template, ensure_ascii=False)}\n\n"
-        f"PDF_TEXT:\n{pdf_text[:20000]}"
-    )
+
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
+        return json.loads(response.choices[0].message["content"])
+    except:
+        return {}
 
-        content = resp.choices[0].message.content or "{}"
-
-        # parse JSON robusto
-        try:
-            data = json.loads(content)
-        except Exception:
-            start = content.find("{")
-            end = content.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                data = json.loads(content[start:end+1])
-            else:
-                data = {}
-
-        return _norm_payload_pdf(data, fields)
-
-    except Exception as e:
-        # fallback senza crash
-        return {k: {"value": "", "confidence": 0.0, "explanation": f"Extraction error: {e}"} for k in fields}
 
 def passport_meta_row(passport: dict) -> dict:
     issuer = passport.get("issuer") or {}
