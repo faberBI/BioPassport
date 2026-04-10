@@ -2025,11 +2025,10 @@ def safe_get(passport, section, field, default=""):
 
 def compute_pef_score(passport: dict) -> int:
     """
-    Versione robusta:
-    - gestisce valori mancanti
-    - gestisce formati strani
+    Versione flessibile:
+    - accetta nomi campo diversi
+    - trova i valori anche se il PDF usa varianti
     - non crasha mai
-    - breakdown sempre coerente
     """
 
     breakdown = {
@@ -2042,24 +2041,87 @@ def compute_pef_score(passport: dict) -> int:
 
     score = 0
 
-    # Helper robusto
-    def get_pdf(field, default=""):
-        return safe_get(passport, "PDF", field, default) or default
+    # -----------------------------
+    # MAPPA FLESSIBILE DEI CAMPI
+    # -----------------------------
+    FIELD_MAP = {
+        "riciclato": [
+            "Percentuale di contenuto riciclato",
+            "Percentuale riciclato",
+            "% riciclato",
+            "Contenuto riciclato"
+        ],
+        "sostanze": [
+            "Sostanze preoccupanti",
+            "Sostanze pericolose",
+            "Sostanze"
+        ],
+        "energia": [
+            "Energia consumata",
+            "Consumo energetico",
+            "Energia"
+        ],
+        "luogo": [
+            "Luogo di Produzione",
+            "Luogo di produzione",
+            "Produzione",
+            "Made in",
+            "Prodotto in"
+        ],
+        "durabilita": [
+            "Durabilità",
+            "Durata",
+            "Resistenza"
+        ],
+        "riparazione": [
+            "Istruzioni di riparazione",
+            "Riparabilità",
+            "Riparazione"
+        ],
+        "parti": [
+            "Parti sostituibili",
+            "Componenti sostituibili",
+            "Parti di ricambio"
+        ],
+        "smaltimento": [
+            "Indicazioni di smaltimento",
+            "Smaltimento",
+            "Disposal"
+        ],
+        "fine_vita": [
+            "Fine vita",
+            "End of life",
+            "Riciclabile"
+        ],
+        "certificazioni": [
+            "Certificazioni",
+            "Certificato",
+            "Certificazione"
+        ]
+    }
+
+    # Helper: trova il campo giusto anche se il nome è diverso
+    def find_field(key):
+        pdf = passport.get("sections", {}).get("PDF", {})
+        for variant in FIELD_MAP[key]:
+            if variant in pdf:
+                return pdf[variant].get("value", "")
+        return ""
 
     # -----------------------------
     # 1) MATERIALI & RICICLATO (30)
     # -----------------------------
-    riciclato = get_pdf("Percentuale di contenuto riciclato", "0")
+    riciclato = find_field("riciclato")
     try:
-        riciclato_val = float(str(riciclato).replace("%", "").strip())
+        ric_val = float(str(riciclato).replace("%", "").strip())
     except:
-        riciclato_val = 0
+        ric_val = 0
 
-    pts = min(30, max(0, riciclato_val * 0.3))
+    pts = min(30, max(0, ric_val * 0.3))
     breakdown["Materiali & riciclato"] += pts
     score += pts
 
-    sostanze = str(get_pdf("Sostanze preoccupanti", "")).lower()
+    sostanze = str(find_field("sostanze")).lower()
     if sostanze in ["", "nessuna", "no", "none", "n/a"]:
         breakdown["Materiali & riciclato"] += 10
         score += 10
@@ -2070,7 +2132,7 @@ def compute_pef_score(passport: dict) -> int:
     # -----------------------------
     # 2) ENERGIA & PRODUZIONE (20)
     # -----------------------------
-    energia = get_pdf("Energia consumata", "")
+    energia = find_field("energia")
     try:
         energia_val = float(str(energia).replace("kwh", "").strip())
     except:
@@ -2086,25 +2148,25 @@ def compute_pef_score(passport: dict) -> int:
         breakdown["Energia & produzione"] += pts
         score += pts
 
-    luogo = str(get_pdf("Luogo di Produzione", "")).lower()
-    if any(x in luogo for x in ["italia", "eu", "europe", "ue", "european"]):
+    luogo = str(find_field("luogo")).lower()
+    if any(x in luogo for x in ["italia", "eu", "ue", "europe"]):
         breakdown["Energia & produzione"] += 5
         score += 5
 
     # -----------------------------
     # 3) DURABILITÀ & RIPARABILITÀ (20)
     # -----------------------------
-    dur = str(get_pdf("Durabilità", "")).lower()
+    dur = str(find_field("durabilita")).lower()
     if any(x in dur for x in ["alta", "elevata", "buona", "robusta"]):
         breakdown["Durabilità & riparabilità"] += 10
         score += 10
 
-    rip = get_pdf("Istruzioni di riparazione", "")
+    rip = find_field("riparazione")
     if rip not in ["", "no", "none", "n/a"]:
         breakdown["Durabilità & riparabilità"] += 5
         score += 5
 
-    parti = get_pdf("Parti sostituibili", "")
+    parti = find_field("parti")
     if parti not in ["", "no", "none", "n/a"]:
         breakdown["Durabilità & riparabilità"] += 5
         score += 5
@@ -2112,12 +2174,12 @@ def compute_pef_score(passport: dict) -> int:
     # -----------------------------
     # 4) FINE VITA (15)
     # -----------------------------
-    smalt = get_pdf("Indicazioni di smaltimento", "")
+    smalt = find_field("smaltimento")
     if smalt not in ["", "n/a", "none"]:
         breakdown["Fine vita"] += 10
         score += 10
 
-    fine_vita = str(get_pdf("Fine vita", "")).lower()
+    fine_vita = str(find_field("fine_vita")).lower()
     if "riciclabile" in fine_vita or "recyclable" in fine_vita:
         breakdown["Fine vita"] += 5
         score += 5
@@ -2125,7 +2187,7 @@ def compute_pef_score(passport: dict) -> int:
     # -----------------------------
     # 5) CERTIFICAZIONI (15)
     # -----------------------------
-    cert = get_pdf("Certificazioni", "")
+    cert = find_field("certificazioni")
     if cert not in ["", "n/a", "none"]:
         breakdown["Certificazioni"] += 10
         score += 10
@@ -2148,28 +2210,79 @@ def compute_pef_score(passport: dict) -> int:
 
     return score
 
-
-
-
 def missing_pef_fields(passport):
-    required = [
-        "Percentuale di contenuto riciclato",
-        "Sostanze preoccupanti",
-        "Energia consumata",
-        "Luogo di Produzione",
-        "Durabilità",
-        "Istruzioni di riparazione",
-        "Parti sostituibili",
-        "Indicazioni di smaltimento",
-        "Fine vita",
-        "Certificazioni"
-    ]
+    """
+    Versione flessibile: controlla i campi richiesti usando varianti dei nomi.
+    Restituisce SOLO i campi realmente mancanti.
+    """
 
+    FIELD_MAP = {
+        "Percentuale di contenuto riciclato": [
+            "Percentuale di contenuto riciclato",
+            "Percentuale riciclato",
+            "% riciclato",
+            "Contenuto riciclato"
+        ],
+        "Sostanze preoccupanti": [
+            "Sostanze preoccupanti",
+            "Sostanze pericolose",
+            "Sostanze"
+        ],
+        "Energia consumata": [
+            "Energia consumata",
+            "Consumo energetico",
+            "Energia"
+        ],
+        "Luogo di Produzione": [
+            "Luogo di Produzione",
+            "Luogo di produzione",
+            "Produzione",
+            "Made in",
+            "Prodotto in"
+        ],
+        "Durabilità": [
+            "Durabilità",
+            "Durata",
+            "Resistenza"
+        ],
+        "Istruzioni di riparazione": [
+            "Istruzioni di riparazione",
+            "Riparabilità",
+            "Riparazione"
+        ],
+        "Parti sostituibili": [
+            "Parti sostituibili",
+            "Componenti sostituibili",
+            "Parti di ricambio"
+        ],
+        "Indicazioni di smaltimento": [
+            "Indicazioni di smaltimento",
+            "Smaltimento",
+            "Disposal"
+        ],
+        "Fine vita": [
+            "Fine vita",
+            "End of life",
+            "Riciclabile"
+        ],
+        "Certificazioni": [
+            "Certificazioni",
+            "Certificato",
+            "Certificazione"
+        ]
+    }
+
+    pdf = passport.get("sections", {}).get("PDF", {})
     missing = []
-    for field in required:
-        val = safe_get(passport, "PDF", field, "")
-        if not val:
-            missing.append(field)
+
+    for canonical_name, variants in FIELD_MAP.items():
+        found = False
+        for v in variants:
+            if v in pdf and pdf[v].get("value", "") not in ["", None]:
+                found = True
+                break
+        if not found:
+            missing.append(canonical_name)
 
     return missing
 
