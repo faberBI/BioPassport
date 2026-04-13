@@ -2454,12 +2454,12 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         """
 
     # ---------------------------------------------------------
-    # COVER PAGE
+    # COVER PAGE (logo ridotto + palette EU)
     # ---------------------------------------------------------
     cover_html = f"""
     <div class="cover">
         <img src="data:image/jpeg;base64,{logo_base64}" class="cover-logo"/>
-        <h1 class="cover-title">Digital Product Passport</h1>
+        <h1 class="cover-title">🇪🇺 Digital Product Passport</h1>
         <h2 class="cover-product">{passport.get("product_name") or passport.get("id","")}</h2>
 
         <div class="cover-meta">
@@ -2482,7 +2482,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     # ---------------------------------------------------------
     summary_html = f"""
     <div class="section summary">
-        <h2>Passport Summary</h2>
+        <h2>📘 Passport Summary</h2>
         <table class="data-table">
             <tr><td class='field-name'>Product Name</td><td>{passport.get("product_name")}</td></tr>
             <tr><td class='field-name'>Product ID</td><td>{passport.get("id")}</td></tr>
@@ -2503,7 +2503,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
     breakdown_html = f"""
     <div class="section">
-        <h2>Environmental Impact Breakdown</h2>
+        <h2>📊 Environmental Impact Breakdown</h2>
         <table class="data-table">
             {pef_rows}
         </table>
@@ -2511,11 +2511,11 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # SEZIONI ESPR — STANDARD EU
+    # SEZIONI ESPR — con icone + palette EU
     # ---------------------------------------------------------
     espr_html = f"""
     <div class="section">
-        <h2>1. Product Identity</h2>
+        <h2>🔖 1. Product Identity</h2>
         <table class="data-table">
             <tr><td class='field-name'>Product Name</td><td>{pdf.get("Nome prodotto",{}).get("value","—")}</td></tr>
             <tr><td class='field-name'>Model Number</td><td>{pdf.get("Numero di modello",{}).get("value","—")}</td></tr>
@@ -2525,7 +2525,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     </div>
 
     <div class="section">
-        <h2>2. Materials & Substances</h2>
+        <h2>🧱 2. Materials & Substances</h2>
         <table class="data-table">
             <tr><td class='field-name'>Materials</td><td>{pdf.get("Materiali/componenti utilizzati",{}).get("value","—")}</td></tr>
             <tr><td class='field-name'>Recycled Content</td><td>{pdf.get("Percentuale di contenuto riciclato",{}).get("value","—")}</td></tr>
@@ -2550,7 +2550,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     </div>
 
     <div class="section">
-        <h2>3. Repairability & Durability</h2>
+        <h2>🛠️ 3. Repairability & Durability</h2>
         <table class="data-table">
             <tr><td class='field-name'>Durability</td><td>{}</td></tr>
             <tr><td class='field-name'>Repair Instructions</td><td>{}</td></tr>
@@ -2565,14 +2565,14 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
     espr_html += f"""
     <div class="section">
-        <h2>4. End of Life</h2>
+        <h2>♻️ 4. End of Life</h2>
         <table class="data-table">
             <tr><td class='field-name'>Disposal Instructions</td><td>{pdf.get("Indicazioni di smaltimento",{}).get("value","—")}</td></tr>
         </table>
     </div>
 
     <div class="section">
-        <h2>5. Certifications</h2>
+        <h2>📜 5. Certifications</h2>
     """
 
     for c in certificates:
@@ -2587,28 +2587,28 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
     espr_html += f"""
     <div class="section">
-        <h2>6. EPREL</h2>
+        <h2>💡 6. EPREL</h2>
         <table class="data-table">
             <tr><td class='field-name'>Energy Class</td><td>{eprel.get("eprel:energyClass","—")}</td></tr>
         </table>
     </div>
 
     <div class="section">
-        <h2>7. GS1 Digital Link</h2>
+        <h2>🌐 7. GS1 Digital Link</h2>
         <table class="data-table">
             <tr><td class='field-name'>GS1 URI</td><td>{gs1}</td></tr>
         </table>
     </div>
 
     <div class="section">
-        <h2>8. QR Code</h2>
+        <h2>🔗 8. QR Code</h2>
         <div class="qr-inline">
             <img src="data:image/png;base64,{qr_base64}" width="160"/>
         </div>
     </div>
 
     <div class="section">
-        <h2>9. Signature & Integrity</h2>
+        <h2>✒️ 9. Signature & Integrity</h2>
         <table class="data-table">
             <tr><td class='field-name'>Issuer</td><td>{issuer.get("legal_name","—")}</td></tr>
             <tr><td class='field-name'>Attestation</td><td>{attestation.get("statement","—")}</td></tr>
@@ -2637,7 +2637,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         lifecycle_html = f"""
         <div class="page-break"></div>
         <div class="section">
-            <h2>Lifecycle Events</h2>
+            <h2>📅 Lifecycle Events</h2>
             <table class="data-table">
                 <tr><th>Event</th><th>Timestamp</th><th>Details</th></tr>
                 {rows}
@@ -2664,7 +2664,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
         changelog_html = f"""
         <div class="section">
-            <h2>Change Log</h2>
+            <h2>📝 Change Log</h2>
             <table class="data-table">
                 <tr><th>Version</th><th>Date</th><th>Actor</th><th>Action</th><th>Reason</th></tr>
                 {rows}
@@ -2695,7 +2695,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         images_html = f"""
         <div class="page-break"></div>
         <div class="section">
-            <h2>Product Visual Documentation</h2>
+            <h2>🖼️ Product Visual Documentation</h2>
             <div class="image-grid">{cards}</div>
         </div>
         """
@@ -2730,7 +2730,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # FINAL HTML
+    # FINAL HTML — con palette EU
     # ---------------------------------------------------------
     html = f"""
     <html>
@@ -2738,17 +2738,74 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         <meta charset="utf-8">
         <style>
             @page {{ margin: 40px; @bottom-right {{ content: "Page " counter(page); font-size: 9px; }} }}
-            body {{ font-family: "Inter", Arial, sans-serif; color: #3D0F06; background: #F6F8F8; }}
-            .page-break {{ page-break-before: always; }}
-            .section {{ margin-bottom:25px; background:#F6F8F8; padding:15px; border-radius:6px; }}
-            h2 {{ border-bottom:2px solid #23CE6B; padding-bottom:5px; color:#36120D; }}
-            table {{ width:100%; border-collapse: collapse; font-size:12px; }}
-            th, td {{ border:1px solid #27CC6C; padding:6px; }}
-            .field-name {{ font-weight:bold; background:#F6F8F8; width:30%; color:#3D0F06; }}
-            .image-grid {{ display:flex; flex-wrap:wrap; gap:10px; }}
-            .image-card {{ width:48%; border:1px solid #27CC6C; }}
-            .image-card img {{ width:100%; }}
-            .caption {{ font-size:10px; text-align:center; }}
+
+            body {{
+                font-family: "Inter", Arial, sans-serif;
+                color: #002060;
+                background: #FFFFFF;
+            }}
+
+            .cover-logo {{
+                width: 110px;
+                margin-bottom: 20px;
+            }}
+
+            .about-logo {{
+                width: 90px;
+                margin-bottom: 15px;
+            }}
+
+            .section {{
+                margin-bottom: 25px;
+                background: #F8F9FC;
+                padding: 15px;
+                border-radius: 6px;
+                border-left: 4px solid #003399;
+            }}
+
+            h2 {{
+                border-bottom: 2px solid #003399;
+                padding-bottom: 5px;
+                color: #002060;
+            }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 12px;
+            }}
+
+            th, td {{
+                border: 1px solid #003399;
+                padding: 6px;
+            }}
+
+            .field-name {{
+                font-weight: bold;
+                background: #F2F2F2;
+                width: 30%;
+                color: #002060;
+            }}
+
+            .image-grid {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }}
+
+            .image-card {{
+                width: 48%;
+                border: 1px solid #003399;
+            }}
+
+            .image-card img {{
+                width: 100%;
+            }}
+
+            .caption {{
+                font-size: 10px;
+                text-align: center;
+            }}
         </style>
     </head>
     <body>
@@ -2766,6 +2823,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     return html
+
 
 
 
