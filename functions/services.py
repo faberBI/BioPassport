@@ -2752,13 +2752,13 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
 
             /* LOGHI RIDOTTI */
             .cover-logo {{
-                width: 75px;
-                margin-bottom: 16px;
+                width: 120px;
+                margin-bottom: 25px;
             }}
 
             .about-logo {{
-                width: 60px;
-                margin-bottom: 10px;
+                width: 80px;
+                margin-bottom: 20px;
             }}
         </style>
     </head>
