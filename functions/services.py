@@ -2128,115 +2128,192 @@ def safe_get(passport, section, field, default=""):
     return raw or default
 
 
-def compute_pef_score(passport: dict):
+def compute_pef_score(passport: dict) -> int:
     """
-    Nuova versione automatica del calcolo PEF.
-    Calcola il breakdown in base ai dati REALI del passport.
-    Aggiorna:
-        - passport["sustainability_breakdown"]
-        - passport["sustainability_score"]
+    Versione flessibile:
+    - accetta nomi campo diversi
+    - trova i valori anche se il PDF usa varianti
+    - non crasha mai
     """
 
-    pdf = passport.get("sections", {}).get("PDF", {})
-    certs = passport.get("certificates", [])
-
-    # -----------------------------
-    # 1) MATERIALI & RICICLATO
-    # -----------------------------
-    ric_raw = pdf.get("Percentuale di contenuto riciclato", {}).get("value", "")
-    sostanze = pdf.get("Sostanze preoccupanti", {}).get("value", "")
-
-    try:
-        ric = float(str(ric_raw).replace("%", "").strip())
-    except:
-        ric = 0
-
-    mat_score = 0
-    if ric > 30:
-        mat_score = 10
-    elif ric > 10:
-        mat_score = 5
-    else:
-        mat_score = 0
-
-    # penalità sostanze pericolose
-    if sostanze and sostanze.strip().lower() not in ["", "none", "nessuna", "no", "n/a"]:
-        mat_score = max(0, mat_score - 3)
-
-    # -----------------------------
-    # 2) ENERGIA & PRODUZIONE
-    # -----------------------------
-    energia = pdf.get("Energia consumata", {}).get("value", "")
-    luogo = pdf.get("Luogo di Produzione", {}).get("value", "")
-
-    energia_score = 0
-    if energia:
-        energia_score += 5
-
-    if luogo and any(x in luogo.lower() for x in ["italia", "eu", "ue", "europe"]):
-        energia_score += 5
-
-    # -----------------------------
-    # 3) DURABILITÀ & RIPARABILITÀ
-    # -----------------------------
-    dur = pdf.get("Durabilità", {}).get("value", "")
-    rip = pdf.get("Istruzioni di riparazione", {}).get("value", "")
-    parti = pdf.get("Parti sostituibili", {}).get("value", "")
-
-    dura_score = 0
-    if dur:
-        dura_score += 5
-    if rip:
-        dura_score += 3
-    if parti:
-        dura_score += 2
-
-    # -----------------------------
-    # 4) FINE VITA
-    # -----------------------------
-    smalt = pdf.get("Indicazioni di smaltimento", {}).get("value", "")
-    fine_vita = pdf.get("Fine vita", {}).get("value", "")
-
-    fine_score = 0
-    if smalt:
-        fine_score += 5
-    if fine_vita:
-        fine_score += 5
-
-    # -----------------------------
-    # 5) CERTIFICAZIONI
-    # -----------------------------
-    cert_count = len(certs)
-
-    if cert_count == 0:
-        cert_score = 0
-    elif cert_count == 1:
-        cert_score = 5
-    elif cert_count == 2:
-        cert_score = 10
-    else:
-        cert_score = 15
-
-    # -----------------------------
-    # BREAKDOWN COMPLETO
-    # -----------------------------
     breakdown = {
-        "Materiali & riciclato": mat_score,
-        "Energia & produzione": energia_score,
-        "Durabilità & riparabilità": dura_score,
-        "Fine vita": fine_score,
-        "Certificazioni": cert_score
+        "Materiali & riciclato": 0,
+        "Energia & produzione": 0,
+        "Durabilità & riparabilità": 0,
+        "Fine vita": 0,
+        "Certificazioni": 0
     }
 
+    score = 0
+
+    # -----------------------------
+    # MAPPA FLESSIBILE DEI CAMPI
+    # -----------------------------
+    FIELD_MAP = {
+        "riciclato": [
+            "Percentuale di contenuto riciclato",
+            "Percentuale riciclato",
+            "% riciclato",
+            "Contenuto riciclato"
+        ],
+        "sostanze": [
+            "Sostanze preoccupanti",
+            "Sostanze pericolose",
+            "Sostanze"
+        ],
+        "energia": [
+            "Energia consumata",
+            "Consumo energetico",
+            "Energia"
+        ],
+        "luogo": [
+            "Luogo di Produzione",
+            "Luogo di produzione",
+            "Produzione",
+            "Made in",
+            "Prodotto in"
+        ],
+        "durabilita": [
+            "Durabilità",
+            "Durata",
+            "Resistenza"
+        ],
+        "riparazione": [
+            "Istruzioni di riparazione",
+            "Riparabilità",
+            "Riparazione"
+        ],
+        "parti": [
+            "Parti sostituibili",
+            "Componenti sostituibili",
+            "Parti di ricambio"
+        ],
+        "smaltimento": [
+            "Indicazioni di smaltimento",
+            "Smaltimento",
+            "Disposal"
+        ],
+        "fine_vita": [
+            "Fine vita",
+            "End of life",
+            "Riciclabile"
+        ],
+        "certificazioni": [
+            "Certificazioni",
+            "Certificato",
+            "Certificazione"
+        ]
+    }
+
+    # Helper: trova il campo giusto anche se il nome è diverso
+    def find_field(key):
+        pdf = passport.get("sections", {}).get("PDF", {})
+        for variant in FIELD_MAP[key]:
+            if variant in pdf:
+                return pdf[variant].get("value", "")
+        return ""
+
+    # -----------------------------
+    # 1) MATERIALI & RICICLATO (30)
+    # -----------------------------
+    riciclato = find_field("riciclato")
+    try:
+        ric_val = float(str(riciclato).replace("%", "").strip())
+    except:
+        ric_val = 0
+
+    pts = min(30, max(0, ric_val * 0.3))
+    breakdown["Materiali & riciclato"] += pts
+    score += pts
+
+    sostanze = str(find_field("sostanze")).lower()
+    if sostanze in ["", "nessuna", "no", "none", "n/a"]:
+        breakdown["Materiali & riciclato"] += 10
+        score += 10
+    else:
+        breakdown["Materiali & riciclato"] -= 10
+        score -= 10
+
+    # -----------------------------
+    # 2) ENERGIA & PRODUZIONE (20)
+    # -----------------------------
+    energia = find_field("energia")
+    try:
+        energia_val = float(str(energia).replace("kwh", "").strip())
+    except:
+        energia_val = None
+
+    if energia_val is not None:
+        if energia_val < 10:
+            pts = 15
+        elif energia_val < 50:
+            pts = 8
+        else:
+            pts = 2
+        breakdown["Energia & produzione"] += pts
+        score += pts
+
+    luogo = str(find_field("luogo")).lower()
+    if any(x in luogo for x in ["italia", "eu", "ue", "europe"]):
+        breakdown["Energia & produzione"] += 5
+        score += 5
+
+    # -----------------------------
+    # 3) DURABILITÀ & RIPARABILITÀ (20)
+    # -----------------------------
+    dur = str(find_field("durabilita")).lower()
+    if any(x in dur for x in ["alta", "elevata", "buona", "robusta"]):
+        breakdown["Durabilità & riparabilità"] += 10
+        score += 10
+
+    rip = find_field("riparazione")
+    if rip not in ["", "no", "none", "n/a"]:
+        breakdown["Durabilità & riparabilità"] += 5
+        score += 5
+
+    parti = find_field("parti")
+    if parti not in ["", "no", "none", "n/a"]:
+        breakdown["Durabilità & riparabilità"] += 5
+        score += 5
+
+    # -----------------------------
+    # 4) FINE VITA (15)
+    # -----------------------------
+    smalt = find_field("smaltimento")
+    if smalt not in ["", "n/a", "none"]:
+        breakdown["Fine vita"] += 10
+        score += 10
+
+    fine_vita = str(find_field("fine_vita")).lower()
+    if "riciclabile" in fine_vita or "recyclable" in fine_vita:
+        breakdown["Fine vita"] += 5
+        score += 5
+
+    # -----------------------------
+    # 5) CERTIFICAZIONI (15)
+    # -----------------------------
+    cert = find_field("certificazioni")
+    if cert not in ["", "n/a", "none"]:
+        breakdown["Certificazioni"] += 10
+        score += 10
+
+    # Ecolabel UE
+    eco = passport.get("sections", {}).get("Ecolabel_UE", {})
+    if isinstance(eco, dict):
+        eco_points = sum(1 for v in eco.values() if v is True)
+        pts = min(5, eco_points)
+        breakdown["Certificazioni"] += pts
+        score += pts
+
+    # -----------------------------
+    # NORMALIZZAZIONE FINALE
+    # -----------------------------
+    score = max(0, min(100, int(score)))
+
+    passport["sustainability_score"] = score
     passport["sustainability_breakdown"] = breakdown
 
-    # -----------------------------
-    # PUNTEGGIO FINALE (0–100)
-    # -----------------------------
-    total = sum(breakdown.values())
-    passport["sustainability_score"] = min(100, total)
-
-    return passport["sustainability_score"]
+    return score
 
 def missing_pef_fields(passport):
     """
@@ -2332,17 +2409,10 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     status = (passport.get("lifecycle") or {}).get("status", "")
     sustainability_score = passport.get("sustainability_score", 0)
 
-    # Sezioni principali
     pdf = passport.get("sections", {}).get("PDF", {})
-
-    # Moduli ESPR
     eprel = passport.get("eprel") or {}
     gs1 = passport.get("gs1_digital_link") or "—"
     scip = passport.get("scip") or {"scip:substances": []}
-    ontology = passport.get("ontology") or {}
-    jsonld = passport.get("jsonld") or {}
-    espr_sections = passport.get("espr_sections") or {}
-
     scip_substances = scip.get("scip:substances", [])
     certificates = passport.get("certificates", [])
 
@@ -2384,12 +2454,11 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         """
 
     # ---------------------------------------------------------
-    # COVER PAGE (logo ingrandito)
+    # COVER PAGE (logo ridotto)
     # ---------------------------------------------------------
     cover_html = f"""
     <div class="cover">
         <img src="data:image/jpeg;base64,{logo_base64}" class="cover-logo"/>
-
         <h1 class="cover-title">📘 Digital Product Passport</h1>
         <h2 class="cover-product">{passport.get("product_name") or passport.get("id","")}</h2>
 
@@ -2407,6 +2476,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     </div>
     <div class="page-break"></div>
     """
+
     # ---------------------------------------------------------
     # SUMMARY SECTION
     # ---------------------------------------------------------
@@ -2441,7 +2511,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # SEZIONI ESPR STANDARD
+    # SEZIONI ESPR — con icone
     # ---------------------------------------------------------
     espr_html = f"""
     <div class="section">
@@ -2515,63 +2585,38 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         </table>
         """
 
-    # ---------------------------------------------------------
-    # 🔥 6. EPREL (nuova sezione)
-    # ---------------------------------------------------------
-    eprel_html = f"""
+    espr_html += f"""
     <div class="section">
-        <h2>⚡ EPREL Module</h2>
+        <h2>💡 6. EPREL</h2>
         <table class="data-table">
             <tr><td class='field-name'>Energy Class</td><td>{eprel.get("eprel:energyClass","—")}</td></tr>
-            <tr><td class='field-name'>URL</td><td>{eprel.get("eprel:url","—")}</td></tr>
         </table>
     </div>
-    """
 
-    # ---------------------------------------------------------
-    # 🔥 7. GS1 Digital Link (nuova sezione)
-    # ---------------------------------------------------------
-    gs1_html = f"""
     <div class="section">
-        <h2>🌐 GS1 Digital Link</h2>
+        <h2>🌐 7. GS1 Digital Link</h2>
         <table class="data-table">
             <tr><td class='field-name'>GS1 URI</td><td>{gs1}</td></tr>
         </table>
     </div>
-    """
 
-    # ---------------------------------------------------------
-    # 🔥 8. SCIP / ECHA (nuova sezione)
-    # ---------------------------------------------------------
-    scip_html = f"""
     <div class="section">
-        <h2>🧪 SCIP / ECHA</h2>
+        <h2>🔗 8. QR Code</h2>
+        <div class="qr-inline">
+            <img src="data:image/png;base64,{qr_base64}" width="160"/>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>✒️ 9. Signature & Integrity</h2>
         <table class="data-table">
-            <tr><td class='field-name'>SCIP Code</td><td>{scip.get("scip:code","—")}</td></tr>
-            <tr><td class='field-name'>SVHC Substances</td><td>{len(scip_substances)}</td></tr>
+            <tr><td class='field-name'>Issuer</td><td>{issuer.get("legal_name","—")}</td></tr>
+            <tr><td class='field-name'>Attestation</td><td>{attestation.get("statement","—")}</td></tr>
+            <tr><td class='field-name'>Document Hash</td><td>{signature.get("hash","—")}</td></tr>
         </table>
     </div>
     """
 
-    # ---------------------------------------------------------
-    # 🔥 9. Ontologia ESPR (nuova sezione)
-    # ---------------------------------------------------------
-    ontology_html = f"""
-    <div class="section">
-        <h2>📚 ESPR Ontology</h2>
-        <pre>{json.dumps(ontology, ensure_ascii=False, indent=2)}</pre>
-    </div>
-    """
-
-    # ---------------------------------------------------------
-    # 🔥 10. JSON‑LD (nuova sezione)
-    # ---------------------------------------------------------
-    jsonld_html = f"""
-    <div class="section">
-        <h2>📘 JSON‑LD</h2>
-        <pre>{json.dumps(jsonld, ensure_ascii=False, indent=2)}</pre>
-    </div>
-    """
     # ---------------------------------------------------------
     # LIFECYCLE EVENTS
     # ---------------------------------------------------------
@@ -2654,6 +2699,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             <div class="image-grid">{cards}</div>
         </div>
         """
+
     # ---------------------------------------------------------
     # ABOUT + LEGAL (logo ridotto)
     # ---------------------------------------------------------
@@ -2684,7 +2730,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # FINAL HTML + CSS
+    # FINAL HTML (solo aggiunta classi logo)
     # ---------------------------------------------------------
     html = f"""
     <html>
@@ -2704,7 +2750,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             .image-card img {{ width:100%; }}
             .caption {{ font-size:10px; text-align:center; }}
 
-            /* LOGHI INGANDITI */
+            /* LOGHI RIDOTTI */
             .cover-logo {{
                 width: 190px;
                 margin-bottom: 85px;
@@ -2714,15 +2760,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 width: 120px;
                 margin-bottom: 20px;
             }}
-
-            pre {{
-                background: #FFFFFF;
-                padding: 10px;
-                border-radius: 6px;
-                border: 1px solid #27CC6C;
-                font-size: 11px;
-                overflow-x: auto;
-            }}
         </style>
     </head>
     <body>
@@ -2730,11 +2767,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         {summary_html}
         {breakdown_html}
         {espr_html}
-        {eprel_html}
-        {gs1_html}
-        {scip_html}
-        {ontology_html}
-        {jsonld_html}
         {lifecycle_html}
         {changelog_html}
         {images_html}
@@ -2786,7 +2818,6 @@ def integrate_espr_modules(passport):
     passport["espr_validation"] = validate_espr_compliance(passport)
 
     return passport
-
 
 
 
