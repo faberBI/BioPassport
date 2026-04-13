@@ -21,6 +21,18 @@ import os
 import streamlit as st
 import base64
 
+# ======================================================
+# DPP ESPR MODULES (JSON-LD, Ontology, EPREL, GS1, SCIP)
+# ======================================================
+from dpp.jsonld import generate_jsonld
+from dpp.ontology import build_ontology_graph
+from dpp.eprel import generate_eprel_block, validate_eprel
+from dpp.gs1 import generate_gs1_digital_link, validate_gs1
+from dpp.scip import generate_scip_block
+from dpp.sections import build_espr_sections
+from dpp.validator import validate_espr_compliance
+
+
 def normalize_pdf_fields(pdf_data: dict) -> dict:
     """
     Normalizza i nomi dei campi PDF in modo che compute_pef_score
@@ -866,16 +878,25 @@ def generate_qr_from_url(url):
 def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
     text = extract_text_from_pdf(pdf_file)
     extracted_data = gpt_extract_from_pdf(text, client, tipo="mobile", fields=ECOLABEL_FIELDS)
+
     ecolabel_data = {}
     for campo, info in extracted_data.items():
         val = info.get("value")
-        if isinstance(val,bool):
+
+        if isinstance(val, bool):
             ecolabel_data[campo] = val
-        elif isinstance(val,str):
-            ecolabel_data[campo] = val.strip().lower() in ["sì","si","true","yes","conforme"]
+
+        elif isinstance(val, str):
+            ecolabel_data[campo] = val.strip().lower() in [
+                "sì", "si", "true", "yes", "conforme"
+            ]
+
         else:
             ecolabel_data[campo] = False
+
     return ecolabel_data
+
+
 
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
     """
@@ -890,7 +911,6 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
 
     changed = False
 
-    # Struttura base
     passport.setdefault("sections", {})
     passport["sections"].setdefault("PDF", {})
     passport["sections"].setdefault("Images", {})
@@ -899,7 +919,8 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
     # ---------------------------------------------------------
     # 1) PDF + ECOLABEL
     # ---------------------------------------------------------
-    if pdf_file:
+    if pdf_file and client:
+
         # --- Estrazione Ecolabel (booleani)
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
 
@@ -2700,6 +2721,48 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     return html
+
+
+def integrate_espr_modules(passport):
+    """
+    Integra automaticamente:
+    - JSON-LD
+    - Ontologia ESPR
+    - EPREL block
+    - GS1 Digital Link
+    - SCIP block
+    - Sezioni standard
+    - Validator ESPR
+    """
+
+    # 1) JSON-LD
+    passport["jsonld"] = generate_jsonld(passport)
+
+    # 2) Ontologia (solo struttura, non istanze)
+    passport["ontology"] = build_ontology_graph()
+
+    # 3) EPREL block
+    passport["eprel"] = generate_eprel_block(passport)
+
+    # 4) GS1 Digital Link (se GTIN presente)
+    pdf = passport.get("sections", {}).get("PDF", {})
+    gtin = pdf.get("GTIN", {}).get("value")
+    if gtin and validate_gs1(gtin):
+        passport["gs1_digital_link"] = generate_gs1_digital_link(gtin)
+    else:
+        passport["gs1_digital_link"] = None
+
+    # 5) SCIP block
+    passport["scip"] = generate_scip_block(passport)
+
+    # 6) Sezioni standard ESPR
+    passport["espr_sections"] = build_espr_sections(passport)
+
+    # 7) Validazione ESPR completa
+    passport["espr_validation"] = validate_espr_compliance(passport)
+
+    return passport
+
 
 
 
