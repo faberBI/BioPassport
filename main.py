@@ -583,14 +583,12 @@ with tabs[2]:
                 st.json(pp["simple_signature"].get("raw_response", {}))
 
 
-# ======================================================
-# TAB 4 — ARCHIVIO (ENTERPRISE GRADE - REFACTORED)
-# ======================================================
 with tabs[3]:
     st.header("📚 Passport Archive")
 
     import os
     import pandas as pd
+    import base64
 
     # =========================
     # GUARD CLAUSE
@@ -640,170 +638,214 @@ with tabs[3]:
     )
 
     # =========================
-    # SESSION STATE
+    # STATISTICHE ARCHIVIO
     # =========================
-    if "selected_passport" not in st.session_state:
-        st.session_state.selected_passport = None
+    st.subheader("📊 Statistiche archivio")
 
-    if "filters" not in st.session_state:
-        st.session_state.filters = {
-            "search": "",
-            "type": "ALL",
-            "lifecycle": "ALL",
-        }
+    total_passports = len(df_latest)
+    certified_count = (df_latest["lifecycle"] == "certified").sum() if "lifecycle" in df_latest.columns else 0
+    with_pdf = df_latest["pdf_document"].notna().sum() if "pdf_document" in df_latest.columns else 0
+    with_cert = df_latest["cert_count"].sum() if "cert_count" in df_latest.columns else 0
+
+    colA, colB, colC, colD = st.columns(4)
+    colA.metric("Totale passport", total_passports)
+    colB.metric("Certificati", certified_count)
+    colC.metric("Con PDF", with_pdf)
+    colD.metric("Con certificazioni", with_cert)
+
+    # Distribuzione per tipo prodotto
+    if "product_type" in df_latest.columns:
+        st.write("### 📦 Passport per tipo prodotto")
+        st.bar_chart(df_latest["product_type"].value_counts())
+
+    # Distribuzione per lifecycle
+    if "lifecycle" in df_latest.columns:
+        st.write("### 🔄 Distribuzione lifecycle")
+        st.bar_chart(df_latest["lifecycle"].value_counts())
+
+    # Passport per mese
+    if "created_at" in df_latest.columns:
+        df_latest["created_month"] = pd.to_datetime(df_latest["created_at"]).dt.to_period("M")
+        st.write("### 📅 Passport creati per mese")
+        st.line_chart(df_latest["created_month"].value_counts().sort_index())
+
+    st.divider()
 
     # =========================
-    # SIDEBAR FILTERS
+    # SIDEBAR FILTERS (ENTERPRISE)
     # =========================
-    st.sidebar.subheader("🔎 Control Panel")
+    st.sidebar.subheader("🔎 Filtri avanzati")
 
-    f = st.session_state.filters
-
-    f["search"] = st.sidebar.text_input(
-        "Search (ID / type)",
-        value=f["search"]
+    f_search = st.sidebar.text_input("Cerca (ID, tipo, produttore)")
+    f_type = st.sidebar.selectbox(
+        "Tipo prodotto",
+        ["ALL"] + sorted(df_latest["product_type"].dropna().unique().tolist()) if "product_type" in df_latest.columns else ["ALL"]
     )
-
-    f["type"] = st.sidebar.selectbox(
-        "Product type",
-        ["ALL"] + sorted(df_latest["product_type"].dropna().unique().tolist())
-    )
-
-    lifecycle_values = (
-        df_latest["lifecycle"].dropna().unique().tolist()
-        if "lifecycle" in df_latest.columns else []
-    )
-
-    f["lifecycle"] = st.sidebar.selectbox(
+    f_lifecycle = st.sidebar.selectbox(
         "Lifecycle",
-        ["ALL"] + sorted(lifecycle_values)
+        ["ALL"] + sorted(df_latest["lifecycle"].dropna().unique().tolist()) if "lifecycle" in df_latest.columns else ["ALL"]
     )
+    max_version = int(df_latest["version"].max()) if not df_latest["version"].isna().all() else 1
+    f_version = st.sidebar.slider("Versione minima", 1, max_version, 1)
+    f_has_pdf = st.sidebar.checkbox("Solo con PDF generato")
+    f_has_cert = st.sidebar.checkbox("Solo con certificazioni")
 
     # =========================
     # FILTER PIPELINE
     # =========================
     df_view = df_latest.copy()
 
-    if f["search"]:
-        df_view = df_view[
-            df_view["id"].str.contains(f["search"], case=False, na=False) |
-            df_view["product_type"].str.contains(f["search"], case=False, na=False)
-        ]
+    if f_search:
+        mask = (
+            df_view["id"].str.contains(f_search, case=False, na=False)
+        )
+        if "product_type" in df_view.columns:
+            mask |= df_view["product_type"].str.contains(f_search, case=False, na=False)
+        if "issuer_legal_name" in df_view.columns:
+            mask |= df_view["issuer_legal_name"].astype(str).str.contains(f_search, case=False, na=False)
+        df_view = df_view[mask]
 
-    if f["type"] != "ALL":
-        df_view = df_view[df_view["product_type"] == f["type"]]
+    if f_type != "ALL" and "product_type" in df_view.columns:
+        df_view = df_view[df_view["product_type"] == f_type]
 
-    if f["lifecycle"] != "ALL" and "lifecycle" in df_view.columns:
-        df_view = df_view[df_view["lifecycle"] == f["lifecycle"]]
+    if f_lifecycle != "ALL" and "lifecycle" in df_view.columns:
+        df_view = df_view[df_view["lifecycle"] == f_lifecycle]
+
+    df_view = df_view[df_view["version"] >= f_version]
+
+    if f_has_pdf and "pdf_document" in df_view.columns:
+        df_view = df_view[df_view["pdf_document"].notna()]
+
+    if f_has_cert and "cert_count" in df_view.columns:
+        df_view = df_view[df_view["cert_count"] > 0]
 
     if df_view.empty:
         st.warning("Nessun risultato per i filtri correnti")
         st.stop()
 
     # =========================
-    # AUTO SELECT
+    # ORDINAMENTO AVANZATO
     # =========================
-    if st.session_state.selected_passport not in df_view["id"].values:
-        st.session_state.selected_passport = df_view.iloc[0]["id"]
+    st.subheader("↕️ Ordinamento")
 
-    selected_id = str(st.session_state.selected_passport)
+    sort_options = {
+        "Data creazione (nuovi → vecchi)": ("created_at", False),
+        "Data creazione (vecchi → nuovi)": ("created_at", True),
+        "Data aggiornamento (nuovi → vecchi)": ("last_updated_at", False),
+        "Data aggiornamento (vecchi → nuovi)": ("last_updated_at", True),
+        "Versione (alta → bassa)": ("version", False),
+        "Versione (bassa → alta)": ("version", True),
+        "Produttore (A → Z)": ("issuer_legal_name", True),
+        "Produttore (Z → A)": ("issuer_legal_name", False),
+        "Tipo prodotto (A → Z)": ("product_type", True),
+        "Tipo prodotto (Z → A)": ("product_type", False),
+    }
 
-    # ======================================================
-    # MASTER LIST (TOP)
-    # ======================================================
-    st.subheader("📦 Passports")
+    sort_choice = st.selectbox("Ordina per", list(sort_options.keys()))
+    sort_col, sort_asc = sort_options[sort_choice]
 
-    st.dataframe(
-        df_view[["id", "product_type", "version"]],
-        use_container_width=True,
-        hide_index=True
+    if sort_col in df_view.columns:
+        df_view = df_view.sort_values(sort_col, ascending=sort_asc)
+
+    # =========================
+    # ESPORTAZIONE CSV (VIEW FILTRATA)
+    # =========================
+    st.subheader("📤 Esportazione archivio filtrato")
+
+    csv_buf = df_view.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Scarica CSV (vista filtrata)",
+        data=csv_buf,
+        file_name="passport_archive_filtered.csv",
+        mime="text/csv"
     )
 
     st.divider()
 
-    for _, row in df_view.head(200).iterrows():
+    # =========================
+    # MASTER LIST
+    # =========================
+    st.subheader("📦 Passports")
+
+    for _, row in df_view.iterrows():
         pid = row["id"]
-        is_selected = (pid == selected_id)
 
-        if is_selected:
-            st.markdown(f"### 🟢 {pid}")
-        else:
-            st.markdown(f"*{pid}*")
+        st.markdown(f"### {pid}")
 
-        c1, c2, c3 = st.columns([2, 1, 1])
-        c1.write(f"Type: {row.get('product_type', '-')}")
+        c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
+
+        c1.write(f"Tipo: {row.get('product_type', '-')}")
         c2.write(f"v{row.get('version', '-')}")
-        c3.write("")
+        c3.write(f"Lifecycle: {row.get('lifecycle', '-')}")
 
-        if st.button("Open", key=f"open_{pid}"):
-            st.session_state.selected_passport = pid
+        # --- ACTION BUTTONS ---
+        open_col, validate_col, export_col = c4.columns(3)
+
+        if open_col.button("🔍", key=f"open_{pid}", help="Apri vista pubblica"):
+            st.experimental_set_query_params(passport_id=pid)
+            st.rerun()
+
+        if validate_col.button("📝", key=f"validate_{pid}", help="Vai alla validazione"):
+            st.session_state["selected_passport"] = pid
+            st.experimental_set_query_params(passport_id=pid)
+            st.rerun()
+
+        if export_col.button("📄", key=f"export_{pid}", help="Esporta PDF"):
+            passport = services.load_passport_from_file(pid)
+            if passport and passport.get("pdf_document"):
+                pdf_bytes = base64.b64decode(passport["pdf_document"])
+                st.download_button(
+                    label=f"Scarica {pid}.pdf",
+                    data=pdf_bytes,
+                    file_name=f"{pid}.pdf",
+                    mime="application/pdf",
+                    key=f"dl_{pid}"
+                )
+            else:
+                st.warning("PDF non disponibile")
 
         st.divider()
 
-    # ======================================================
-    # DETAIL (FULL WIDTH)
-    # ======================================================
-    st.divider()
-
-    passport = services.load_passport_from_file(selected_id)
-
+    # =========================
+    # DETAIL VIEW
+    # =========================
     st.subheader("🔎 Passport Detail")
 
+    selected_id = st.session_state.get("selected_passport") or df_view.iloc[0]["id"]
+    st.session_state["selected_passport"] = selected_id
+
+    passport = services.load_passport_from_file(selected_id)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
 
-    # HEADER
     st.markdown(f"## 📦 {passport.get('id')}")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Version", passport.get("version"))
     c2.metric("Type", passport.get("product_type"))
-    c3.metric(
-        "Lifecycle",
-        (passport.get("lifecycle") or {}).get("status", "unknown")
-    )
-
-    # ACTIONS
-    colA, colB = st.columns(2)
-    colA.button("✅ Validate", use_container_width=True)
-    colB.button("📤 Export", use_container_width=True)
+    c3.metric("Lifecycle", (passport.get("lifecycle") or {}).get("status", "unknown"))
 
     st.divider()
 
-    # =========================
-    # TABS (ENTERPRISE UX)
-    # =========================
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Overview",
-        "Security",
-        "Fields",
-        "Media"
-    ])
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Security", "Fields", "Media"])
 
-    # OVERVIEW
     with tab1:
         st.write("### Evidences")
-        st.info(len(passport.get("evidences", [])))
+        st.json(passport.get("evidences", []))
 
-    # SECURITY
     with tab2:
         st.write("### Digital Signature")
         st.json(passport.get("digital_signature"))
-
         st.write("### Qualified Seal")
         st.json(passport.get("qualified_seal"))
 
-    # FIELDS
     with tab3:
         df_f = df_fields[df_fields["passport_id"] == selected_id]
         st.dataframe(df_f, use_container_width=True, hide_index=True)
 
-    # MEDIA
     with tab4:
-        imgs = df_images[df_images["passport_id"] == selected_id]
-        imgs = imgs.drop_duplicates(subset=["file_base64"])
-
+        imgs = df_images[df_images["passport_id"] == selected_id].drop_duplicates(subset=["file_base64"])
         if imgs.empty:
             st.info("No media attached")
         else:
