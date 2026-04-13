@@ -55,11 +55,18 @@ for k, v in DEFAULT_STATE.items():
 # ======================================================
 passport_id = st.query_params.get("passport_id")
 if passport_id:
+
+    # --- Caricamento passport ---
     passport = services.load_passport_from_file(passport_id)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
 
+    st.title("🇪🇺 Digital Product Passport — Public View")
+
+    # ======================================================
+    # METADATA PRINCIPALI
+    # ======================================================
     st.subheader("📌 Metadata principali")
     st.markdown(
         f"""
@@ -72,7 +79,9 @@ if passport_id:
 """
     )
 
-    # --- Sigillo QeSeal (preferito) ---
+    # ======================================================
+    # FIRME / SIGILLI
+    # ======================================================
     if passport.get("qualified_seal"):
         seal = passport["qualified_seal"]
         st.subheader("🔐 Sigillo elettronico qualificato (QeSeal)")
@@ -80,6 +89,7 @@ if passport_id:
         st.write(f"Servizio: {seal.get('service')}")
         st.write(f"Seal ID: {seal.get('seal_id')}")
         st.write(f"Stato: {seal.get('state')}")
+
     elif passport.get("qualified_signature"):
         qs = passport["qualified_signature"]
         st.subheader("🔐 Firma qualificata (QES)")
@@ -87,10 +97,13 @@ if passport_id:
         st.write(f"Servizio: {qs.get('service')}")
         st.write(f"Signature ID: {qs.get('signature_id')}")
         st.write(f"Stato: {qs.get('state')}")
+
     else:
         st.info("Firma elettronica semplice presente")
 
-    # --- Legame fisico-digitale ---
+    # ======================================================
+    # LEGAME FISICO-DIGITALE
+    # ======================================================
     if passport.get("physical_binding"):
         pb = passport["physical_binding"]
         st.subheader("🔗 Legame fisico‑digitale")
@@ -99,47 +112,84 @@ if passport_id:
         st.write(f"URL: {pb.get('public_url')}")
         st.write(f"Tamper risk: {pb.get('tamper_risk')}")
 
-    # --- Sezioni DPP ---
-    st.subheader("🧩 Contenuti (sezioni)")
-    for sec_name, sec in passport.get("sections", {}).items():
-        st.markdown(f"### {sec_name}")
-        if isinstance(sec, dict):
-            for fname, f in sec.items():
-                val = f.get("value") if isinstance(f, dict) else f
-                conf = f.get("confidence", 0) if isinstance(f, dict) else 0
-                exp = f.get("explanation", "") if isinstance(f, dict) else ""
-                st.write(f"**{fname}**: {val}  _(conf: {conf})_")
-                if conf is not None and float(conf) < 0.5:
-                    st.caption("⚠️ Bassa confidenza")
-                if exp:
-                    st.caption(exp)
+    # ======================================================
+    # SEZIONI DPP (PDF + IMMAGINI + CERTIFICATI)
+    # ======================================================
+    st.subheader("🧩 Contenuti del DPP")
 
-    # --- Certificati + evidence hash ---
+    # --- PDF fields ---
+    st.markdown("### 📄 Sezione PDF")
+    for fname, f in passport.get("sections", {}).get("PDF", {}).items():
+        val = f.get("value")
+        conf = f.get("confidence")
+        exp = f.get("explanation")
+        st.write(f"**{fname}**: {val} _(conf: {conf})_")
+        if conf is not None and float(conf) < 0.5:
+            st.caption("⚠️ Bassa confidenza")
+        if exp:
+            st.caption(exp)
+
+    # --- Images ---
+    if passport.get("sections", {}).get("Images"):
+        st.markdown("### 🖼️ Immagini")
+        for k, v in passport["sections"]["Images"].items():
+            st.write(f"**{k}**: {v.get('value')}")
+            st.caption(v.get("explanation", ""))
+
+    # --- Certificates ---
     if passport.get("certificates"):
-        st.subheader("📜 Certificati (verificabili)")
+        st.markdown("### 📜 Certificati")
         for idx, cert in enumerate(passport["certificates"], start=1):
             st.markdown(f"**Certificato {idx}**")
-            if isinstance(cert, dict) and cert.get("evidence"):
-                ev = cert["evidence"]
-                st.caption(f"Evidence ID: {ev.get('evidence_id')}")
-                st.caption(f"Evidence hash: {str(ev.get('hash',''))[:16]}…")
-            for k, v in (cert.items() if isinstance(cert, dict) else []):
+            for k, v in cert.items():
                 if k == "evidence":
+                    ev = v
+                    st.caption(f"Evidence ID: {ev.get('evidence_id')}")
+                    st.caption(f"Evidence hash: {str(ev.get('hash',''))[:16]}…")
                     continue
                 if isinstance(v, dict):
-                    st.write(f"- {k}: {v.get('value','')}")
+                    st.write(f"- {k}: {v.get('value')}")
                 else:
                     st.write(f"- {k}: {v}")
 
-    # --- Immagini ---
-    if passport.get("images"):
-        st.subheader("🖼️ Immagini")
-        for img in passport.get("images", []):
-            st.image(f"data:image/jpeg;base64,{img['file_base64']}", caption=img.get("caption", ""))
-
+    # ======================================================
+    # MODULI ESPR (JSON-LD, Ontologia, EPREL, GS1, SCIP)
+    # ======================================================
     st.divider()
-    services.render_espr_compliance(passport)
+    st.subheader("🧠 Moduli ESPR")
+
+    # --- JSON-LD ---
+    st.markdown("### 📘 JSON‑LD")
+    st.json(passport.get("jsonld"))
+
+    # --- Ontologia ---
+    st.markdown("### 📚 Ontologia ESPR")
+    st.json(passport.get("ontology"))
+
+    # --- EPREL ---
+    st.markdown("### ⚡ EPREL")
+    st.json(passport.get("eprel"))
+
+    # --- GS1 Digital Link ---
+    st.markdown("### 🔗 GS1 Digital Link")
+    st.write(passport.get("gs1_digital_link") or "Nessun GTIN disponibile")
+
+    # --- SCIP / ECHA ---
+    st.markdown("### 🧪 SCIP / ECHA")
+    st.json(passport.get("scip"))
+
+    # --- Sezioni standard ESPR ---
+    st.markdown("### 📑 Sezioni standard ESPR")
+    st.json(passport.get("espr_sections"))
+
+    # --- Validazione ESPR ---
+    st.markdown("### 🛡️ Validazione ESPR")
+    st.json(passport.get("espr_validation"))
+
     st.stop()
+
+
+
 
 # ======================================================
 # SELEZIONE TIPO PRODOTTO
@@ -171,7 +221,8 @@ with tabs[0]:
         with st.spinner("Analisi in corso..."):
             pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
             st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
-
+            st.session_state.pdf_data = services.normalize_pdf_fields(st.session_state.pdf_data)
+            
             img_data = {}
             for b in st.session_state.uploaded_images_bytes:
                 img_data.update(services.gpt_analyze_image(BytesIO(b), client, tipo))
@@ -392,6 +443,7 @@ with tabs[2]:
             action="finalize",
             reason="Final publication (ESPR compliant)"
         )
+        services.integrate_espr_modules(passport)
 
         # 8) QeSeal (opzionale)
         qeseal_ok = False
