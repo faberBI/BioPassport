@@ -125,6 +125,22 @@ def generate_pdf_from_html(html: str) -> bytes:
     return resp.content
 
 # ======================================================
+# NORMALIZZAZIONE PRIORITY MAP (ESSENTIAL / OPTIONAL)
+# ======================================================
+
+def normalize_priority_map(priority_map):
+    """
+    Normalizza le chiavi della FIELD_PRIORITY_MAP usando la stessa
+    normalizzazione dei campi PDF, così ogni variante matcha correttamente.
+    """
+    normalized = {}
+    for key, val in priority_map.items():
+        nk = normalize(key)  # usa la tua funzione normalize()
+        normalized[nk] = val
+    return normalized
+
+
+# ======================================================
 # CONFIG
 # ======================================================
 PASSPORT_DIR = "passports"
@@ -185,7 +201,6 @@ ECOLABEL_FIELDS = [
     "voc_bassi","facilmente_smortabile","produzione_basso_impatto","info_consumatore_ok"
 ]
 
-
 # ======================================================
 # ESPR – FURNITURE / WOOD FIELD PRIORITY MAP
 # ======================================================
@@ -228,6 +243,9 @@ FIELD_PRIORITY_MAP = {
     "Peso": "optional",
     "Dimensioni": "optional",
 }
+
+# Mappa normalizzata pronta all'uso
+NORMALIZED_FIELD_PRIORITY_MAP = normalize_priority_map(FIELD_PRIORITY_MAP)
 
 # ======================================================
 # NORMALIZATION / MATCHING
@@ -327,9 +345,8 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str, issuer: dic
 
     return passport
 
-
-
 def _norm_field(x, field_name=None, default_conf=0.0):
+    # --- Normalizzazione valore / confidenza / spiegazione ---
     if isinstance(x, dict):
         value = "" if x.get("value") is None else str(x.get("value"))
         confidence = float(x.get("confidence", default_conf) or 0.0)
@@ -339,7 +356,10 @@ def _norm_field(x, field_name=None, default_conf=0.0):
         confidence = float(default_conf)
         explanation = ""
 
-    priority = FIELD_PRIORITY_MAP.get(field_name, "optional")
+    # --- PRIORITY MAP NORMALIZZATA ---
+    # Usa la priority map normalizzata, non quella originale
+    norm_key = normalize(field_name) if field_name else ""
+    priority = NORMALIZED_FIELD_PRIORITY_MAP.get(norm_key, "optional")
     mandatory = priority == "essential"
 
     return {
@@ -349,6 +369,7 @@ def _norm_field(x, field_name=None, default_conf=0.0):
         "priority": priority,
         "mandatory": mandatory
     }
+
 
 def _norm_payload_cert(payload: dict) -> dict:
     # Normalizza output certificati (chiavi libere)
