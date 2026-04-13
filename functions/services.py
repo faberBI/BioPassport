@@ -858,40 +858,49 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
 
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
     """
-    Versione robusta:
+    Versione robusta e corretta:
     - Estrae PDF + Ecolabel
     - Normalizza i nomi dei campi PDF
-    - Deep merge coerente
+    - Integra gli Ecolabel dentro la sezione PDF (no sezioni duplicate)
+    - Deep merge coerente PDF + immagini
+    - Certificati gestiti correttamente (lista, non dict)
     - Prepara i dati per il PEF
     """
 
     changed = False
 
+    # Struttura base
     passport.setdefault("sections", {})
     passport["sections"].setdefault("PDF", {})
     passport["sections"].setdefault("Images", {})
-    passport.setdefault("certificates", {})
+    passport.setdefault("certificates", [])
 
-    # -------------------------
+    # ---------------------------------------------------------
     # 1) PDF + ECOLABEL
-    # -------------------------
+    # ---------------------------------------------------------
     if pdf_file:
-        # Estrazione Ecolabel
+        # --- Estrazione Ecolabel (booleani)
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
-        passport["sections"]["Ecolabel_UE"] = ecolabel_data
 
-        # Estrazione testo PDF
+        # Integra Ecolabel dentro la sezione PDF
+        for k, v in ecolabel_data.items():
+            passport["sections"]["PDF"][k] = {
+                "value": v,
+                "confidence": 1.0,
+                "explanation": "Ecolabel UE"
+            }
+
+        # --- Estrazione testo PDF
         pdf_text = extract_text_from_pdf(pdf_file)
 
-        # Estrazione GPT
+        # --- Estrazione GPT
         fields_to_extract = PRODUCT_FIELDS.get("mobile", {}).get("pdf", [])
         pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", fields_to_extract)
 
-
-        # 🔥 NORMALIZZAZIONE (fondamentale per il PEF)
+        # --- Normalizzazione campi PDF (fondamentale)
         normalized_pdf = normalize_pdf_fields(pdf_text_data)
 
-        # Deep merge PDF
+        # --- Deep merge PDF
         for field, newdata in normalized_pdf.items():
             old = passport["sections"]["PDF"].get(field, {})
             passport["sections"]["PDF"][field] = {
@@ -902,9 +911,9 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
 
         changed = True
 
-    # -------------------------
+    # ---------------------------------------------------------
     # 2) IMMAGINI
-    # -------------------------
+    # ---------------------------------------------------------
     if image_data:
         for field, newdata in image_data.items():
             old = passport["sections"]["Images"].get(field, {})
@@ -915,22 +924,16 @@ def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data
             }
         changed = True
 
-    # -------------------------
-    # 3) CERTIFICATI
-    # -------------------------
+    # ---------------------------------------------------------
+    # 3) CERTIFICATI (lista, non dict)
+    # ---------------------------------------------------------
     if cert_data:
-        for field, newdata in cert_data.items():
-            old = passport["certificates"].get(field, {})
-            passport["certificates"][field] = {
-                "value": newdata.get("value", old.get("value", "")),
-                "confidence": newdata.get("confidence", old.get("confidence", 0)),
-                "explanation": newdata.get("explanation", old.get("explanation", "")),
-            }
+        passport["certificates"] = cert_data
         changed = True
 
-    # -------------------------
-    # 4) EVENTO LIFECYCLE
-    # -------------------------
+    # ---------------------------------------------------------
+    # 4) VERSIONING + AUDIT ESPR
+    # ---------------------------------------------------------
     if changed:
         append_lifecycle_event(passport, "updated", {"what": "merge_data_with_ecolabel"})
         espr_stamp(
