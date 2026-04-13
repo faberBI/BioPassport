@@ -896,94 +896,91 @@ def extract_ecolabel_fields_from_pdf(pdf_file, client: OpenAI):
 
     return ecolabel_data
 
-
-
 def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
     """
-    Versione robusta e corretta:
-    - Estrae PDF + Ecolabel
-    - Normalizza i nomi dei campi PDF
-    - Integra gli Ecolabel dentro la sezione PDF (no sezioni duplicate)
-    - Deep merge coerente PDF + immagini
-    - Certificati gestiti correttamente (lista, non dict)
-    - Prepara i dati per il PEF
+    Merge completo:
+    - Estrae PDF
+    - Normalizza
+    - Integra Ecolabel
+    - Integra dati validati (PDF + immagini)
+    - Aggiorna passport["sections"]["PDF"]
     """
 
     changed = False
 
-    passport.setdefault("sections", {})
-    passport["sections"].setdefault("PDF", {})
-    passport["sections"].setdefault("Images", {})
-    passport.setdefault("certificates", [])
-
-    # ---------------------------------------------------------
-    # 1) PDF + ECOLABEL
-    # ---------------------------------------------------------
+    # ------------------------------------------------------
+    # 1) Estrazione PDF grezza
+    # ------------------------------------------------------
+    extracted_pdf = {}
     if pdf_file and client:
+        text = extract_text_from_pdf(pdf_file)
+        extracted_pdf = gpt_extract_from_pdf(
+            text,
+            client,
+            tipo="mobile",
+            fields=list(passport["sections"]["PDF"].keys())
+        )
 
-        # --- Estrazione Ecolabel (booleani)
+    # ------------------------------------------------------
+    # 2) Normalizzazione campi PDF
+    # ------------------------------------------------------
+    normalized_pdf = normalize_pdf_fields(extracted_pdf)
+
+    # ------------------------------------------------------
+    # 3) Ecolabel
+    # ------------------------------------------------------
+    ecolabel_data = {}
+    if pdf_file and client:
         ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
 
-        # Integra Ecolabel dentro la sezione PDF
-        for k, v in ecolabel_data.items():
-            passport["sections"]["PDF"][k] = {
-                "value": v,
-                "confidence": 1.0,
-                "explanation": "Ecolabel UE"
-            }
+    # ------------------------------------------------------
+    # 4) Merge PDF (validati + estratti + ecolabel)
+    # ------------------------------------------------------
+    passport["sections"].setdefault("PDF", {})
 
-        # --- Estrazione testo PDF
-        pdf_text = extract_text_from_pdf(pdf_file)
+    for field in passport["sections"]["PDF"].keys():
+        final_value = None
 
-        # --- Estrazione GPT
-        fields_to_extract = PRODUCT_FIELDS.get("mobile", {}).get("pdf", [])
-        pdf_text_data = gpt_extract_from_pdf(pdf_text, client, "mobile", fields_to_extract)
+        # 1) Validato dall’utente (PRIORITARIO)
+        if field in st.session_state.get("validated_pdf", {}):
+            final_value = st.session_state.validated_pdf[field]["value"]
 
-        # --- Normalizzazione campi PDF (fondamentale)
-        normalized_pdf = normalize_pdf_fields(pdf_text_data)
+        # 2) Estratto da GPT
+        elif field in normalized_pdf:
+            final_value = normalized_pdf[field]["value"]
 
-        # --- Deep merge PDF
-        for field, newdata in normalized_pdf.items():
-            old = passport["sections"]["PDF"].get(field, {})
-            passport["sections"]["PDF"][field] = {
-                "value": newdata.get("value", old.get("value", "")),
-                "confidence": newdata.get("confidence", old.get("confidence", 0)),
-                "explanation": newdata.get("explanation", old.get("explanation", "")),
-            }
+        # 3) Ecolabel (solo booleani)
+        elif field in ecolabel_data:
+            final_value = ecolabel_data[field]
 
-        changed = True
+        passport["sections"]["PDF"][field] = {
+            "value": final_value,
+            "confidence": 1.0,
+            "explanation": ""
+        }
 
-    # ---------------------------------------------------------
-    # 2) IMMAGINI
-    # ---------------------------------------------------------
+    changed = True
+
+    # ------------------------------------------------------
+    # 5) Merge immagini
+    # ------------------------------------------------------
     if image_data:
-        for field, newdata in image_data.items():
-            old = passport["sections"]["Images"].get(field, {})
-            passport["sections"]["Images"][field] = {
-                "value": newdata.get("value", old.get("value", "")),
-                "confidence": newdata.get("confidence", old.get("confidence", 0)),
-                "explanation": newdata.get("explanation", old.get("explanation", "")),
-            }
+        passport["sections"]["Images"] = image_data
         changed = True
 
-    # ---------------------------------------------------------
-    # 3) CERTIFICATI (lista, non dict)
-    # ---------------------------------------------------------
+    # ------------------------------------------------------
+    # 6) Merge certificati
+    # ------------------------------------------------------
     if cert_data:
         passport["certificates"] = cert_data
         changed = True
 
-    # ---------------------------------------------------------
-    # 4) VERSIONING + AUDIT ESPR
-    # ---------------------------------------------------------
+    # ------------------------------------------------------
+    # 7) Versioning
+    # ------------------------------------------------------
     if changed:
         append_lifecycle_event(passport, "updated", {"what": "merge_data_with_ecolabel"})
-        espr_stamp(
-            passport,
-            actor="manufacturer",
-            action="data_merge_ecolabel",
-            reason="Merged validated data + ecolabel"
-        )
+        espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
 
     return passport
 
