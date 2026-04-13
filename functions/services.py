@@ -32,32 +32,19 @@ from dpp.scip import generate_scip_block
 from dpp.sections import build_espr_sections
 from dpp.validator import validate_espr_compliance
 
+
 def normalize(text: str) -> str:
-    """
-    Normalizza una stringa per confronti consistenti:
-    - lowercase
-    - rimuove spazi extra
-    - rimuove caratteri speciali
-    """
     if not text:
         return ""
-    return (
-        str(text)
-        .strip()
-        .lower()
-        .replace("à", "a")
-        .replace("è", "e")
-        .replace("é", "e")
-        .replace("ì", "i")
-        .replace("ò", "o")
-        .replace("ù", "u")
-        .replace("’", "'")
-        .replace("‘", "'")
-        .replace("“", '"')
-        .replace("”", '"')
-    )
-
-
+    text = str(text).strip().lower()
+    replacements = {
+        "à": "a", "è": "e", "é": "e", "ì": "i",
+        "ò": "o", "ù": "u",
+        "’": "'", "‘": "'", "“": '"', "”": '"'
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
 
 def normalize_pdf_fields(pdf_data: dict) -> dict:
     """
