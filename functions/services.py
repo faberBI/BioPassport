@@ -48,83 +48,40 @@ def normalize(text: str) -> str:
 
 def normalize_pdf_fields(pdf_data: dict) -> dict:
     """
-    Normalizza i nomi dei campi PDF in modo che compute_pef_score
-    trovi sempre i campi canonici, indipendentemente da come GPT li ha estratti.
+    Normalizza SOLO i campi PEF, senza perdere gli altri campi PDF.
     """
 
     FIELD_MAP = {
-        "Percentuale di contenuto riciclato": [
-            "Percentuale di contenuto riciclato",
-            "Percentuale riciclato",
-            "% di contenuto riciclato",
-            "% riciclato",
-            "Contenuto riciclato"
-        ],
-        "Sostanze preoccupanti": [
-            "Sostanze preoccupanti",
-            "Sostanze pericolose",
-            "Sostanze"
-        ],
-        "Energia consumata": [
-            "Energia consumata",
-            "Consumo energetico",
-            "Energia"
-        ],
-        "Luogo di Produzione": [
-            "Luogo di Produzione",
-            "Luogo di produzione",
-            "Produzione",
-            "Made in",
-            "Prodotto in"
-        ],
-        "Durabilità": [
-            "Durabilità",
-            "Durata",
-            "Resistenza"
-        ],
-        "Istruzioni di riparazione": [
-            "Istruzioni di riparazione",
-            "Riparabilità",
-            "Riparazione"
-        ],
-        "Parti sostituibili": [
-            "Parti sostituibili",
-            "Componenti sostituibili",
-            "Parti di ricambio"
-        ],
-        "Indicazioni di smaltimento": [
-            "Indicazioni di smaltimento",
-            "Smaltimento",
-            "Disposal"
-        ],
-        "Fine vita": [
-            "Fine vita",
-            "End of life",
-            "Riciclabile"
-        ],
-        "Certificazioni": [
-            "Certificazioni",
-            "Certificato",
-            "Certificazione"
-        ]
+        "Percentuale di contenuto riciclato": [...],
+        "Sostanze preoccupanti": [...],
+        "Energia consumata": [...],
+        "Luogo di Produzione": [...],
+        "Durabilità": [...],
+        "Istruzioni di riparazione": [...],
+        "Parti sostituibili": [...],
+        "Indicazioni di smaltimento": [...],
+        "Fine vita": [...],
+        "Certificazioni": [...]
     }
 
-    normalized = {}
+    # 1) Mantieni TUTTI i campi originali
+    normalized = dict(pdf_data)
 
+    # 2) Normalizza SOLO i campi PEF
     for canonical, variants in FIELD_MAP.items():
         found = False
         for v in variants:
-            if v in pdf_data and pdf_data[v].get("value") not in ["", None]:
+            if v in pdf_data and pdf_data[v].get("value"):
                 normalized[canonical] = pdf_data[v]
                 found = True
                 break
 
         if not found:
-            normalized[canonical] = {
+            normalized.setdefault(canonical, {
                 "value": "",
                 "confidence": 0.0,
                 "explanation": ""
-            }
+            })
 
     return normalized
 
@@ -2818,7 +2775,3 @@ def integrate_espr_modules(passport):
     passport["espr_validation"] = validate_espr_compliance(passport)
 
     return passport
-
-
-
-
