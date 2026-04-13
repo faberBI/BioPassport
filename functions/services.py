@@ -2454,12 +2454,12 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         """
 
     # ---------------------------------------------------------
-    # COVER PAGE (logo ridotto + palette EU)
+    # COVER PAGE (logo ridotto)
     # ---------------------------------------------------------
     cover_html = f"""
     <div class="cover">
         <img src="data:image/jpeg;base64,{logo_base64}" class="cover-logo"/>
-        <h1 class="cover-title">🇪🇺 Digital Product Passport</h1>
+        <h1 class="cover-title">📘 Digital Product Passport</h1>
         <h2 class="cover-product">{passport.get("product_name") or passport.get("id","")}</h2>
 
         <div class="cover-meta">
@@ -2482,7 +2482,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     # ---------------------------------------------------------
     summary_html = f"""
     <div class="section summary">
-        <h2>📘 Passport Summary</h2>
+        <h2>📄 Passport Summary</h2>
         <table class="data-table">
             <tr><td class='field-name'>Product Name</td><td>{passport.get("product_name")}</td></tr>
             <tr><td class='field-name'>Product ID</td><td>{passport.get("id")}</td></tr>
@@ -2511,7 +2511,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # SEZIONI ESPR — con icone + palette EU
+    # SEZIONI ESPR — con icone
     # ---------------------------------------------------------
     espr_html = f"""
     <div class="section">
@@ -2701,7 +2701,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         """
 
     # ---------------------------------------------------------
-    # ABOUT + LEGAL
+    # ABOUT + LEGAL (logo ridotto)
     # ---------------------------------------------------------
     about_html = f"""
     <div class="page-break"></div>
@@ -2730,7 +2730,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # FINAL HTML — con palette EU
+    # FINAL HTML (solo aggiunta classi logo)
     # ---------------------------------------------------------
     html = f"""
     <html>
@@ -2738,73 +2738,27 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
         <meta charset="utf-8">
         <style>
             @page {{ margin: 40px; @bottom-right {{ content: "Page " counter(page); font-size: 9px; }} }}
+            body {{ font-family: "Inter", Arial, sans-serif; color: #3D0F06; background: #F6F8F8; }}
+            .page-break {{ page-break-before: always; }}
+            .section {{ margin-bottom:25px; background:#F6F8F8; padding:15px; border-radius:6px; }}
+            h2 {{ border-bottom:2px solid #23CE6B; padding-bottom:5px; color:#36120D; }}
+            table {{ width:100%; border-collapse: collapse; font-size:12px; }}
+            th, td {{ border:1px solid #27CC6C; padding:6px; }}
+            .field-name {{ font-weight:bold; background:#F6F8F8; width:30%; color:#3D0F06; }}
+            .image-grid {{ display:flex; flex-wrap:wrap; gap:10px; }}
+            .image-card {{ width:48%; border:1px solid #27CC6C; }}
+            .image-card img {{ width:100%; }}
+            .caption {{ font-size:10px; text-align:center; }}
 
-            body {{
-                font-family: "Inter", Arial, sans-serif;
-                color: #002060;
-                background: #FFFFFF;
-            }}
-
+            /* LOGHI RIDOTTI */
             .cover-logo {{
-                width: 110px;
-                margin-bottom: 20px;
+                width: 75px;
+                margin-bottom: 16px;
             }}
 
             .about-logo {{
-                width: 90px;
-                margin-bottom: 15px;
-            }}
-
-            .section {{
-                margin-bottom: 25px;
-                background: #F8F9FC;
-                padding: 15px;
-                border-radius: 6px;
-                border-left: 4px solid #003399;
-            }}
-
-            h2 {{
-                border-bottom: 2px solid #003399;
-                padding-bottom: 5px;
-                color: #002060;
-            }}
-
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 12px;
-            }}
-
-            th, td {{
-                border: 1px solid #003399;
-                padding: 6px;
-            }}
-
-            .field-name {{
-                font-weight: bold;
-                background: #F2F2F2;
-                width: 30%;
-                color: #002060;
-            }}
-
-            .image-grid {{
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-            }}
-
-            .image-card {{
-                width: 48%;
-                border: 1px solid #003399;
-            }}
-
-            .image-card img {{
-                width: 100%;
-            }}
-
-            .caption {{
-                font-size: 10px;
-                text-align: center;
+                width: 60px;
+                margin-bottom: 10px;
             }}
         </style>
     </head>
@@ -2823,9 +2777,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     return html
-
-
-
 
 
 def integrate_espr_modules(passport):
