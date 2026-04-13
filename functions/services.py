@@ -2618,10 +2618,116 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     # ---------------------------------------------------------
-    # RESTO DELLA TUA FUNZIONE (lifecycle, changelog, images…)
+    # LIFECYCLE EVENTS
     # ---------------------------------------------------------
+    lifecycle_html = ""
+    events = (passport.get("lifecycle") or {}).get("events") or []
 
-    # (qui manteniamo tutto il tuo codice esistente: lifecycle_html, changelog_html, images_html, about_html, legal_html)
+    if events:
+        rows = ""
+        for ev in events:
+            rows += f"""
+            <tr>
+                <td>{ev.get('event')}</td>
+                <td>{ev.get('timestamp')}</td>
+                <td><pre>{json.dumps(ev.get('data', {}), ensure_ascii=False, indent=2)}</pre></td>
+            </tr>
+            """
+
+        lifecycle_html = f"""
+        <div class="page-break"></div>
+        <div class="section">
+            <h2>Lifecycle Events</h2>
+            <table class="data-table">
+                <tr><th>Event</th><th>Timestamp</th><th>Details</th></tr>
+                {rows}
+            </table>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # CHANGE LOG
+    # ---------------------------------------------------------
+    changelog_html = ""
+    if passport.get("change_log"):
+        rows = ""
+        for log in passport["change_log"]:
+            rows += f"""
+            <tr>
+                <td>{log.get('version')}</td>
+                <td>{log.get('timestamp')}</td>
+                <td>{log.get('actor')}</td>
+                <td>{log.get('action')}</td>
+                <td>{log.get('reason')}</td>
+            </tr>
+            """
+
+        changelog_html = f"""
+        <div class="section">
+            <h2>Change Log</h2>
+            <table class="data-table">
+                <tr><th>Version</th><th>Date</th><th>Actor</th><th>Action</th><th>Reason</th></tr>
+                {rows}
+            </table>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # IMAGES
+    # ---------------------------------------------------------
+    images_html = ""
+    images = passport.get("images", [])
+
+    if images:
+        cards = ""
+        for img in images:
+            b64 = img.get("file_base64")
+            if not b64:
+                continue
+
+            cards += f"""
+            <div class="image-card">
+                <img src="data:image/jpeg;base64,{b64}" />
+                <div class="caption">{img.get("caption","")}</div>
+            </div>
+            """
+
+        images_html = f"""
+        <div class="page-break"></div>
+        <div class="section">
+            <h2>Product Visual Documentation</h2>
+            <div class="image-grid">{cards}</div>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # ABOUT + LEGAL
+    # ---------------------------------------------------------
+    about_html = f"""
+    <div class="page-break"></div>
+    <div class="about">
+        <img src="data:image/jpeg;base64,{logo_base64}" class="about-logo"/>
+        <h1>About Nuvia</h1>
+        <p>Nuvia è una piattaforma digitale per la generazione automatizzata del Digital Product Passport, progettata per supportare la tracciabilità e la sostenibilità dei prodotti in conformità alle normative europee.</p>
+        <p>Supportiamo il Digital Product Passport secondo regolamento ESPR 2024/1781.</p>
+        <h2>Mission</h2>
+        <p>Abilitare trasparenza e sostenibilità lungo l’intero ciclo di vita dei prodotti.</p>
+        <h2>Contatti</h2>
+        <p>Email: informazioni.nuvia@gmail.com</p>
+        <p>Web: https://nuviadpp.com</p>
+    </div>
+    """
+
+    legal_html = """
+    <div class="page-break"></div>
+    <div class="legal">
+        <h1>Legal Notice</h1>
+        <p>Questo documento è generato automaticamente dal sistema Nuvia DPP.</p>
+        <p>I dati sono forniti dal produttore sotto la propria responsabilità.</p>
+        <p>Nuvia non è responsabile per errori o omissioni.</p>
+        <p>© Nuvia S.r.l. – Tutti i diritti riservati</p>
+    </div>
+    """
 
     # ---------------------------------------------------------
     # FINAL HTML
@@ -2639,6 +2745,10 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             table {{ width:100%; border-collapse: collapse; font-size:12px; }}
             th, td {{ border:1px solid #27CC6C; padding:6px; }}
             .field-name {{ font-weight:bold; background:#F6F8F8; width:30%; color:#3D0F06; }}
+            .image-grid {{ display:flex; flex-wrap:wrap; gap:10px; }}
+            .image-card {{ width:48%; border:1px solid #27CC6C; }}
+            .image-card img {{ width:100%; }}
+            .caption {{ font-size:10px; text-align:center; }}
         </style>
     </head>
     <body>
@@ -2656,6 +2766,7 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     """
 
     return html
+
 
 
 
