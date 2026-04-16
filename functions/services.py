@@ -144,14 +144,11 @@ PRODUCT_FIELDS = {
             "Data di produzione",
             "Dimensioni",
             "Peso",
-
             # --- Campi PEF (fondamentali) ---
-            "Percentuale riciclato",
             "Percentuale di contenuto riciclato",   # variante
             "% di contenuto riciclato",            # variante
             "Sostanze preoccupanti",
             "Energia consumata",
-            "Luogo di produzione",                 # variante
             "Durabilità",
             "Istruzioni di riparazione",
             "Parti sostituibili",
