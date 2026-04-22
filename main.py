@@ -1,7 +1,7 @@
 import streamlit as st
 import uuid
-import os
 import base64
+import os
 import pandas as pd
 from io import BytesIO
 from PIL import Image
@@ -32,6 +32,7 @@ st.title("🇪🇺 Digital Product Passport")
 # OPENAI CLIENT
 # ======================================================
 client = OpenAI(api_key=st.secrets["OPEN_AI_KEY"])
+
 # ======================================================
 # SESSION STATE INIT
 # ======================================================
@@ -39,13 +40,15 @@ DEFAULT_STATE = {
     "uploaded_pdf_bytes": None,
     "uploaded_images_bytes": None,
     "uploaded_cert_bytes": None,
-    "uploaded_cert_names": None,  # ✅ NEW
+    "uploaded_cert_names": None,
     "pdf_data": None,
     "image_data": None,
     "cert_data": None,
     "validated_pdf": None,
     "validated_image": None,
     "validated_cert": None,
+    "published_passport": None,
+    "selected_passport": None,
 }
 for k, v in DEFAULT_STATE.items():
     st.session_state.setdefault(k, v)
@@ -55,9 +58,9 @@ for k, v in DEFAULT_STATE.items():
 # ======================================================
 passport_id = st.query_params.get("passport_id")
 if passport_id:
+    # DB-first (wrapper), fallback file se DB non ha ancora quel record
+    passport = services.load_passport(passport_id)
 
-    # --- Caricamento passport ---
-    passport = services.load_passport_from_file(passport_id)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
@@ -97,9 +100,8 @@ if passport_id:
         st.write(f"Servizio: {qs.get('service')}")
         st.write(f"Signature ID: {qs.get('signature_id')}")
         st.write(f"Stato: {qs.get('state')}")
-
     else:
-        st.info("Firma elettronica semplice presente")
+        st.info("Firma elettronica semplice presente (o non richiesta)")
 
     # ======================================================
     # LEGAME FISICO-DIGITALE
@@ -113,30 +115,27 @@ if passport_id:
         st.write(f"Tamper risk: {pb.get('tamper_risk')}")
 
     # ======================================================
-    # SEZIONI DPP (PDF + IMMAGINI + CERTIFICATI)
+    # SEZIONI DPP
     # ======================================================
     st.subheader("🧩 Contenuti del DPP")
 
-    # --- PDF fields ---
     st.markdown("### 📄 Sezione PDF")
-    for fname, f in passport.get("sections", {}).get("PDF", {}).items():
-        val = f.get("value")
-        conf = f.get("confidence")
-        exp = f.get("explanation")
+    for fname, f in (passport.get("sections", {}).get("PDF", {}) or {}).items():
+        val = f.get("value") if isinstance(f, dict) else f
+        conf = f.get("confidence") if isinstance(f, dict) else None
+        exp = f.get("explanation") if isinstance(f, dict) else ""
         st.write(f"**{fname}**: {val} _(conf: {conf})_")
         if conf is not None and float(conf) < 0.5:
             st.caption("⚠️ Bassa confidenza")
         if exp:
             st.caption(exp)
 
-    # --- Images ---
     if passport.get("sections", {}).get("Images"):
-        st.markdown("### 🖼️ Immagini")
+        st.markdown("### 🖼️ Immagini (estratte)")
         for k, v in passport["sections"]["Images"].items():
             st.write(f"**{k}**: {v.get('value')}")
             st.caption(v.get("explanation", ""))
 
-    # --- Certificates ---
     if passport.get("certificates"):
         st.markdown("### 📜 Certificati")
         for idx, cert in enumerate(passport["certificates"], start=1):
@@ -153,43 +152,33 @@ if passport_id:
                     st.write(f"- {k}: {v}")
 
     # ======================================================
-    # MODULI ESPR (JSON-LD, Ontologia, EPREL, GS1, SCIP)
+    # MODULI ESPR (se presenti)
     # ======================================================
     st.divider()
     st.subheader("🧠 Moduli ESPR")
 
-    # --- JSON-LD ---
     st.markdown("### 📘 JSON‑LD")
     st.json(passport.get("jsonld"))
 
-    # --- Ontologia ---
     st.markdown("### 📚 Ontologia ESPR")
     st.json(passport.get("ontology"))
 
-    # --- EPREL ---
     st.markdown("### ⚡ EPREL")
     st.json(passport.get("eprel"))
 
-    # --- GS1 Digital Link ---
     st.markdown("### 🔗 GS1 Digital Link")
     st.write(passport.get("gs1_digital_link") or "Nessun GTIN disponibile")
 
-    # --- SCIP / ECHA ---
     st.markdown("### 🧪 SCIP / ECHA")
     st.json(passport.get("scip"))
 
-    # --- Sezioni standard ESPR ---
     st.markdown("### 📑 Sezioni standard ESPR")
     st.json(passport.get("espr_sections"))
 
-    # --- Validazione ESPR ---
     st.markdown("### 🛡️ Validazione ESPR")
     st.json(passport.get("espr_validation"))
 
     st.stop()
-
-
-
 
 # ======================================================
 # SELEZIONE TIPO PRODOTTO
@@ -202,8 +191,7 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🚀 Pubblica", "�
 # ======================================================
 # TAB 1 — UPLOAD & AI
 # ======================================================
-with tabs[0]:
-    pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
+with tabspdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
     cert_files = st.file_uploader("Certificati", type=["pdf", "jpg", "png"], accept_multiple_files=True)
 
@@ -216,13 +204,18 @@ with tabs[0]:
         st.session_state.uploaded_images_bytes = [i.read() for i in image_files]
 
         st.session_state.uploaded_cert_bytes = [c.read() for c in (cert_files or [])]
-        st.session_state.uploaded_cert_names = [getattr(c, "name", f"cert_{i+1}") for i, c in enumerate(cert_files or [])]
+        st.session_state.uploaded_cert_names = [
+            getattr(c, "name", f"cert_{i+1}") for i, c in enumerate(cert_files or [])
+        ]
 
         with st.spinner("Analisi in corso..."):
             pdf_text = services.extract_text_from_pdf(BytesIO(st.session_state.uploaded_pdf_bytes))
             st.session_state.pdf_data = services.gpt_extract_from_pdf(pdf_text, client, tipo, fields)
-            st.session_state.pdf_data = services.normalize_pdf_fields(st.session_state.pdf_data)
-            
+
+            # Normalizza PEF fields se la funzione esiste nel tuo services
+            if hasattr(services, "normalize_pdf_fields"):
+                st.session_state.pdf_data = services.normalize_pdf_fields(st.session_state.pdf_data)
+
             img_data = {}
             for b in st.session_state.uploaded_images_bytes:
                 img_data.update(services.gpt_analyze_image(BytesIO(b), client, tipo))
@@ -230,6 +223,7 @@ with tabs[0]:
 
             cert_list = []
             for b in st.session_state.uploaded_cert_bytes:
+                # nome funzione nel tuo services.py: gpt_extract_cert_info
                 cert_list.append(services.gpt_extract_cert_info(BytesIO(b), client))
             st.session_state.cert_data = cert_list
 
@@ -239,129 +233,104 @@ with tabs[0]:
 # TAB 2 — VALIDAZIONE
 # ======================================================
 with tabs[1]:
-
     if st.session_state.pdf_data and st.session_state.image_data:
-
-        # --------------------------------------------------
+        # ----------------------------
         # VALIDAZIONE PDF
-        # --------------------------------------------------
+        # ----------------------------
         st.subheader("Validazione PDF")
         validated_pdf = {}
-
         for k, v in st.session_state.pdf_data.items():
-            original_val = v.get("value", "")
+            original_val = v.get("value", "") if isinstance(v, dict) else str(v)
             user_val = st.text_input(
                 f"PDF · {k}",
                 value=original_val,
-                help=v.get("explanation", ""),
+                help=(v.get("explanation", "") if isinstance(v, dict) else ""),
                 key=f"pdf_{k}"
             )
-
             validated_pdf[k] = {
                 "value": user_val,
-                "confidence": 1.0 if user_val != original_val else v.get("confidence", 0),
-                "explanation": v.get("explanation", "")
+                "confidence": 1.0 if user_val != original_val else (v.get("confidence", 0) if isinstance(v, dict) else 0),
+                "explanation": (v.get("explanation", "") if isinstance(v, dict) else "")
             }
-
         st.session_state.validated_pdf = validated_pdf
 
-        # --------------------------------------------------
+        # ----------------------------
         # VALIDAZIONE IMMAGINI
-        # --------------------------------------------------
+        # ----------------------------
         st.subheader("Validazione Immagini")
         validated_image = {}
-
         for k, v in st.session_state.image_data.items():
-            original_val = v.get("value", "")
+            original_val = v.get("value", "") if isinstance(v, dict) else str(v)
             user_val = st.text_input(
                 f"IMG · {k}",
                 value=original_val,
-                help=v.get("explanation", ""),
+                help=(v.get("explanation", "") if isinstance(v, dict) else ""),
                 key=f"img_{k}"
             )
-
             validated_image[k] = {
                 "value": user_val,
-                "confidence": 1.0 if user_val != original_val else v.get("confidence", 0),
-                "explanation": v.get("explanation", "")
+                "confidence": 1.0 if user_val != original_val else (v.get("confidence", 0) if isinstance(v, dict) else 0),
+                "explanation": (v.get("explanation", "") if isinstance(v, dict) else "")
             }
-
         st.session_state.validated_image = validated_image
-        # --------------------------------------------------
+
+        # ----------------------------
         # VALIDAZIONE CERTIFICATI
-        # --------------------------------------------------
+        # ----------------------------
         if st.session_state.cert_data:
             st.subheader("Certificati")
             validated_cert = []
-
             for i, cert in enumerate(st.session_state.cert_data):
                 st.markdown(f"**Certificato {i+1}**")
                 row = {}
-
-                for k, v in cert.items():
-                    original_val = v.get("value", "") if isinstance(v, dict) else v
-
+                for k, v in (cert or {}).items():
+                    original_val = v.get("value", "") if isinstance(v, dict) else str(v)
                     user_val = st.text_input(
                         f"CERT {i+1} · {k}",
                         value=original_val,
                         key=f"cert_{i}_{k}"
                     )
-
                     row[k] = {
                         "value": user_val,
                         "confidence": 1.0 if user_val != original_val else (v.get("confidence", 0) if isinstance(v, dict) else 0),
-                        "explanation": v.get("explanation", "") if isinstance(v, dict) else ""
+                        "explanation": (v.get("explanation", "") if isinstance(v, dict) else "")
                     }
-
                 validated_cert.append(row)
-
             st.session_state.validated_cert = validated_cert
 
         st.success("Validazione pronta ✅")
-
     else:
         st.info("Esegui prima l’analisi")
-
 
 # ======================================================
 # TAB 3 — PUBBLICA
 # ======================================================
 with tabs[2]:
-
-    # --------------------------------------------------
-    # Guard-rail: serve prima validazione completata
-    # --------------------------------------------------
     if not (st.session_state.get("validated_pdf") and st.session_state.get("validated_image")):
         st.info("Completa prima la validazione")
         st.stop()
 
-    # --------------------------------------------------
-    # Feature flag
-    # --------------------------------------------------
     ENABLE_QESEAL = False
     ENABLE_SES = True
 
-    # --------------------------------------------------
-    # Bottone principale: PUBBLICA DPP
-    # --------------------------------------------------
     if st.button("🚀 Finalizza e pubblica DPP"):
-
-        # 1) CREAZIONE PASSPORT
+        # 1) CREA PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
         passport = services.initialize_passport(pid, tipo, fields)
 
-        # 2) URL pubblico + binding
+        # 2) URL pubblico + binding (se funzione presente)
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
-        services.set_physical_binding(
-            passport,
-            public_url=url,
-            carrier="qr",
-            location="product_label",
-            tamper_risk="medium"
-        )
+        if hasattr(services, "set_physical_binding"):
+            services.set_physical_binding(
+                passport,
+                public_url=url,
+                carrier="qr",
+                location="product_label",
+                tamper_risk="medium"
+            )
 
-        # 3) MERGE DATI VALIDATI + PEF
-        if tipo == "mobile":
+        # 3) MERGE DATI
+        if tipo == "mobile" and hasattr(services, "merge_data_with_ecolabel"):
             services.merge_data_with_ecolabel(
                 passport,
                 pdf_file=BytesIO(st.session_state.uploaded_pdf_bytes),
@@ -376,78 +345,73 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
-            
-        # Calcolo PEF + breakdown
-        services.compute_pef_score(passport)
 
-        # 3b) Campi mancanti per PEF
+        # 3b) PEF
+        if hasattr(services, "compute_pef_score"):
+            services.compute_pef_score(passport)
+
         if hasattr(services, "missing_pef_fields"):
             missing_pef = services.missing_pef_fields(passport)
-        else:
-            missing_pef = []
-        if missing_pef:
-            st.warning("⚠️ Campi mancanti per il calcolo PEF")
-            for m in missing_pef:
-                st.write(f"- {m}")
+            if missing_pef:
+                st.warning("⚠️ Campi mancanti per il calcolo PEF")
+                for m in missing_pef:
+                    st.write(f"- {m}")
 
         # 4) IMMAGINI
         for b in (st.session_state.uploaded_images_bytes or []):
             services.add_product_image(passport, BytesIO(b))
 
-        # 5) CERTIFICATI
-        if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
-            for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
-                parsed = (
-                    st.session_state.validated_cert[i]
-                    if i < len(st.session_state.validated_cert)
-                    else {}
-                )
-                fname = (
-                    st.session_state.uploaded_cert_names[i]
-                    if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
-                    else f"cert_{i+1}"
-                )
+        # 5) CERTIFICATI + EVIDENCE (se presente la funzione)
+        if hasattr(services, "add_certificate_evidence"):
+            if st.session_state.get("uploaded_cert_bytes") and st.session_state.get("validated_cert"):
+                for i, raw in enumerate(st.session_state.uploaded_cert_bytes):
+                    parsed = st.session_state.validated_cert[i] if i < len(st.session_state.validated_cert) else {}
+                    fname = (
+                        st.session_state.uploaded_cert_names[i]
+                        if st.session_state.get("uploaded_cert_names") and i < len(st.session_state.uploaded_cert_names)
+                        else f"cert_{i+1}"
+                    )
+                    services.add_certificate_evidence(
+                        passport,
+                        cert_parsed=parsed,
+                        raw_bytes=raw,
+                        filename=fname,
+                        source="uploaded_certificate"
+                    )
 
-                services.add_certificate_evidence(
-                    passport,
-                    cert_parsed=parsed,
-                    raw_bytes=raw,
-                    filename=fname,
-                    source="uploaded_certificate"
-                )
+        # 6) VALIDAZIONE ESPR (se presente)
+        if hasattr(services, "validate_espr_furniture"):
+            check = services.validate_espr_furniture(passport)
+            if check.get("warnings"):
+                st.warning("⚠️ Warning di qualità dati")
+                for w in check["warnings"]:
+                    st.write(f"- {w}")
 
-        # 6) VALIDAZIONE ESPR
-        check = services.validate_espr_furniture(passport)
+            if not check.get("is_compliant", False):
+                st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
+                if check.get("missing_fields"):
+                    st.write("### Campi mancanti")
+                    for f in check["missing_fields"]:
+                        st.write(f"- {f}")
+                if check.get("missing_blocks"):
+                    st.write("### Blocchi mancanti")
+                    for b in check["missing_blocks"]:
+                        st.write(f"- {b}")
+                st.stop()
 
-        if check.get("warnings"):
-            st.warning("⚠️ Warning di qualità dati")
-            for w in check["warnings"]:
-                st.write(f"- {w}")
-
-        if not check.get("is_compliant", False):
-            st.error("❌ DPP NON conforme ai requisiti ESSENTIAL")
-            if check.get("missing_fields"):
-                st.write("### Campi mancanti")
-                for f in check["missing_fields"]:
-                    st.write(f"- {f}")
-            if check.get("missing_blocks"):
-                st.write("### Blocchi mancanti")
-                for b in check["missing_blocks"]:
-                    st.write(f"- {b}")
-            st.stop()
-
-        # 7) FINALIZZAZIONE ESPR
+        # 7) FINALIZZAZIONE ESPR + moduli
         services.espr_stamp(
             passport,
             actor="manufacturer",
             action="finalize",
             reason="Final publication (ESPR compliant)"
         )
-        services.integrate_espr_modules(passport)
+        if hasattr(services, "integrate_espr_modules"):
+            services.integrate_espr_modules(passport)
 
         # 8) QeSeal (opzionale)
         qeseal_ok = False
-        if ENABLE_QESEAL:
+        if ENABLE_QESEAL and hasattr(services, "seal_passport_pdf_qeseal_openapi"):
             with st.spinner("Applico QeSeal..."):
                 try:
                     services.seal_passport_pdf_qeseal_openapi(passport)
@@ -455,45 +419,31 @@ with tabs[2]:
                 except Exception as e:
                     st.warning(f"⚠️ QeSeal non applicato: {e}")
 
-        # 9) SALVATAGGI + PDF UFFICIALE
-        services.save_passport_to_file(passport)
-        services.save_passport_to_excel_append(passport)
-        st.session_state['published_passport'] = passport
-
-        # === GENERA PDF UFFICIALE MULTIPAGINA ===
+        # 9) GENERA PDF UFFICIALE multipagina (se presenti funzioni)
         public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
         st.info("Generazione PDF ufficiale del DPP in corso...")
 
-        # 1) Genera QR code (stesso URL della pagina Streamlit)
-        qr_buf = services.generate_qr_from_url(public_url)
-        qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
+        if hasattr(services, "generate_qr_from_url") and hasattr(services, "generate_passport_html") and hasattr(services, "generate_pdf_from_html"):
+            qr_buf = services.generate_qr_from_url(public_url)
+            qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
+            html = services.generate_passport_html(passport, qr_base64=qr_base64)
+            pdf_bytes = services.generate_pdf_from_html(html)
+            passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
 
-        # 2) Genera HTML
-        html = services.generate_passport_html(passport, qr_base64=qr_base64)
-
-        # 3) Converte HTML → PDF multipagina professionale
-        pdf_bytes = services.generate_pdf_from_html(html)
-
-        # 4) Salva PDF nel passport
-        passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
-
-        # 5) Salva il passport aggiornato
-        services.save_passport_to_file(passport)
+        # 10) SALVA SU DB (Passport Registry) — append-only
+        services.persist_passport(passport, actor="manufacturer", reason="publish_final", shadow_file=False)
+        st.session_state["published_passport"] = passport
 
         if qeseal_ok:
             st.success("✅ DPP pubblicato e sigillato (QeSeal)")
         else:
-            st.success("✅ DPP pubblicato (senza QeSeal)")
+            st.success("✅ DPP pubblicato")
 
     # --------------------------------------------------
-    # 10) OUTPUT PUBBLICO + BREAKDOWN PEF
+    # Output + breakdown (se presente)
     # --------------------------------------------------
     pp = st.session_state.get("published_passport")
     if pp:
-        url = f"{st.secrets['APP_URL']}?passport_id={pp.get('id', 'unknown')}"
-        qr_img = services.generate_qr_from_url(url)
-
-        # Breakdown PEF
         breakdown = pp.get("sustainability_breakdown") or {}
         if breakdown:
             st.subheader("🔍 Breakdown PEF")
@@ -501,7 +451,7 @@ with tabs[2]:
                 st.write(f"**{k}**: {v}")
 
     # --------------------------------------------------
-    # 11) FIRMA ELETTRONICA SEMPLICE (SES)
+    # Firma elettronica semplice (SES) (se attiva)
     # --------------------------------------------------
     if ENABLE_SES:
         st.divider()
@@ -511,7 +461,6 @@ with tabs[2]:
             st.info("Pubblica prima il DPP per poter avviare la firma.")
             st.stop()
 
-        # Inizializza stato
         st.session_state.setdefault("ses_name", "Nuvia")
         st.session_state.setdefault("ses_surname", "srls")
         st.session_state.setdefault("ses_email", "informazioni.nuvia@gmail.com")
@@ -520,15 +469,12 @@ with tabs[2]:
         st.session_state.setdefault("ses_mode", "typed")
         st.session_state.setdefault("ses_allow_edit", False)
 
-        # FORM SES
         with st.form("ses_form", clear_on_submit=False):
             col1, col2 = st.columns(2)
-
             with col1:
                 st.text_input("Nome firmatario", key="ses_name")
                 st.text_input("Cognome firmatario", key="ses_surname")
                 st.text_input("Email OTP", key="ses_email")
-
             with col2:
                 st.text_input("Cellulare OTP", key="ses_mobile")
                 st.selectbox("Canale OTP", ["email", "sms"], key="ses_channel")
@@ -541,10 +487,10 @@ with tabs[2]:
 
             submit_ses = st.form_submit_button("Invia richiesta firma SES")
 
-        # INVIO RICHIESTA SES
         if submit_ses:
             with st.spinner("Invio richiesta di firma SES..."):
                 try:
+                    # la tua funzione SES deve esistere in services.py
                     services.sign_passport_pdf_ses_openapi(
                         pp,
                         signer_name=st.session_state["ses_name"],
@@ -557,12 +503,10 @@ with tabs[2]:
                         pp,
                         actor="manufacturer",
                         action="request_ses_signature",
-                        reason="Requested SES (OTP) signature for demo/test"
+                        reason="Requested SES (OTP) signature"
                     )
 
-                    services.save_passport_to_file(pp)
-                    services.save_passport_to_excel_append(pp)
-
+                    services.persist_passport(pp, actor="manufacturer", reason="ses_requested", shadow_file=False)
                     st.session_state["published_passport"] = pp
 
                     st.success("✅ Richiesta SES inviata")
@@ -570,10 +514,8 @@ with tabs[2]:
                     st.error(f"❌ Errore SES: {e}")
                     st.stop()
 
-        # MOSTRA LINK DI FIRMA
         signing_urls = (pp.get("simple_signature") or {}).get("signing_urls") or []
         signing_urls = [u for u in signing_urls if u]
-
         if signing_urls:
             st.markdown("### 🔗 Link firma")
             for u in signing_urls:
@@ -582,278 +524,178 @@ with tabs[2]:
             with st.expander("Debug risposta SES"):
                 st.json(pp["simple_signature"].get("raw_response", {}))
 
+# ======================================================
+# TAB 4 — ARCHIVIO (POSTGRES / SUPABASE)
+# ======================================================
+with tabsst.header("📚 Passport Registry")
 
-with tabs[3]:
-    st.header("📚 Passport Archive")
+    # --------------------------------------------------
+    # DB-first archive
+    # --------------------------------------------------
+    if services.db_enabled():
+        st.sidebar.subheader("🔎 Filtri avanzati")
 
-    import os
-    import pandas as pd
-    import base64
-
-    # =========================
-    # GUARD CLAUSE
-    # =========================
-    if not os.path.exists(services.EXCEL_FILE):
-        st.error("Excel storage non disponibile")
-        st.stop()
-
-    # =========================
-    # CACHE LOADING
-    # =========================
-    @st.cache_data(show_spinner=False)
-    def load_data(path):
-        df_passport = pd.read_excel(path, sheet_name="passport").rename(columns=str.strip)
-        df_fields = pd.read_excel(path, sheet_name="fields").rename(columns=str.strip)
-        df_images = pd.read_excel(path, sheet_name="images").rename(columns=str.strip)
-        return df_passport, df_fields, df_images
-
-    df_passport, df_fields, df_images = load_data(services.EXCEL_FILE)
-
-    if df_passport.empty:
-        st.warning("Nessun passport presente")
-        st.stop()
-
-    # =========================
-    # NORMALIZATION
-    # =========================
-    def normalize(df, col):
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-        return df
-
-    df_passport = normalize(df_passport, "id")
-    df_fields = normalize(df_fields, "passport_id")
-    df_images = normalize(df_images, "passport_id")
-
-    df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
-
-    # =========================
-    # LATEST SNAPSHOT
-    # =========================
-    df_latest = (
-        df_passport.sort_values(["id", "version"])
-        .groupby("id", as_index=False)
-        .tail(1)
-        .reset_index(drop=True)
-    )
-
-    # =========================
-    # STATISTICHE ARCHIVIO
-    # =========================
-    st.subheader("📊 Statistiche archivio")
-
-    total_passports = len(df_latest)
-    certified_count = (df_latest["lifecycle"] == "certified").sum() if "lifecycle" in df_latest.columns else 0
-    with_pdf = df_latest["pdf_document"].notna().sum() if "pdf_document" in df_latest.columns else 0
-    with_cert = df_latest["cert_count"].sum() if "cert_count" in df_latest.columns else 0
-
-    colA, colB, colC, colD = st.columns(4)
-    colA.metric("Totale passport", total_passports)
-    colB.metric("Certificati", certified_count)
-    colC.metric("Con PDF", with_pdf)
-    colD.metric("Con certificazioni", with_cert)
-
-    # Distribuzione per tipo prodotto
-    if "product_type" in df_latest.columns:
-        st.write("### 📦 Passport per tipo prodotto")
-        st.bar_chart(df_latest["product_type"].value_counts())
-
-    # Distribuzione per lifecycle
-    if "lifecycle" in df_latest.columns:
-        st.write("### 🔄 Distribuzione lifecycle")
-        st.bar_chart(df_latest["lifecycle"].value_counts())
-
-    # Passport per mese
-    if "created_at" in df_latest.columns:
-        df_latest["created_month"] = pd.to_datetime(df_latest["created_at"]).dt.to_period("M")
-        st.write("### 📅 Passport creati per mese")
-        st.line_chart(df_latest["created_month"].value_counts().sort_index())
-
-    st.divider()
-
-    # =========================
-    # SIDEBAR FILTERS (ENTERPRISE)
-    # =========================
-    st.sidebar.subheader("🔎 Filtri avanzati")
-
-    f_search = st.sidebar.text_input("Cerca (ID, tipo, produttore)")
-    f_type = st.sidebar.selectbox(
-        "Tipo prodotto",
-        ["ALL"] + sorted(df_latest["product_type"].dropna().unique().tolist()) if "product_type" in df_latest.columns else ["ALL"]
-    )
-    f_lifecycle = st.sidebar.selectbox(
-        "Lifecycle",
-        ["ALL"] + sorted(df_latest["lifecycle"].dropna().unique().tolist()) if "lifecycle" in df_latest.columns else ["ALL"]
-    )
-    max_version = int(df_latest["version"].max()) if not df_latest["version"].isna().all() else 1
-    f_version = st.sidebar.slider("Versione minima", 1, max_version, 1)
-    f_has_pdf = st.sidebar.checkbox("Solo con PDF generato")
-    f_has_cert = st.sidebar.checkbox("Solo con certificazioni")
-
-    # =========================
-    # FILTER PIPELINE
-    # =========================
-    df_view = df_latest.copy()
-
-    if f_search:
-        mask = (
-            df_view["id"].str.contains(f_search, case=False, na=False)
+        f_search = st.sidebar.text_input("Cerca (ID, tipo, produttore)", key="arch_search")
+        f_type = st.sidebar.selectbox("Tipo prodotto", ["ALL", "mobile", "lampada", "bicicletta"], key="arch_type")
+        f_lifecycle = st.sidebar.selectbox(
+            "Lifecycle",
+            ["ALL", "draft", "updated", "signed", "certified", "withdrawn", "end_of_life"],
+            key="arch_lifecycle"
         )
-        if "product_type" in df_view.columns:
-            mask |= df_view["product_type"].str.contains(f_search, case=False, na=False)
-        if "issuer_legal_name" in df_view.columns:
-            mask |= df_view["issuer_legal_name"].astype(str).str.contains(f_search, case=False, na=False)
-        df_view = df_view[mask]
+        f_version = st.sidebar.slider("Versione minima", 1, 50, 1, key="arch_ver")
+        f_has_pdf = st.sidebar.checkbox("Solo con PDF generato", key="arch_pdf")
+        f_has_cert = st.sidebar.checkbox("Solo con certificazioni", key="arch_cert")
 
-    if f_type != "ALL" and "product_type" in df_view.columns:
-        df_view = df_view[df_view["product_type"] == f_type]
+        sort_options = {
+            "Aggiornamento (recenti ↓)": ("updated_at", False),
+            "Aggiornamento (vecchi ↑)": ("updated_at", True),
+            "Creazione (recenti ↓)": ("created_at", False),
+            "Creazione (vecchi ↑)": ("created_at", True),
+            "Versione (alta ↓)": ("current_version", False),
+            "Versione (bassa ↑)": ("current_version", True),
+            "Produttore (A → Z)": ("issuer_legal_name", True),
+            "Produttore (Z → A)": ("issuer_legal_name", False),
+            "Tipo prodotto (A → Z)": ("product_type", True),
+            "Tipo prodotto (Z → A)": ("product_type", False),
+            "Lifecycle (A → Z)": ("status", True),
+            "Lifecycle (Z → A)": ("status", False),
+        }
+        sort_choice = st.selectbox("Ordina per", list(sort_options.keys()), key="arch_sort")
+        sort_col, sort_asc = sort_options[sort_choice]
 
-    if f_lifecycle != "ALL" and "lifecycle" in df_view.columns:
-        df_view = df_view[df_view["lifecycle"] == f_lifecycle]
+        df_view = services.db_list_passports_latest(
+            search=f_search,
+            product_type=f_type,
+            lifecycle=f_lifecycle,
+            min_version=f_version,
+            has_pdf=f_has_pdf,
+            has_cert=f_has_cert,
+            sort_col=sort_col,
+            sort_asc=sort_asc
+        )
 
-    df_view = df_view[df_view["version"] >= f_version]
+        if df_view.empty:
+            st.warning("Nessun passport trovato con i filtri correnti")
+            st.stop()
 
-    if f_has_pdf and "pdf_document" in df_view.columns:
-        df_view = df_view[df_view["pdf_document"].notna()]
-
-    if f_has_cert and "cert_count" in df_view.columns:
-        df_view = df_view[df_view["cert_count"] > 0]
-
-    if df_view.empty:
-        st.warning("Nessun risultato per i filtri correnti")
-        st.stop()
-
-    # =========================
-    # ORDINAMENTO AVANZATO
-    # =========================
-    st.subheader("↕️ Ordinamento")
-
-    sort_options = {
-        "Data creazione (nuovi → vecchi)": ("created_at", False),
-        "Data creazione (vecchi → nuovi)": ("created_at", True),
-        "Data aggiornamento (nuovi → vecchi)": ("last_updated_at", False),
-        "Data aggiornamento (vecchi → nuovi)": ("last_updated_at", True),
-        "Versione (alta → bassa)": ("version", False),
-        "Versione (bassa → alta)": ("version", True),
-        "Produttore (A → Z)": ("issuer_legal_name", True),
-        "Produttore (Z → A)": ("issuer_legal_name", False),
-        "Tipo prodotto (A → Z)": ("product_type", True),
-        "Tipo prodotto (Z → A)": ("product_type", False),
-    }
-
-    sort_choice = st.selectbox("Ordina per", list(sort_options.keys()))
-    sort_col, sort_asc = sort_options[sort_choice]
-
-    if sort_col in df_view.columns:
-        df_view = df_view.sort_values(sort_col, ascending=sort_asc)
-
-    # =========================
-    # ESPORTAZIONE CSV (VIEW FILTRATA)
-    # =========================
-    st.subheader("📤 Esportazione archivio filtrato")
-
-    csv_buf = df_view.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Scarica CSV (vista filtrata)",
-        data=csv_buf,
-        file_name="passport_archive_filtered.csv",
-        mime="text/csv"
-    )
-
-    st.divider()
-
-    # =========================
-    # MASTER LIST
-    # =========================
-    st.subheader("📦 Passports")
-
-    for _, row in df_view.iterrows():
-        pid = row["id"]
-
-        st.markdown(f"### {pid}")
-
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
-
-        c1.write(f"Tipo: {row.get('product_type', '-')}")
-        c2.write(f"v{row.get('version', '-')}")
-        c3.write(f"Lifecycle: {row.get('lifecycle', '-')}")
-
-        # --- ACTION BUTTONS ---
-        open_col, validate_col, export_col = c4.columns(3)
-
-        if open_col.button("🔍", key=f"open_{pid}", help="Apri vista pubblica"):
-            st.experimental_set_query_params(passport_id=pid)
-            st.rerun()
-
-        if validate_col.button("📝", key=f"validate_{pid}", help="Vai alla validazione"):
-            st.session_state["selected_passport"] = pid
-            st.experimental_set_query_params(passport_id=pid)
-            st.rerun()
-
-        if export_col.button("📄", key=f"export_{pid}", help="Esporta PDF"):
-            passport = services.load_passport_from_file(pid)
-            if passport and passport.get("pdf_document"):
-                pdf_bytes = base64.b64decode(passport["pdf_document"])
-                st.download_button(
-                    label=f"Scarica {pid}.pdf",
-                    data=pdf_bytes,
-                    file_name=f"{pid}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_{pid}"
-                )
-            else:
-                st.warning("PDF non disponibile")
+        st.subheader("📊 Statistiche archivio")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Totale Passport", len(df_view))
+        c2.metric("Con certificazioni", int((df_view["cert_count"] > 0).sum()))
+        c3.metric("Con PDF", int(df_view["pdf_present"].sum()))
+        c4.metric("Versione massima", int(df_view["version"].max()))
 
         st.divider()
 
-    # =========================
-    # DETAIL VIEW
-    # =========================
-    st.subheader("🔎 Passport Detail")
+        st.subheader("📤 Esporta archivio filtrato")
+        csv_buf = df_view.to_csv(index=False).encode("utf-8")
+        st.download_button("Scarica CSV", csv_buf, "passport_registry_filtered.csv", "text/csv")
 
-    selected_id = st.session_state.get("selected_passport") or df_view.iloc[0]["id"]
-    st.session_state["selected_passport"] = selected_id
+        st.divider()
 
-    passport = services.load_passport_from_file(selected_id)
-    if not passport:
-        st.error("Passport non trovato")
-        st.stop()
+        st.subheader("📦 Passports")
+        for _, row in df_view.iterrows():
+            pid = row["id"]
+            st.markdown(f"### {pid}")
 
-    st.markdown(f"## 📦 {passport.get('id')}")
+            a1, a2, a3, a4 = st.columns([2, 1, 1, 2])
+            a1.write(f"Tipo: {row.get('product_type', '-')}")
+            a2.write(f"v{row.get('version', '-')}")
+            a3.write(f"Lifecycle: {row.get('lifecycle', '-')}")
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Version", passport.get("version"))
-    c2.metric("Type", passport.get("product_type"))
-    c3.metric("Lifecycle", (passport.get("lifecycle") or {}).get("status", "unknown"))
+            open_col, pdf_col = a4.columns(2)
 
-    st.divider()
+            if open_col.button("🔍 Apri", key=f"open_{pid}"):
+                st.experimental_set_query_params(passport_id=pid)
+                st.rerun()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Security", "Fields", "Media"])
-
-    with tab1:
-        st.write("### Evidences")
-        st.json(passport.get("evidences", []))
-
-    with tab2:
-        st.write("### Digital Signature")
-        st.json(passport.get("digital_signature"))
-        st.write("### Qualified Seal")
-        st.json(passport.get("qualified_seal"))
-
-    with tab3:
-        df_f = df_fields[df_fields["passport_id"] == selected_id]
-        st.dataframe(df_f, use_container_width=True, hide_index=True)
-
-    with tab4:
-        imgs = df_images[df_images["passport_id"] == selected_id].drop_duplicates(subset=["file_base64"])
-        if imgs.empty:
-            st.info("No media attached")
-        else:
-            cols = st.columns(5)
-            for i, (_, row) in enumerate(imgs.iterrows()):
-                with cols[i % 5]:
-                    st.image(
-                        f"data:image/jpeg;base64,{row['file_base64']}",
-                        caption=row.get("caption", ""),
-                        use_container_width=True
+            if pdf_col.button("📄 PDF", key=f"pdf_{pid}"):
+                passport = services.load_passport(pid)
+                if passport and passport.get("pdf_document"):
+                    pdf_bytes = base64.b64decode(passport["pdf_document"])
+                    st.download_button(
+                        label=f"Scarica {pid}.pdf",
+                        data=pdf_bytes,
+                        file_name=f"{pid}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_{pid}"
                     )
+                else:
+                    st.warning("PDF non disponibile")
+
+            st.divider()
+
+        st.subheader("🔎 Dettaglio Passport")
+        selected_id = st.session_state.get("selected_passport") or df_view.iloc[0]["id"]
+        st.session_state["selected_passport"] = selected_id
+
+        passport = services.load_passport(selected_id)
+        if not passport:
+            st.error("Passport non trovato")
+            st.stop()
+
+        st.markdown(f"## 📦 {passport.get('id')}")
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Versione", passport.get("version"))
+        d2.metric("Tipo", passport.get("product_type"))
+        d3.metric("Lifecycle", (passport.get("lifecycle") or {}).get("status", "unknown"))
+
+        st.divider()
+
+        t1, t2, t3, t4 = st.tabs(["Overview", "Security", "Fields", "Media"])
+        with t1:
+            st.write("### Evidences")
+            st.json(passport.get("evidences", []))
+        with t2:
+            st.write("### Digital Signature")
+            st.json(passport.get("digital_signature"))
+            st.write("### Qualified Seal")
+            st.json(passport.get("qualified_seal"))
+        with t3:
+            st.json(passport.get("sections", {}))
+        with t4:
+            imgs = passport.get("images", [])
+            if not imgs:
+                st.info("Nessun media")
+            else:
+                cols = st.columns(5)
+                for i, img in enumerate(imgs):
+                    with cols[i % 5]:
+                        st.image(
+                            f"data:image/jpeg;base64,{img.get('file_base64','')}",
+                            caption=img.get("caption", ""),
+                            use_container_width=True
+                        )
+
+    # --------------------------------------------------
+    # Fallback legacy (se DB non configurato)
+    # --------------------------------------------------
+    else:
+        st.warning("DB non configurato: archivio legacy su Excel/file (fallback).")
+
+        if not os.path.exists(services.EXCEL_FILE):
+            st.error("Excel storage non disponibile")
+            st.stop()
+
+        @st.cache_data(show_spinner=False)
+        def load_data(path):
+            df_passport = pd.read_excel(path, sheet_name="passport").rename(columns=str.strip)
+            df_fields = pd.read_excel(path, sheet_name="fields").rename(columns=str.strip)
+            df_images = pd.read_excel(path, sheet_name="images").rename(columns=str.strip)
+            return df_passport, df_fields, df_images
+
+        df_passport, df_fields, df_images = load_data(services.EXCEL_FILE)
+
+        if df_passport.empty:
+            st.warning("Nessun passport presente")
+            st.stop()
+
+        df_passport["version"] = pd.to_numeric(df_passport["version"], errors="coerce")
+        df_latest = (
+            df_passport.sort_values(["id", "version"])
+            .groupby("id", as_index=False)
+            .tail(1)
+            .reset_index(drop=True)
+        )
+
+        st.dataframe(df_latest, use_container_width=True)
