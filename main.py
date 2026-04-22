@@ -740,7 +740,7 @@ with tabs[3]:
             open_col, pdf_col = a4.columns(2)
 
             if open_col.button("🔍 Apri", key=f"open_{pid}"):
-                st.experimental_set_query_params(passport_id=pid)
+                st.query_params["passport_id"] = pid
                 st.rerun()
 
             if pdf_col.button("📄 PDF", key=f"pdf_{pid}"):
