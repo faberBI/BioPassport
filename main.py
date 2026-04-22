@@ -430,15 +430,16 @@ with tabs[2]:
 
     ENABLE_QESEAL = False
     ENABLE_SES = True
-
     if st.button("🚀 Finalizza e pubblica DPP"):
-        render_data_quality(passport)
-        render_espr_validation(passport)
+    
         # 1) CREA PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
         passport = services.initialize_passport(pid, tipo, fields)
-
-        # 2) URL pubblico + binding (se funzione presente)
+    
+        # 2) URL    # 2) URL pubblico + binding
+        render_dpp_status_bar(passport)
+        render_data_quality(passport)
+        render_espr_validation(passport)
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
         if hasattr(services, "set_physical_binding"):
             services.set_physical_binding(
@@ -448,7 +449,7 @@ with tabs[2]:
                 location="product_label",
                 tamper_risk="medium"
             )
-
+    
         # 3) MERGE DATI
         if tipo == "mobile" and hasattr(services, "merge_data_with_ecolabel"):
             services.merge_data_with_ecolabel(
@@ -465,11 +466,13 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
-
-        # 3b) PEF
+    
+        # 4) PEF
         if hasattr(services, "compute_pef_score"):
             services.compute_pef_score(passport)
 
+
+    
         if hasattr(services, "missing_pef_fields"):
             missing_pef = services.missing_pef_fields(passport)
             if missing_pef:
