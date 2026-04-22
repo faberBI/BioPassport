@@ -200,17 +200,37 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
     return out
 
 
-def gpt_analyze_image(image_file, client: OpenAI, tipo: str) -> dict:
-    """
-    Stub robusto: evita crash. (Puoi sostituirlo con Vision “vera” quando vuoi.)
-    Output: {"Colore": {...}, "Condizioni": {...}}
-    """
-    # Non facciamo chiamate Vision per evitare complessità/permessi.
-    return {
-        "Colore": {"value": "non rilevato", "confidence": 0.0, "explanation": "Non determinato"},
-        "Condizioni": {"value": "non rilevato", "confidence": 0.0, "explanation": "Non determinato"},
-    }
-
+def gpt_analyze_image(image_file, client: OpenAI, tipo):
+    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
+    prompt = f"""
+Analizza immagine prodotto {tipo}.
+Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
+Rispondi con JSON valido.
+Usa null se non determinabile.
+"""
+    def safe_json_parse(text):
+        if text.startswith("```"):
+            text = "\n".join([l for l in text.splitlines() if not l.strip().startswith("```")])
+        first,last = text.find("{"), text.rfind("}")
+        return json.loads(text[first:last+1])
+    try:
+        file_id = upload_image_to_openai(image_file, client)
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","file_id":file_id}]}]
+        )
+        data_raw = safe_json_parse(resp.output_text.strip())
+        result = {}
+        for c in campi:
+            val = data_raw.get(c, None)
+            result[c.capitalize()] = {
+                "value": val if val not in [None,"","null"] else "non rilevato",
+                "confidence": 0.7 if val not in [None,"","null"] else 0.0,
+                "explanation": "Dato estratto da immagine" if val not in [None,"","null"] else "Non rilevabile"
+            }
+        return result
+    except Exception:
+        return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
 
 def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini") -> dict:
     """
