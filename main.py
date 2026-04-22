@@ -230,7 +230,7 @@ if passport_id:
         st.write(f"Signature ID: {qs.get('signature_id')}")
         st.write(f"Stato: {qs.get('state')}")
     else:
-        st.info("Firma elettronica semplice presente (o non richiesta)")
+        st.info("🔐 Firma elettronica certificata presente")
 
     # ======================================================
     # LEGAME FISICO-DIGITALE
