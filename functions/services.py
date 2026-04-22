@@ -199,6 +199,10 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         }
     return out
 
+def upload_image_to_openai(image_file, client: OpenAI):
+    resized = resize_image_for_vision(image_file)
+    uploaded = client.files.create(file=resized, purpose="vision")
+    return uploaded.id
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
     campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
@@ -1114,10 +1118,6 @@ def load_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-def upload_image_to_openai(image_file, client: OpenAI):
-    resized = resize_image_for_vision(image_file)
-    uploaded = client.files.create(file=resized, purpose="vision")
-    return uploaded.id
 
 
 
