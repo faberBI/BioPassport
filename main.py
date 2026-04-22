@@ -18,6 +18,96 @@ st.set_page_config(
     layout="centered"
 )
 
+def compute_section_confidence(section: dict) -> float:
+    vals = [
+        v.get("confidence", 0)
+        for v in section.values()
+        if isinstance(v, dict)
+    ]
+    return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+
+def render_data_quality(passport: dict):
+    st.subheader("📊 Qualità dei dati")
+
+    pdf_conf = compute_section_confidence(
+        passport.get("sections", {}).get("PDF", {})
+    )
+    img_conf = compute_section_confidence(
+        passport.get("sections", {}).get("Images", {})
+    )
+
+    overall = round((pdf_conf + img_conf) / max(1, int(bool(img_conf))), 2)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("PDF", f"{int(pdf_conf*100)}%")
+    c2.metric("Immagini", f"{int(img_conf*100)}%")
+    c3.metric("OVERALL", f"{int(overall*100)}%")
+
+def render_dpp_status_bar(passport: dict):
+    {    status = (passport.get("lifecycle") or {}).get("status", "draft")
+        "draft": ("📝", "DRAFT", "#6c757d"),
+        "validated": ("✅", "VALIDATED", "#0d6efd"),
+        "published": ("🚀", "PUBLISHED", "#fd7e14"),
+        "signed": ("✍️", "SIGNED (SES)", "#198754"),
+        "sealed": ("🔐", "SEALED (QeSeal)", "#14532d"),
+        "updated": ("🔄", "UPDATED", "#6f42c1"),
+        "withdrawn": ("⛔", "WITHDRAWN", "#dc3545"),
+    }
+
+    icon, label, color = STATUS_MAP.get(status, ("❓", status.upper(), "#6c757d"))
+
+    st.markdown(
+        f"""
+<div style="
+padding:12px;
+border-radius:8px;
+background-color:{color};
+color:white;
+font-weight:700;
+font-size:18px;
+text-align:center;
+margin-bottom:15px">
+{icon} DPP STATUS — {label}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+def render_espr_validation(passport: dict):atori mancanti")
+        for f in v["missing_fields"]:
+            st.write(f"- {f}")
+
+    if v.get("missing_blocks"):
+        st.error("### ❌ Blocchi mancanti")
+        for b in v["missing_blocks"]:
+            st.write(f"- {b}")
+
+    if v.get("warnings"):
+        st.warning("### ⚠️ Warning")
+        for w in v["warnings"]:
+            st.write(f"- {w}")
+
+    if v.get("is_compliant"):
+        st.success("✅ DPP conforme ai requisiti ESPR ESSENTIAL")
+    v = passport.get("espr_validation") or {}
+
+    st.subheader("🛡️ Conformità ESPR")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Mandatory fields",
+              "❌" if v.get("missing_fields") else "✅",
+              f"{len(v.get('missing_fields', []))} mancanti")
+    c2.metric("Blocchi strutturali",
+              "❌" if v.get("missing_blocks") else "✅",
+              f"{len(v.get('missing_blocks', []))} mancanti")
+    c3.metric("Warning",
+              "⚠️" if v.get("warnings") else "✅",
+              f"{len(v.get('warnings', []))}")
+
+    if v.get("missing_fields"):
+
+
 # ======================================================
 # HEADER / LOGO
 # ======================================================
@@ -60,7 +150,7 @@ passport_id = st.query_params.get("passport_id")
 if passport_id:
     # DB-first (wrapper), fallback file se DB non ha ancora quel record
     passport = services.load_passport(passport_id)
-
+    render_dpp_status_bar(passport)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
@@ -315,6 +405,8 @@ with tabs[2]:
     ENABLE_SES = True
 
     if st.button("🚀 Finalizza e pubblica DPP"):
+        render_data_quality(passport)
+        render_espr_validation(passport)
         # 1) CREA PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
         passport = services.initialize_passport(pid, tipo, fields)
@@ -433,6 +525,7 @@ with tabs[2]:
 
         # 10) SALVA SU DB (Passport Registry) — append-only
         services.persist_passport(passport, actor="manufacturer", reason="publish_final", shadow_file=False)
+        services.save_passport_to_excel_append(passport)
         st.session_state["published_passport"] = passport
 
         if qeseal_ok:
@@ -445,6 +538,7 @@ with tabs[2]:
     # --------------------------------------------------
     pp = st.session_state.get("published_passport")
     if pp:
+        render_dpp_status_bar(pp)
         breakdown = pp.get("sustainability_breakdown") or {}
         if breakdown:
             st.subheader("🔍 Breakdown PEF")
@@ -630,8 +724,9 @@ with tabs[3]:
         st.subheader("🔎 Dettaglio Passport")
         selected_id = st.session_state.get("selected_passport") or df_view.iloc[0]["id"]
         st.session_state["selected_passport"] = selected_id
-
         passport = services.load_passport(selected_id)
+        
+        render_dpp_status_bar(passport)
         if not passport:
             st.error("Passport non trovato")
             st.stop()
@@ -641,9 +736,49 @@ with tabs[3]:
         d1.metric("Versione", passport.get("version"))
         d2.metric("Tipo", passport.get("product_type"))
         d3.metric("Lifecycle", (passport.get("lifecycle") or {}).get("status", "unknown"))
-
+        
         st.divider()
-
+        st.subheader("🔍 Confronto tra le versioni del DPP")
+        
+        # Se non esiste l’Excel, niente diff
+        if not os.path.exists(services.EXCEL_FILE):
+            st.info("Impossibile effettuare confronto.")
+        else:
+            try:
+                df_p = pd.read_excel(services.EXCEL_FILE, sheet_name="passport").rename(columns=str.strip)
+                df_f = pd.read_excel(services.EXCEL_FILE, sheet_name="fields").rename(columns=str.strip)
+        
+                # versioni disponibili per questo passport
+                df_p = df_p[df_p["id"].astype(str).str.strip() == str(selected_id).strip()].copy()
+                df_p["version"] = pd.to_numeric(df_p["version"], errors="coerce")
+                versions = sorted(df_p["version"].dropna().unique().tolist())
+        
+                if len(versions) < 2:
+                    st.info("Prima versione del DPP")
+                else:
+                    v_new_default = int(max(versions))
+                    v_old_default = int(versions[-2])
+        
+                    cL, cR = st.columns(2)
+                    with cL:
+                        v_old = st.selectbox("Versione PRECEDENTE", versions, index=versions.index(v_old_default), key=f"diff_old_{selected_id}")
+                    with cR:
+                        v_new = st.selectbox("Versione CORRENTE", versions, index=versions.index(v_new_default), key=f"diff_new_{selected_id}")
+        
+                    if int(v_old) == int(v_new):
+                        st.warning("Seleziona due versioni diverse per vedere le differenze.")
+                    else:
+                        diff_df = compute_diff_fields(df_f, selected_id, int(v_old), int(v_new))
+        
+                        if diff_df.empty:
+                            st.success("✅ Nessuna differenza sui campi")
+                        else:
+                            st.caption(f"Campi cambiati: {len(diff_df)}")
+                            st.dataframe(diff_df, use_container_width=True, hide_index=True)
+        
+            except Exception as e:
+                st.error(f"Errore lettura Excel per diff: {e}")
+        
         t1, t2, t3, t4 = st.tabs(["Overview", "Security", "Fields", "Media"])
         with t1:
             st.write("### Evidences")
