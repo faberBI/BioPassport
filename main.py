@@ -183,6 +183,7 @@ passport_id = st.query_params.get("passport_id")
 if passport_id:
     # DB-first (wrapper), fallback file se DB non ha ancora quel record
     passport = services.load_passport(passport_id)
+    render_dpp_status_bar(passport)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
@@ -438,18 +439,15 @@ with tabs[2]:
     if st.button("🚀 Finalizza e pubblica DPP"):
         apply_mixed_confidence(st.session_state.validated_pdf, st.session_state.pdf_data)
         apply_mixed_confidence(st.session_state.validated_image,st.session_state.image_data)
-        
-        if st.session_state.get("validated_cert"):
-            for cert in st.session_state.validated_cert:
-                for k, v in cert.items():
-                    if isinstance(v, dict):
-                        v["confidence"] = 1.0 if v.get("value") else 0.5
-        
+    
         # 1) CREA PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
         passport = services.initialize_passport(pid, tipo, fields)
     
         # 2) URL    # 2) URL pubblico + binding
+        render_dpp_status_bar(passport)
+        render_data_quality(passport)
+        render_espr_validation(passport)
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
         if hasattr(services, "set_physical_binding"):
             services.set_physical_binding(
@@ -551,51 +549,23 @@ with tabs[2]:
                     qeseal_ok = True
                 except Exception as e:
                     st.warning(f"⚠️ QeSeal non applicato: {e}")
-        # ======================================================
-        # 9) GENERA PDF UFFICIALE (SAFE VERSION)
-        # ======================================================
+
+        # 9) GENERA PDF UFFICIALE multipagina (se presenti funzioni)
         public_url = f"{st.secrets['APP_URL']}?passport_id={passport['id']}"
         st.info("Generazione PDF ufficiale del DPP in corso...")
-        
-        pdf_bytes = None
-        
-        try:
-            # QR
-            if hasattr(services, "generate_qr_from_url"):
-                qr_buf = services.generate_qr_from_url(public_url)
-                qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
-            else:
-                qr_base64 = None
-        
-            # HTML
-            if hasattr(services, "generate_passport_html"):
-                html = services.generate_passport_html(passport, qr_base64=qr_base64)
-            else:
-                html = None
-        
-            # PDF
-            if html and hasattr(services, "generate_pdf_from_html"):
-                pdf_bytes = services.generate_pdf_from_html(html)
-        
-            # SALVATAGGIO SOLO SE ESISTE PDF
-            if pdf_bytes:
-                passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
-            else:
-                st.warning("⚠️ PDF non generato: servizi mancanti o HTML nullo")
-                passport["pdf_document"] = None
-        
-        except Exception as e:
-            st.error(f"❌ Errore generazione PDF: {e}")
-            passport["pdf_document"] = None
+
+        if hasattr(services, "generate_qr_from_url") and hasattr(services, "generate_passport_html") and hasattr(services, "generate_pdf_from_html"):
+            qr_buf = services.generate_qr_from_url(public_url)
+            qr_base64 = base64.b64encode(qr_buf.getvalue()).decode()
+            html = services.generate_passport_html(passport, qr_base64=qr_base64)
+            pdf_bytes = services.generate_pdf_from_html(html)
+            passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
 
         # 10) SALVA SU DB (Passport Registry) — append-only
         services.persist_passport(passport, actor="manufacturer", reason="publish_final", shadow_file=False)
         services.save_passport_to_excel_append(passport)
         st.session_state["published_passport"] = passport
-        render_dpp_status_bar(passport)
-        render_data_quality(passport)
-        render_espr_validation(passport)
-        
+
         if qeseal_ok:
             st.success("✅ DPP pubblicato e sigillato (QeSeal)")
         else:
@@ -770,7 +740,7 @@ with tabs[3]:
             open_col, pdf_col = a4.columns(2)
 
             if open_col.button("🔍 Apri", key=f"open_{pid}"):
-                st.query_params["passport_id"] = pid
+                st.experimental_set_query_params(passport_id=pid)
                 st.rerun()
 
             if pdf_col.button("📄 PDF", key=f"pdf_{pid}"):
