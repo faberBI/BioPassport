@@ -989,176 +989,296 @@ def save_passport_to_excel_append(passport: dict):
     _append_df(df_fields, "fields")
     _append_df(df_images, "images")
 
-
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
-    # =====================================================
-    # HELPER
-    # =====================================================
-    def quality_label(v):
-        if v is None:
-            return "—"
-        if v >= 80:
-            return "Alta ✅"
-        if v >= 50:
-            return "Media 🟡"
-        return "Bassa 🔴"
+    import json
+    from datetime import datetime
 
-    # =====================================================
-    # DATI BASE
-    # =====================================================
-    lifecycle = passport.get("lifecycle", {}).get("status", "draft")
-    version = passport.get("version", "")
-    issuer = (passport.get("issuer") or {}).get("legal_name", "")
-    attestation = passport.get("attestation") or {}
-    espr = passport.get("espr_validation") or {}
+    # ======================================================
+    # ASSETS
+    # ======================================================
+    logo_base64 = load_image_base64("functions/logo_nuvia.jpeg")
+    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    espr_label = (
-        "✅ Prodotto conforme ai requisiti europei"
-        if espr.get("is_compliant")
-        else "❌ Prodotto NON conforme"
-    )
+    status = (passport.get("lifecycle") or {}).get("status", "draft")
+    sustainability_score = passport.get("sustainability_score", 0)
 
-    dq = passport.get("data_quality") or {}
-    pdf_q = int(round(dq.get("pdf", 0) * 100)) if dq else None
-    img_q = int(round(dq.get("images", 0) * 100)) if dq else None
-    ov_q = int(round(dq.get("overall", 0) * 100)) if dq else None
+    pdf = passport.get("sections", {}).get("PDF", {})
+    eprel = passport.get("eprel") or {}
+    gs1 = passport.get("gs1_digital_link") or "—"
+    scip = passport.get("scip") or {"scip:substances": []}
+    scip_substances = scip.get("scip:substances", [])
+    certificates = passport.get("certificates", [])
 
-    evidences = passport.get("evidences") or []
-    audit = passport.get("change_log") or []
+    issuer = passport.get("issuer") or {}
+    signature = passport.get("digital_signature") or {}
 
-    # =====================================================
-    # QR
-    # =====================================================
-    qr_html = (
-        f"<img src='data:image/png;base64,{qr_base64}' style='width:160px;'/>"
-        if qr_base64 else ""
-    )
+    # ======================================================
+    # TRUST + SCORE LOGIC
+    # ======================================================
+    def traffic_light(score):
+        try:
+            s = int(score)
+        except:
+            s = 0
 
-    # =====================================================
-    # SEZIONI
-    # =====================================================
-    sections_html = ""
-    for section, fields in passport.get("sections", {}).items():
-        rows = ""
-        for k, v in fields.items():
-            rows += f"""
-                <tr>
-                    <td style='padding:6px 10px; border:1px solid #ddd;'><b>{k}</b></td>
-                    <td style='padding:6px 10px; border:1px solid #ddd;'>{v.get('value','')}</td>
-                </tr>
-            """
-        sections_html += f"""
-            <h2 style='margin-top:40px; color:#333;'>{section}</h2>
-            <table style='width:100%; border-collapse:collapse; margin-top:10px;'>
-                {rows}
-            </table>
+        if s >= 70:
+            return "#27CC6C", "Low impact"
+        elif s >= 40:
+            return "#F6C23C", "Medium impact"
+        return "#E63946", "High impact"
+
+    color, label = traffic_light(sustainability_score)
+    angle = int((sustainability_score / 100) * 360)
+
+    # ======================================================
+    # JSON-LD (CRITICAL ESPR + AI INTEROPERABILITY)
+    # ======================================================
+    jsonld = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": passport.get("product_name"),
+        "productID": passport.get("id"),
+        "manufacturer": {
+            "@type": "Organization",
+            "name": issuer.get("legal_name")
+        },
+        "additionalProperty": [
+            {
+                "@type": "PropertyValue",
+                "name": "ESPR",
+                "value": "2024/1781"
+            },
+            {
+                "@type": "PropertyValue",
+                "name": "sustainability_score",
+                "value": sustainability_score
+            }
+        ]
+    }
+
+    jsonld_script = f"""
+    <script type="application/ld+json">
+    {json.dumps(jsonld, ensure_ascii=False)}
+    </script>
+    """
+
+    # ======================================================
+    # COVER (DPP HEADER)
+    # ======================================================
+    cover_html = f"""
+    <div class="dpp-header">
+
+        <img src="data:image/jpeg;base64,{logo_base64}" style="width:160px;margin-bottom:20px"/>
+
+        <h1>Digital Product Passport (ESPR 2024/1781)</h1>
+
+        <div class="meta-grid">
+            <div><b>ID:</b> {passport.get("id")}</div>
+            <div><b>Product:</b> {passport.get("product_name")}</div>
+            <div><b>Status:</b> {status}</div>
+            <div><b>Issuer:</b> {issuer.get("legal_name")}</div>
+            <div><b>Generated:</b> {generated_at}</div>
+        </div>
+
+        <div class="trust-line">
+            Score: {sustainability_score}% ({label})
+        </div>
+
+        {"<img src='data:image/png;base64," + qr_base64 + "' style='width:140px;margin-top:15px'/>" if qr_base64 else ""}
+
+    </div>
+
+    <div class="page-break"></div>
+    """
+
+    # ======================================================
+    # BLOCK RENDER ENGINE
+    # ======================================================
+    def block(title, block_id, content):
+        return f"""
+        <div class="dpp-block" data-block="{block_id}">
+            <h2>{title}</h2>
+            {content}
+        </div>
         """
 
-    # =====================================================
-    # IMMAGINI
-    # =====================================================
-    images_html = ""
-    for img in passport.get("images", []):
-        images_html += f"""
-            <div style='margin:10px 0;'>
-                <img src="data:image/jpeg;base64,{img['file_base64']}"
-                     style="max-width:300px; border:1px solid #ccc;"/>
-                <p style='font-size:12px; color:#555;'>{img.get('caption','')}</p>
-            </div>
+    # ======================================================
+    # IDENTIFICATION BLOCK
+    # ======================================================
+    identification = block(
+        "🔖 Identification",
+        "identification",
+        f"""
+        <table>
+            <tr><td>ID</td><td>{passport.get("id")}</td></tr>
+            <tr><td>Model</td><td>{pdf.get("Numero di modello", {}).get("value", "—")}</td></tr>
+            <tr><td>Manufacturer</td><td>{issuer.get("legal_name", "—")}</td></tr>
+            <tr><td>Production Site</td><td>{pdf.get("Luogo di Produzione", {}).get("value", "—")}</td></tr>
+        </table>
         """
+    )
 
-    # =====================================================
-    # HTML
-    # =====================================================
+    # ======================================================
+    # MATERIALS BLOCK
+    # ======================================================
+    materials_rows = "".join(
+        f"<tr><td>{k}</td><td>{v}</td></tr>"
+        for k, v in pdf.items()
+        if "Materiali" in k or "riciclato" in k
+    )
+
+    materials = block(
+        "🧱 Materials & Substances",
+        "materials",
+        f"""
+        <table>{materials_rows}</table>
+        <p><b>SCIP substances:</b></p>
+        {"".join([f"• {s.get('name','—')}<br>" for s in scip_substances]) or "None"}
+        """
+    )
+
+    # ======================================================
+    # ENVIRONMENTAL IMPACT BLOCK
+    # ======================================================
+    pef = passport.get("sustainability_breakdown", {})
+
+    env_rows = "".join(
+        f"<tr><td>{k}</td><td>{v}</td></tr>"
+        for k, v in pef.items()
+    )
+
+    environmental = block(
+        "🌱 Environmental Impact",
+        "environmental_impact",
+        f"""
+        <p><b>Methodology:</b> ISO 14040 / 14044 (LCA)</p>
+        <p><b>Boundary:</b> cradle-to-gate</p>
+        <table>{env_rows}</table>
+        """
+    )
+
+    # ======================================================
+    # TRACEABILITY BLOCK
+    # ======================================================
+    traceability = block(
+        "🌐 Traceability",
+        "traceability",
+        f"""
+        <table>
+            <tr><td>GS1</td><td>{gs1}</td></tr>
+            <tr><td>EPREL</td><td>{eprel.get('eprel:energyClass','—')}</td></tr>
+        </table>
+        """
+    )
+
+    # ======================================================
+    # DIGITAL TRUST BLOCK
+    # ======================================================
+    trust = block(
+        "🔐 Digital Trust",
+        "digital_trust",
+        f"""
+        <table>
+            <tr><td>Issuer</td><td>{issuer.get('legal_name','—')}</td></tr>
+            <tr><td>Document Hash</td><td>{signature.get('hash','—')}</td></tr>
+            <tr><td>Signature Status</td><td>{signature.get('status','—')}</td></tr>
+        </table>
+        """
+    )
+
+    # ======================================================
+    # CERTIFICATES
+    # ======================================================
+    cert_html = ""
+    if certificates:
+        cert_html = block(
+            "📜 Certifications",
+            "certifications",
+            "".join([
+                f"""
+                <table>
+                    <tr><td>Type</td><td>{c.get('tipo_certificato',{}).get('value','—')}</td></tr>
+                    <tr><td>Issuer</td><td>{c.get('ente_emittente',{}).get('value','—')}</td></tr>
+                    <tr><td>Number</td><td>{c.get('numero_certificato',{}).get('value','—')}</td></tr>
+                </table>
+                """ for c in certificates
+            ])
+        )
+
+    # ======================================================
+    # FINAL HTML
+    # ======================================================
     html = f"""
     <html>
     <head>
         <meta charset="utf-8">
+
+        {jsonld_script}
+
         <style>
             body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-                color: #222;
+                font-family: Arial;
+                background: #f6f8f8;
+                color: #2d2d2d;
             }}
-            h1 {{
-                color: #0A4A9A;
-                border-bottom: 2px solid #0A4A9A;
-                padding-bottom: 10px;
+
+            .dpp-header {{
+                padding: 20px;
+                background: white;
+                border-radius: 10px;
             }}
-            h2 {{
-                color: #0A4A9A;
+
+            .meta-grid {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                font-size: 13px;
             }}
-            .box {{
-                border:1px solid #ddd;
-                border-radius:8px;
-                padding:15px;
-                margin:20px 0;
-                background:#f9f9f9;
+
+            .dpp-block {{
+                margin-top: 20px;
+                padding: 15px;
+                background: white;
+                border-radius: 8px;
+                border: 1px solid #27CC6C;
             }}
+
+            .dpp-block h2 {{
+                border-bottom: 1px solid #23CE6B;
+                padding-bottom: 6px;
+            }}
+
             table {{
                 width: 100%;
-                border-collapse: collapse;
+                font-size: 12px;
             }}
+
             td {{
-                border: 1px solid #ddd;
-                padding: 8px;
+                padding: 4px;
+                border-bottom: 1px solid #eee;
             }}
-            .small {{
-                font-size:12px;
-                color:#555;
+
+            .page-break {{
+                page-break-before: always;
             }}
         </style>
     </head>
+
     <body>
 
-        <h1>Digital Product Passport</h1>
+        {cover_html}
 
-        <!-- METADATA -->
-        <h2>Metadata</h2>
-        <p><b>ID:</b> {passport.get("id")}</p>
-        <p><b>Tipo:</b> {passport.get("product_type")}</p>
-        <p><b>Versione:</b> {version}</p>
-
-        <!-- COPERTINA / STATUS -->
-        <div class="box">
-            <p><b>{espr_label}</b></p>
-            <p><b>Produttore:</b> {issuer}</p>
-            <p><b>Stato prodotto:</b> {lifecycle}</p>
-            {qr_html}
-        </div>
-
-        <!-- QUALITÀ DATI -->
-        <div class="box">
-            <h2>Qualità dei dati</h2>
-            <p><b>Dati PDF:</b> {quality_label(pdf_q)}</p>
-            <p><b>Dati immagini:</b> {quality_label(img_q)}</p>
-            <p><b>Qualità complessiva:</b> {quality_label(ov_q)}</p>
-        </div>
-
-        <!-- PROVE -->
-        <div class="box">
-            <h2>Prove e verifiche</h2>
-            <p><b>Numero prove:</b> {len(evidences)}</p>
-            <p><b>Aggiornamenti:</b> {len(audit)}</p>
-        </div>
-
-        <!-- ATTESTAZIONE -->
-        <div class="box">
-            <h2>Dichiarazione del produttore</h2>
-            <p>{attestation.get("statement","")}</p>
-            <p class="small">Data: {attestation.get("timestamp","")}</p>
-        </div>
-
-        <!-- SEZIONI -->
-        {sections_html}
-
-        <!-- IMMAGINI -->
-        <h2>Immagini prodotto</h2>
-        {images_html}
+        {identification}
+        {materials}
+        {environmental}
+        {traceability}
+        {trust}
+        {cert_html}
 
     </body>
     </html>
     """
+
     return html
 
 def generate_pdf_from_html(html: str) -> bytes:
