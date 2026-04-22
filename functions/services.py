@@ -1160,5 +1160,4 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     </html>
     """
     return html
-    return html
 
