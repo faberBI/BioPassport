@@ -45,7 +45,12 @@ def render_data_quality(passport: dict):
     c3.metric("OVERALL", f"{int(overall*100)}%")
 
 def render_dpp_status_bar(passport: dict):
-    {    status = (passport.get("lifecycle") or {}).get("status", "draft")
+    """
+    Barra di stato DPP sempre visibile (audit-ready).
+    """
+    status = (passport.get("lifecycle") or {}).get("status", "draft")
+
+    STATUS_MAP = {
         "draft": ("📝", "DRAFT", "#6c757d"),
         "validated": ("✅", "VALIDATED", "#0d6efd"),
         "published": ("🚀", "PUBLISHED", "#fd7e14"),
@@ -55,25 +60,27 @@ def render_dpp_status_bar(passport: dict):
         "withdrawn": ("⛔", "WITHDRAWN", "#dc3545"),
     }
 
-    icon, label, color = STATUS_MAP.get(status, ("❓", status.upper(), "#6c757d"))
+    icon, label, color = STATUS_MAP.get(
+        status,
+        ("❓", status.upper(), "#6c757d")
+    )
 
     st.markdown(
         f"""
 <div style="
-padding:12px;
-border-radius:8px;
-background-color:{color};
-color:white;
-font-weight:700;
-font-size:18px;
-text-align:center;
-margin-bottom:15px">
-{icon} DPP STATUS — {label}
+    padding:12px;
+    border-radius:8px;
+    background-color:{color};
+    color:white;
+    font-weight:700;
+    font-size:18px;
+    text-align:center;
+    margin-bottom:15px">
+    {icon} DPP STATUS — {label}
 </div>
 """,
         unsafe_allow_html=True,
     )
-
 def render_espr_validation(passport: dict):
     """
     Render leggibile della validazione ESPR.
