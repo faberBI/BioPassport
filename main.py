@@ -191,7 +191,8 @@ tabs = st.tabs(["📤 Upload & Analisi", "📝 Validazione", "🚀 Pubblica", "�
 # ======================================================
 # TAB 1 — UPLOAD & AI
 # ======================================================
-with tabspdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
+with tabs[0]:
+    pdf_file = st.file_uploader("PDF prodotto", type=["pdf"])
     image_files = st.file_uploader("Immagini prodotto", type=["jpg", "png"], accept_multiple_files=True)
     cert_files = st.file_uploader("Certificati", type=["pdf", "jpg", "png"], accept_multiple_files=True)
 
