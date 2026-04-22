@@ -36,20 +36,26 @@ def apply_mixed_confidence(validated: dict, extracted: dict):
 def render_data_quality(passport: dict):
     st.subheader("📊 Qualità dei dati")
 
-    pdf_conf = compute_section_confidence(
-        passport.get("sections", {}).get("PDF", {})
-    )
-    img_conf = compute_section_confidence(
-        passport.get("sections", {}).get("Images", {})
-    )
+    pdf_section = (passport.get("sections", {}) or {}).get("PDF", {}) or {}
+    img_section = (passport.get("sections", {}) or {}).get("Images", {}) or {}
 
-    overall = round((pdf_conf + img_conf) / max(1, int(bool(img_conf))), 2)
+    pdf_conf = compute_section_confidence(pdf_section)
+    img_conf = compute_section_confidence(img_section)
+
+    # media robusta: considera solo le sezioni presenti
+    confs = []
+    if pdf_section:
+        confs.append(pdf_conf)
+    if img_section:
+        confs.append(img_conf)
+
+    overall = round(sum(confs) / len(confs), 2) if confs else 0.0
 
     c1, c2, c3 = st.columns(3)
     c1.metric("PDF", f"{int(pdf_conf*100)}%")
     c2.metric("Immagini", f"{int(img_conf*100)}%")
     c3.metric("OVERALL", f"{int(overall*100)}%")
-
+    
 def render_dpp_status_bar(passport: dict):
     """
     Barra di stato DPP sempre visibile (audit-ready).
@@ -445,9 +451,6 @@ with tabs[2]:
         passport = services.initialize_passport(pid, tipo, fields)
     
         # 2) URL    # 2) URL pubblico + binding
-        render_dpp_status_bar(passport)
-        render_data_quality(passport)
-        render_espr_validation(passport)
         url = f"{st.secrets['APP_URL']}?passport_id={pid}"
         if hasattr(services, "set_physical_binding"):
             services.set_physical_binding(
@@ -474,12 +477,15 @@ with tabs[2]:
                 st.session_state.validated_image,
                 None
             )
-    
+        
+        render_dpp_status_bar(passport)
+        render_data_quality(passport)
+        render_espr_validation(passport
+
         # 4) PEF
         if hasattr(services, "compute_pef_score"):
-            services.compute_pef_score(passport)
-
-
+            services.compute_pef_score(passport)      
+    
     
         if hasattr(services, "missing_pef_fields"):
             missing_pef = services.missing_pef_fields(passport)
