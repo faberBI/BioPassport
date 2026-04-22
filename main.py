@@ -480,7 +480,7 @@ with tabs[2]:
         
         render_dpp_status_bar(passport)
         render_data_quality(passport)
-        render_espr_validation(passport
+        render_espr_validation(passport)
 
         # 4) PEF
         if hasattr(services, "compute_pef_score"):
