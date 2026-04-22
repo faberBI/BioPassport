@@ -18,9 +18,9 @@ from openai import OpenAI
 import qrcode
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-import request
+import requests
 from typing import Optional, Dict
-
+from openpyxl import load_workbook
 # ======================================================
 # CONFIG
 # ======================================================
@@ -865,4 +865,153 @@ def db_list_passports_latest(
 
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
-# services.py — Nuvia Digital Product Passport
+
+def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v_new: int) -> pd.DataFrame:def compute_diff_fields(df_fields: pd.DataFrame, passport due versioni.
+    Confronta per chiave: (section, field_name).
+    Richiede che df_fields abbia colonne: passport_id, version, section, field_name, value
+
+    Ritorna un DataFrame con:
+      section | field_name | old_value | new_value
+    """
+    if df_fields is None or df_fields.empty:
+        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+
+    required_cols = {"passport_id", "version", "section", "field_name", "value"}
+    missing = required_cols - set(df_fields.columns)
+    if missing:
+        # niente diff versionato possibile
+        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+
+    sub = df_fields[df_fields["passport_id"].astype(str).str.strip() == str(passport_id).strip()].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+
+    sub["version"] = pd.to_numeric(sub["version"], errors="coerce")
+    sub = sub.dropna(subset=["version"])
+    if sub.empty:
+        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+
+    # normalizza stringhe
+    sub["section"] = sub["section"].astype(str).str.strip()
+    sub["field_name"] = sub["field_name"].astype(str).str.strip()
+    sub["value"] = sub["value"].astype(str)
+
+    old = sub[sub["version"] == int(v_old)][["section", "field_name", "value"]].rename(columns={"value": "old_value"})
+    new = sub[sub["version"] == int(v_new)][["section", "field_name", "value"]].rename(columns={"value": "new_value"})
+
+    # outer join: intercetta aggiunte/rimozioni
+    m = old.merge(new, on=["section", "field_name"], how="outer")
+    m["old_value"] = m["old_value"].fillna("")
+    m["new_value"] = m["new_value"].fillna("")
+
+    # tieni solo cambiati
+    changed = m[m["old_value"] != m["new_value"]].copy()
+    changed = changed.sort_values(["section", "field_name"]).reset_index(drop=True)
+    return changed
+
+
+
+
+def save_passport_to_excel_append(passport: dict):
+    """
+    Salva/append su Excel legacy per Archivio + Diff versioni.
+    Sheet:
+      - passport  (meta per versione)
+      - fields    (campi per versione)  ✅ include 'version'
+      - images    (immagini per versione) ✅ include 'version'
+    """
+    os.makedirs(PASSPORT_DIR, exist_ok=True)
+
+    pid = str(passport.get("id") or "").strip()
+    ver = int(passport.get("version") or 0)
+
+    issuer = passport.get("issuer") or {}
+    lifecycle = passport.get("lifecycle") or {}
+    pb = passport.get("physical_binding") or {}
+
+    # ---------------------------
+    # 1) SHEET: passport (meta)
+    # ---------------------------
+    meta_row = {
+        "id": pid,
+        "version": ver,
+        "product_type": passport.get("product_type"),
+        "created_at": passport.get("created_at"),
+        "last_updated_at": passport.get("last_updated_at"),
+        "issuer_legal_name": issuer.get("legal_name"),
+        "lifecycle": lifecycle.get("status"),
+        "pdf_present": bool(passport.get("pdf_document")),
+        "cert_count": len(passport.get("certificates") or []),
+        "binding_public_url": pb.get("public_url"),
+    }
+    df_passport = pd.DataFrame([meta_row])
+
+    # ---------------------------
+    # 2) SHEET: fields  ✅ version qui
+    # ---------------------------
+    fields_rows = []
+    sections = passport.get("sections") or {}
+    if isinstance(sections, dict):
+        for section, fields in sections.items():
+            if not isinstance(fields, dict):
+                continue
+            for field_name, f in fields.items():
+                if isinstance(f, dict):
+                    val = f.get("value")
+                else:
+                    val = f
+                fields_rows.append({
+                    "passport_id": pid,
+                    "version": ver,               # ✅ FONDAMENTALE PER IL DIFF
+                    "section": section,
+                    "field_name": field_name,
+                    "value": "" if val is None else str(val),
+                })
+    df_fields = pd.DataFrame(fields_rows)
+
+    # ---------------------------
+    # 3) SHEET: images ✅ version anche qui
+    # ---------------------------
+    images_rows = []
+    for img in (passport.get("images") or []):
+        images_rows.append({
+            "passport_id": pid,
+            "version": ver,                   # ✅ utile anche per diff media
+            "file_base64": img.get("file_base64"),
+            "caption": img.get("caption", ""),
+        })
+    df_images = pd.DataFrame(images_rows)
+
+    # ---------------------------
+    # 4) CREA FILE SE NON ESISTE
+    # ---------------------------
+    if not os.path.exists(EXCEL_FILE):
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            df_passport.to_excel(writer, sheet_name="passport", index=False)
+            df_fields.to_excel(writer, sheet_name="fields", index=False)
+            df_images.to_excel(writer, sheet_name="images", index=False)
+        return
+
+    # ---------------------------
+    # 5) APPEND SE ESISTE
+    # ---------------------------
+    book = load_workbook(EXCEL_FILE)
+
+    def _append_df(df: pd.DataFrame, sheet: str):
+        if df is None or df.empty:
+            return
+
+        # se sheet non esiste, lo creiamo scrivendo da riga 0 con header
+        if sheet not in book.sheetnames:
+            with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a") as writer:
+                df.to_excel(writer, sheet_name=sheet, index=False)
+            return
+
+        startrow = book[sheet].max_row
+        # se max_row==1 ma il foglio è vuoto con solo header, ok: append da 1
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="overlay") as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False, header=False, startrow=startrow)
+
+    _append_df(df_passport, "passport")
+    _append_df(df_fields, "fields")
+    _append_df(df_images, "images")
