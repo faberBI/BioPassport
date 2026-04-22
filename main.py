@@ -528,7 +528,8 @@ with tabs[2]:
 # ======================================================
 # TAB 4 — ARCHIVIO (POSTGRES / SUPABASE)
 # ======================================================
-with tabsst.header("📚 Passport Registry")
+with tabs[3]:
+    st.header("📚 Passport Registry")
 
     # --------------------------------------------------
     # DB-first archive
