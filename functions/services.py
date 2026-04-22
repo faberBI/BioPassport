@@ -195,6 +195,127 @@ def gpt_analyze_image(image_file, client: OpenAI, tipo):
 # PASSPORT CORE
 # ======================================================
 
+
+def integrate_espr_modules(passport):
+    """
+    Integra automaticamente:
+    - JSON-LD
+    - Ontologia ESPR
+    - EPREL block
+    - GS1 Digital Link
+    - SCIP block
+    - Sezioni standard
+    - Validator ESPR
+    """
+
+    # 1) JSON-LD
+    passport["jsonld"] = generate_jsonld(passport)
+
+    # 2) Ontologia (solo struttura, non istanze)
+    passport["ontology"] = build_ontology_graph()
+
+    # 3) EPREL block
+    passport["eprel"] = generate_eprel_block(passport)
+
+    # 4) GS1 Digital Link (se GTIN presente)
+    pdf = passport.get("sections", {}).get("PDF", {})
+    gtin = pdf.get("GTIN", {}).get("value")
+    if gtin and validate_gs1(gtin):
+        passport["gs1_digital_link"] = generate_gs1_digital_link(gtin)
+    else:
+        passport["gs1_digital_link"] = None
+
+    # 5) SCIP block
+    passport["scip"] = generate_scip_block(passport)
+
+    # 6) Sezioni standard ESPR
+    passport["espr_sections"] = build_espr_sections(passport)
+
+    # 7) Validazione ESPR completa
+    passport["espr_validation"] = validate_espr_compliance(passport)
+
+    return passport
+
+def sign_passport_pdf_ses_openapi(
+    passport: dict,
+    signer_name: str,
+    signer_surname: str,
+    signer_email: str,
+    signer_mobile: str,
+    page: int = 6,
+    x: int = 430,
+    y: int = 338
+) -> dict:
+    """
+    Avvia una firma elettronica semplice (EU-SES) su PDF del DPP,
+    con posizione firma personalizzata.
+    """
+
+    import streamlit as st
+    import base64
+
+    # 1) Bearer token
+    bearer_token = st.secrets["OPENAPI_BEARER_PROD"]
+
+    # 2) Recupera PDF ufficiale
+    if "pdf_document" not in passport:
+        raise RuntimeError("passport['pdf_document'] mancante — PDF non generato")
+
+    pdf_bytes = base64.b64decode(passport["pdf_document"])
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    # 3) Firmatario
+    signers = [{
+        "name": signer_name,
+        "surname": signer_surname,
+        "email": signer_email,
+        "mobile": signer_mobile,
+        "authentication": "sms",
+
+        # 🔥 POSIZIONE FIRMA
+        "signature": {
+            "page": page,
+            "x": str(x),
+            "y": str(y)
+        }
+    }]
+
+    # 4) Chiamata EU-SES
+    resp = openapi_eu_ses_request(
+        bearer_token=bearer_token,
+        pdf_base64=pdf_base64,
+        signers=signers,
+        signature_mode=["typed"]
+    )
+
+    # 5) Salva dati necessari per il REFRESH STATO
+    passport.setdefault("simple_signature", {})
+    passport["simple_signature"]["pdf_base64"] = pdf_base64
+    passport["simple_signature"]["signers"] = signers
+    passport["simple_signature"]["signature_mode"] = ["typed"]
+
+    # 6) Validazione risposta
+    data = resp["data"]
+
+    # 7) Estrazione link OTP
+    signing_urls = []
+    for s in data.get("signers", []):
+        if s.get("url"):
+            signing_urls.append(s["url"])
+
+    # 8) Scrittura STRUCTURED nel passport
+    passport["simple_signature"].update({
+        "provider": "OpenAPI",
+        "type": "EU-SES",
+        "request_id": data["id"],
+        "status": data["state"],
+        "signing_urls": signing_urls,
+        "created_at": data.get("createdAt"),
+        "raw_response": resp
+    })
+
+    return resp
+
 def initialize_passport(pid: str, tipo: str, fields: list[str]) -> dict:
     passport = {
         "id": pid,
@@ -402,7 +523,123 @@ def load_passport(pid: str):
         r = cur.fetchone()
         return r[0] if r else None
 
+def set_physical_binding(
+    passport: dict,
+    public_url: str,
+    carrier: str = "qr",
+    location: str = "product_label",
+    tamper_risk: str = "medium"
+) -> dict:
+    passport["physical_binding"] = {
+        "carrier": carrier,
+        "location": location,
+        "public_url": public_url,
+        "generated_at": _utc_now_iso(),
+        "tamper_risk": tamper_risk
+    }
+    append_lifecycle_event(passport, "updated", {"physical_binding": {"carrier": carrier, "location": location}})
+    espr_stamp(passport, actor="manufacturer", action="set_physical_binding", reason="Linked physical carrier to DPP")
+    return passport
+def merge_data_with_ecolabel(passport, pdf_file=None, image_data=None, cert_data=None, client=None):
+    """
+    Merge completo:
+    - Estrae PDF
+    - Normalizza
+    - Integra Ecolabel
+    - Integra dati validati (PDF + immagini)
+    - Aggiorna passport["sections"]["PDF"]
+    """
+
+    changed = False
+
+    # ------------------------------------------------------
+    # 1) Estrazione PDF grezza
+    # ------------------------------------------------------
+    extracted_pdf = {}
+    if pdf_file and client:
+        text = extract_text_from_pdf(pdf_file)
+        extracted_pdf = gpt_extract_from_pdf(
+            text,
+            client,
+            tipo="mobile",
+            fields=list(passport["sections"]["PDF"].keys())
+        )
+
+    # ------------------------------------------------------
+    # 2) Normalizzazione campi PDF
+    # ------------------------------------------------------
+    normalized_pdf = normalize_pdf_fields(extracted_pdf)
+
+    # ------------------------------------------------------
+    # 3) Ecolabel
+    # ------------------------------------------------------
+    ecolabel_data = {}
+    if pdf_file and client:
+        ecolabel_data = extract_ecolabel_fields_from_pdf(pdf_file, client)
+
+    # ------------------------------------------------------
+    # 4) Merge PDF (validati + estratti + ecolabel)
+    # ------------------------------------------------------
+    passport["sections"].setdefault("PDF", {})
+
+    for field in passport["sections"]["PDF"].keys():
+        final_value = None
+
+        # 1) Validato dall’utente (PRIORITARIO)
+        if field in st.session_state.get("validated_pdf", {}):
+            final_value = st.session_state.validated_pdf[field]["value"]
+
+        # 2) Estratto da GPT
+        elif field in normalized_pdf:
+            final_value = normalized_pdf[field]["value"]
+
+        # 3) Ecolabel (solo booleani)
+        elif field in ecolabel_data:
+            final_value = ecolabel_data[field]
+
+        passport["sections"]["PDF"][field] = {
+            "value": final_value,
+            "confidence": 1.0,
+            "explanation": ""
+        }
+
+    changed = True
+
+    # ------------------------------------------------------
+    # 5) Merge immagini
+    # ------------------------------------------------------
+    if image_data:
+        passport["sections"]["Images"] = image_data
+        changed = True
+
+    # ------------------------------------------------------
+    # 6) Merge certificati
+    # ------------------------------------------------------
+    if cert_data:
+        passport["certificates"] = cert_data
+        changed = True
+
+    # ------------------------------------------------------
+    # 7) Versioning
+    # ------------------------------------------------------
+    if changed:
+        append_lifecycle_event(passport, "updated", {"what": "merge_data_with_ecolabel"})
+        espr_stamp(passport, actor="manufacturer", action="data_merge_ecolabel", reason="Merged validated data + ecolabel")
+
+    return passport
+
+
 
 def db_list_passports_latest(**kwargs) -> pd.DataFrame:
     with db_conn() as conn:
-        return pd.read_sql("select passport_id as id, version from passports", conn)
+        return pd.read_sql("""
+            select
+                passport_id as id,
+                version,
+                payload->>'product_type' as product_type,
+                payload->'lifecycle'->>'status' as lifecycle,
+                payload->>'pdf_document' is not null as pdf_present,
+                coalesce(jsonb_array_length(payload->'certificates'),0) as cert_count
+            from passports
+            order by version desc
+        """, conn)
