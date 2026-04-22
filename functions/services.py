@@ -2809,4 +2809,509 @@ def derive_certifications_summary(cert_list: list[dict]) -> str:
         return " | ".join(uniq[:6])  # limita a 6 per non esplodere UI
     return f"{len(cert_list)} certificati caricati"
 
+# ======================================================
+# DATABASE (Supabase Postgres) — Passport Registry (append-only)
+# ======================================================
+import json
+import os
+import uuid as _uuid
+from contextlib import contextmanager
+from datetime import timezone, datetime
 
+import pandas as pd
+
+#DB URL mancante. Imposta SUPABASE_DB_URL in secrets/env.")# ------------------------------------------------------
+
+    # psycopg2 (più comune)
+    try:
+        import psycopg2
+        conn = psycopg2.connect(url)
+        conn.autocommit = False
+        try:
+            yield conn
+        finally:
+            conn.close()
+        return
+    except ImportError:
+        pass
+
+    # fallback: pg8000
+    try:
+        import pg8000
+        from urllib.parse import urlparse
+
+        u = urlparse(url)
+        conn = pg8000.connect(
+            user=u.username,
+            password=u.password,
+            host=u.hostname,
+            port=u.port or 5432,
+            database=(u.path or "/postgres").lstrip("/")
+        )
+        try:
+            yield conn
+        finally:
+            conn.close()
+    except ImportError as e:
+        raise RuntimeError(
+            "Manca driver Postgres. Installa psycopg2-binary (consigliato) oppure pg8000."
+        ) from e
+
+# ------------------------------------------------------
+# Schema (idempotente)
+# ------------------------------------------------------
+_DB_SCHEMA_READY = False
+
+def ensure_db_schema():
+    """
+    Crea tabelle minime (idempotente).
+    Principi:
+      - passports: stato corrente (facilita query archivio)
+      - passport_versions: append-only, immutabile (audit-grade)
+      - lifecycle_events, evidences, signatures: append-only
+    """
+    global _DB_SCHEMA_READY
+    if _DB_SCHEMA_READY or not db_enabled():
+        return
+
+    ddl = """
+    create table if not exists passports (
+      passport_id        text primary key,
+      product_type       text,
+      issuer_legal_name  text,
+      created_at         timestamptz,
+      updated_at         timestamptz,
+      current_version    integer default 0,
+      status             text,
+      pdf_present        boolean default false,
+      cert_count         integer default 0,
+      deleted_at         timestamptz
+    );
+
+    create table if not exists passport_versions (
+      version_id      uuid primary key,
+      passport_id     text references passports(passport_id),
+      version_number  integer not null,
+      payload         jsonb not null,
+      hash_sha256     text not null,
+      created_at      timestamptz not null,
+      created_by      text,
+      reason          text,
+      is_deleted      boolean default false,
+      unique(passport_id, version_number)
+    );
+
+    create index if not exists idx_passports_updated_at on passports(updated_at desc);
+    create index if not exists idx_passports_status on passports(status);
+    create index if not exists idx_passports_type on passports(product_type);
+    create index if not exists idx_versions_passport on passport_versions(passport_id, version_number desc);
+
+    create table if not exists lifecycle_events (
+      event_id     uuid primary key,
+      passport_id  text references passports(passport_id),
+      event_type   text,
+      event_data   jsonb,
+      ts           timestamptz not null,
+      actor        text
+    );
+    create index if not exists idx_lifecycle_passport on lifecycle_events(passport_id, ts desc);
+
+    create table if not exists evidences (
+      evidence_id   uuid primary key,
+      passport_id   text references passports(passport_id),
+      evidence_type text,
+      filename      text,
+      hash_sha256   text,
+      source        text,
+      created_at    timestamptz not null
+    );
+    create index if not exists idx_evidences_passport on evidences(passport_id, created_at desc);
+
+    create table if not exists signatures (
+      sig_row_id     uuid primary key,
+      passport_id    text references passports(passport_id),
+      provider       text,
+      signature_type text,
+      state          text,
+      raw_response   jsonb,
+      signed_at      timestamptz,
+      created_at     timestamptz not null
+    );
+    create index if not exists idx_signatures_passport on signatures(passport_id, created_at desc);
+    """
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(ddl)
+        conn.commit()
+
+    _DB_SCHEMA_READY = True
+
+# ------------------------------------------------------
+# Utility timestamps
+# ------------------------------------------------------
+def _utc_now_iso_db():
+    return datetime.now(timezone.utc).isoformat()
+
+# ------------------------------------------------------
+# Helpers per meta (pdf/cert count)
+# ------------------------------------------------------
+def _bool_pdf_present(passport: dict) -> bool:
+    return bool(passport.get("pdf_document"))
+
+def _cert_count(passport: dict) -> int:
+    return int(len(passport.get("certificates") or []))
+
+def _status_from_passport(passport: dict) -> str:
+    # usa lifecycle.status se presente, altrimenti fallback
+    lc = passport.get("lifecycle") or {}
+    return str(lc.get("status") or passport.get("status") or "draft")
+
+def _issuer_legal_name(passport: dict) -> str:
+    issuer = passport.get("issuer") or {}
+    return str(issuer.get("legal_name") or "")
+
+# ======================================================
+# CORE: persistenza DB (append-only versions)
+# ======================================================
+def persist_passport_db(passport: dict, actor: str = "manufacturer", reason: str = "update") -> None:
+    """
+    Salvataggio audit-grade:
+      1) UPSERT su passports (stato corrente)
+      2) INSERT su passport_versions (append-only, immutabile)
+    """
+    ensure_db_schema()
+
+    pid = str(passport.get("id") or "").strip()
+    if not pid:
+        raise ValueError("passport['id'] mancante")
+
+    product_type = passport.get("product_type")
+    issuer_legal = _issuer_legal_name(passport)
+    status = _status_from_passport(passport)
+
+    created_at = passport.get("created_at") or _utc_now_iso_db()
+    updated_at = passport.get("last_updated_at") or passport.get("last_updated_at") or _utc_now_iso_db()
+
+    version_number = int(passport.get("version") or 0)
+
+    # hash stabile del passport (usa la tua compute_passport_hash già presente nel file)
+    h = compute_passport_hash(passport)
+
+    pdf_present = _bool_pdf_present(passport)
+    cert_count = _cert_count(passport)
+
+    payload_json = json.dumps(passport, ensure_ascii=False)
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+
+        # 1) UPSERT su passports
+        cur.execute(
+            """
+            insert into passports(passport_id, product_type, issuer_legal_name, created_at, updated_at, current_version, status, pdf_present, cert_count, deleted_at)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,null)
+            on conflict (passport_id) do update set
+              product_type=excluded.product_type,
+              issuer_legal_name=excluded.issuer_legal_name,
+              updated_at=excluded.updated_at,
+              current_version=excluded.current_version,
+              status=excluded.status,
+              pdf_present=excluded.pdf_present,
+              cert_count=excluded.cert_count
+            """,
+            (pid, product_type, issuer_legal, created_at, updated_at, version_number, status, pdf_present, cert_count)
+        )
+
+        # 2) INSERT append-only su passport_versions
+        vid = str(_uuid.uuid4())
+        cur.execute(
+            """
+            insert into passport_versions(version_id, passport_id, version_number, payload, hash_sha256, created_at, created_by, reason, is_deleted)
+            values (%s,%s,%s,%s::jsonb,%s,now(),%s,%s,false)
+            on conflict (passport_id, version_number) do nothing
+            """,
+            (vid, pid, version_number, payload_json, h, actor, reason)
+        )
+
+        conn.commit()
+
+# Wrapper “compatibile” con la tua app:
+def persist_passport(passport: dict, actor: str="manufacturer", reason: str="update", shadow_file: bool=False) -> None:
+    """
+    Salva su DB se configurato, altrimenti salva su file.
+    shadow_file=True mantiene anche il file json (migrazione graduale).
+    """
+    if db_enabled():
+        persist_passport_db(passport, actor=actor, reason=reason)
+        if shadow_file:
+            save_passport_to_file(passport)  # funzione già presente nel tuo services.py
+    else:
+        save_passport_to_file(passport)
+
+# ======================================================
+# LOAD: lettura DB (ultima versione o versione specifica)
+# ======================================================
+def load_passport_from_db(pid: str, version: int | None = None) -> dict | None:
+    ensure_db_schema()
+    pid = str(pid).strip()
+    if not pid:
+        return None
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        if version is None:
+            cur.execute(
+                """
+                select payload
+                from passport_versions
+                where passport_id=%s and is_deleted=false
+                order by version_number desc
+                limit 1
+                """,
+                (pid,)
+            )
+        else:
+            cur.execute(
+                """
+                select payload
+                from passport_versions
+                where passport_id=%s and version_number=%s and is_deleted=false
+                limit 1
+                """,
+                (pid, int(version))
+            )
+
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        payload = row[0]
+        # a volte jsonb torna dict, a volte stringa
+        if isinstance(payload, str):
+            return json.loads(payload)
+        return payload
+
+def load_passport(pid: str) -> dict | None:
+    """
+    Carica da DB se disponibile, altrimenti da file.
+    """
+    if db_enabled():
+        p = load_passport_from_db(pid)
+        if p is not None:
+            return p
+        # fallback legacy: se DB non ha ancora tutto, prova su file
+        return load_passport_from_file(pid)  # funzione già presente
+    return load_passport_from_file(pid)
+
+# ======================================================
+# ARCHIVIO: lista interrogabile (DataFrame)
+# ======================================================
+def db_list_passports_latest(
+    search: str = "",
+    product_type: str = "ALL",
+    lifecycle: str = "ALL",
+    min_version: int = 1,
+    has_pdf: bool = False,
+    has_cert: bool = False,
+    sort_col: str = "updated_at",
+    sort_asc: bool = False,
+    limit: int = 5000
+) -> pd.DataFrame:
+    """
+    Ritorna la vista archivio (una riga per passport_id) con filtri e sorting.
+    """
+    ensure_db_schema()
+
+    where = ["deleted_at is null"]
+    params = []
+
+    if search:
+        where.append("(passport_id ilike %s or coalesce(product_type,'') ilike %s or coalesce(issuer_legal_name,'') ilike %s)")
+        like = f"%{search}%"
+        params += [like, like, like]
+
+    if product_type and product_type != "ALL":
+        where.append("product_type=%s")
+        params.append(product_type)
+
+    if lifecycle and lifecycle != "ALL":
+        where.append("status=%s")
+        params.append(lifecycle)
+
+    if min_version and int(min_version) > 1:
+        where.append("current_version >= %s")
+        params.append(int(min_version))
+
+    if has_pdf:
+        where.append("pdf_present = true")
+
+    if has_cert:
+        where.append("cert_count > 0")
+
+    allowed = {"created_at","updated_at","current_version","issuer_legal_name","product_type","status"}
+    if sort_col not in allowed:
+        sort_col = "updated_at"
+    order = "asc" if sort_asc else "desc"
+
+    sql = f"""
+      select passport_id as id,
+             product_type,
+             current_version as version,
+             status as lifecycle,
+             issuer_legal_name,
+             created_at,
+             updated_at,
+             pdf_present,
+             cert_count
+      from passports
+      where {" and ".join(where)}
+      order by {sort_col} {order}
+      limit {int(limit)}
+    """
+
+    with db_conn() as conn:
+        df = pd.read_sql(sql, conn, params=params)
+    return df
+
+# ======================================================
+# SOFT DELETE (archiviazione/ritiro)
+# ======================================================
+def soft_delete_passport_db(pid: str, actor: str="system", reason: str="soft_delete") -> None:
+    """
+    Soft delete: marca passports.deleted_at, e opzionalmente marca versioni is_deleted.
+    Non cancella fisicamente i dati.
+    """
+    ensure_db_schema()
+    pid = str(pid).strip()
+    if not pid:
+        return
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("update passports set deleted_at=now(), status=%s where passport_id=%s", ("withdrawn", pid))
+        cur.execute("update passport_versions set is_deleted=true where passport_id=%s", (pid,))
+        conn.commit()
+
+# ======================================================
+# APPEND-ONLY per lifecycle / evidences / signatures
+# ======================================================
+def db_append_lifecycle_event(passport_id: str, event_type: str, event_data: dict | None=None, actor: str="service") -> None:
+    ensure_db_schema()
+    passport_id = str(passport_id).strip()
+    if not passport_id:
+        return
+    payload = json.dumps(event_data or {}, ensure_ascii=False)
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            insert into lifecycle_events(event_id, passport_id, event_type, event_data, ts, actor)
+            values (%s,%s,%s,%s::jsonb,now(),%s)
+            """,
+            (str(_uuid.uuid4()), passport_id, event_type, payload, actor)
+        )
+        conn.commit()
+
+def db_append_evidence(passport_id: str, evidence_type: str, filename: str, hash_sha256: str, source: str="uploaded") -> None:
+    ensure_db_schema()
+    passport_id = str(passport_id).strip()
+    if not passport_id:
+        return
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            insert into evidences(evidence_id, passport_id, evidence_type, filename, hash_sha256, source, created_at)
+            values (%s,%s,%s,%s,%s,%s,now())
+            """,
+            (str(_uuid.uuid4()), passport_id, evidence_type, filename or "", hash_sha256 or "", source)
+        )
+        conn.commit()
+
+def db_append_signature(passport_id: str, provider: str, signature_type: str, state: str, raw_response: dict | None=None, signed_at: str | None=None) -> None:
+    ensure_db_schema()
+    passport_id = str(passport_id).strip()
+    if not passport_id:
+        return
+    raw = json.dumps(raw_response or {}, ensure_ascii=False)
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            insert into signatures(sig_row_id, passport_id, provider, signature_type, state, raw_response, signed_at, created_at)
+            values (%s,%s,%s,%s,%s,%s::jsonb,%s,now())
+            """,
+            (str(_uuid.uuid4()), passport_id, provider, signature_type, state, raw, signed_at)
+        )
+        conn.commit()
+
+# ======================================================
+# MIGRAZIONE LEGACY: import da passports/*.json -> DB
+# ======================================================
+def migrate_filesystem_to_db(passport_dir: str = None, shadow_file: bool=False) -> dict:
+    """
+    Importa tutti i JSON legacy in DB (una tantum).
+    Ritorna {imported: n, skipped: m, errors: k}.
+    """
+    ensure_db_schema()
+    if not db_enabled():
+        raise RuntimeError("DB non configurato: impossibile migrare.")
+
+    passport_dir = passport_dir or PASSPORT_DIR  # usa la tua costante esistente
+    imported = 0
+    skipped = 0
+    errors = 0
+
+    if not os.path.exists(passport_dir):
+        return {"imported": 0, "skipped": 0, "errors": 0}
+
+    for fn in os.listdir(passport_dir):
+        if not fn.endswith(".json"):
+            continue
+        path = os.path.join(passport_dir, fn)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                passport = json.load(f)
+            # salva in DB (append-only)
+            persist_passport(passport, actor="migration", reason="import_legacy", shadow_file=shadow_file)
+            imported += 1
+        except Exception:
+            errors += 1
+
+    return {"imported": imported, "skipped": skipped, "errors": errors}
+# Secrets / env helper (st.secrets -> env fallback)
+# ------------------------------------------------------
+def _sec(name: str, default: str = "") -> str:
+    """
+    Legge prima da Streamlit secrets (se presenti), altrimenti da env vars.
+    """
+    try:
+        import streamlit as st
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return str(os.getenv(name, default))
+
+def _db_url() -> str:
+    """
+    Connection string Postgres Supabase/Neon.
+    Metti SUPABASE_DB_URL in secrets/env.
+    """
+    return (_sec("SUPABASE_DB_URL") or _sec("DATABASE_URL") or "").strip()
+
+def db_enabled() -> bool:
+    return bool(_db_url())
+
+# ------------------------------------------------------
+# DB Connection manager (psycopg2 -> pg8000 fallback)
+# ------------------------------------------------------
+@contextmanager
+def db_conn():
+    """
+    Ritorna una connessione DB.
+    Preferisce psycopg2 (consigliato), fallback su pg8000.
+    """
+    url = _db_url()
+    if not url:
