@@ -44,11 +44,9 @@ PRODUCT_FIELDS = {
             "Parti sostituibili",
             "Indicazioni di smaltimento",
             "Fine vita",
-            "Certificazioni",
             "Prezzo in euro",
             "Peso",
             "Dimensioni",
-            # opzionali per estensioni
             "GTIN",
         ],
         "image": ["Colore", "Condizioni"],
@@ -199,13 +197,8 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
         }
     return out
 
-def upload_image_to_openai(image_file, client: OpenAI):
-    resized = resize_image_for_vision(image_file)
-    uploaded = client.files.create(file=resized, purpose="vision")
-    return uploaded.id
-
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
+    campi = ["colore","condizioni","categoria_visiva","segni_usura"]
     prompt = f"""
 Analizza immagine prodotto {tipo}.
 Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
@@ -235,6 +228,21 @@ Usa null se non determinabile.
         return result
     except Exception:
         return {c.capitalize():{"value":"non rilevato","confidence":0.0,"explanation":"Non rilevabile"} for c in campi}
+
+def resize_image_for_vision(image_file, max_size=512):
+    img = Image.open(image_file).convert("RGB")
+    img.thumbnail((max_size, max_size))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    buf.name = "image.jpg"
+    return buf
+
+
+def upload_image_to_openai(image_file, client: OpenAI):
+    resized = resize_image_for_vision(image_file)
+    uploaded = client.files.create(file=resized, purpose="vision")
+    return uploaded.id
 
 def gpt_extract_cert_info(file_like, client, model: str = "gpt-4o-mini") -> dict:
     """
