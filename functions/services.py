@@ -203,7 +203,7 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
     return out
 
 def gpt_analyze_image(image_file, client: OpenAI, tipo):
-    campi = ["colore","condizioni","materiale_probabile","categoria_visiva","segni_usura"]
+    campi = ["colore","condizioni","categoria_visiva","segni_usura"]
     prompt = f"""
 Analizza immagine prodotto {tipo}.
 Estrai i seguenti campi: colore, condizioni, materiale_probabile, categoria_visiva, segni_usura.
