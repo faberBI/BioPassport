@@ -1,4 +1,4 @@
-# ======================================================#/Pubblica/Archivio + Public View + SES)
+# ======================================================
 # ======================================================
 
 import os
@@ -866,20 +866,17 @@ def db_list_passports_latest(
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
 
-def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v_new: int) -> pd.DataFrame:def compute_diff_fields(df_fields: pd.DataFrame, passport due versioni.
-    Confronta per chiave: (section, field_name).
-    Richiede che df_fields abbia colonne: passport_id, version, section, field_name, value
-
-    Ritorna un DataFrame con:
-      section | field_name | old_value | new_value
+def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v_new: int) -> pd.DataFrame:
+    """
+    Diff minimale sui campi tra due versioni.
+    Richiede df_fields con colonne: passport_id, version, section, field_name, value
+    Ritorna: section | field_name | old_value | new_value
     """
     if df_fields is None or df_fields.empty:
         return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
 
-    required_cols = {"passport_id", "version", "section", "field_name", "value"}
-    missing = required_cols - set(df_fields.columns)
-    if missing:
-        # niente diff versionato possibile
+    required = {"passport_id", "version", "section", "field_name", "value"}
+    if not required.issubset(df_fields.columns):
         return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
 
     sub = df_fields[df_fields["passport_id"].astype(str).str.strip() == str(passport_id).strip()].copy()
@@ -891,7 +888,6 @@ def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v
     if sub.empty:
         return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
 
-    # normalizza stringhe
     sub["section"] = sub["section"].astype(str).str.strip()
     sub["field_name"] = sub["field_name"].astype(str).str.strip()
     sub["value"] = sub["value"].astype(str)
@@ -899,19 +895,13 @@ def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v
     old = sub[sub["version"] == int(v_old)][["section", "field_name", "value"]].rename(columns={"value": "old_value"})
     new = sub[sub["version"] == int(v_new)][["section", "field_name", "value"]].rename(columns={"value": "new_value"})
 
-    # outer join: intercetta aggiunte/rimozioni
     m = old.merge(new, on=["section", "field_name"], how="outer")
     m["old_value"] = m["old_value"].fillna("")
     m["new_value"] = m["new_value"].fillna("")
 
-    # tieni solo cambiati
     changed = m[m["old_value"] != m["new_value"]].copy()
-    changed = changed.sort_values(["section", "field_name"]).reset_index(drop=True)
-    return changed
-
-
-
-
+    return changed.sort_values(["section", "field_name"]).reset_index(drop=True)
+    
 def save_passport_to_excel_append(passport: dict):
     """
     Salva/append su Excel legacy per Archivio + Diff versioni.
