@@ -692,7 +692,7 @@ _DB_SCHEMA_READY = False
 
 def ensure_db_schema():
     """
-    Crea tutte le tabelle necessarie (versione completa e coerente).
+    Crea tabelle minime se non esistono.
     """
     global _DB_SCHEMA_READY
     if _DB_SCHEMA_READY or not db_enabled():
@@ -700,73 +700,11 @@ def ensure_db_schema():
 
     ddl = """
     create table if not exists passports (
-        id text primary key,
-        product_type text,
-        version integer,
-        status text,
-        issuer_name text,
-        created_at timestamptz default now(),
-        updated_at timestamptz default now()
-    );
-
-    create table if not exists passport_versions (
-        id bigserial primary key,
-        passport_id text,
-        version integer,
-        snapshot jsonb,
-        created_at timestamptz default now()
-    );
-
-    create table if not exists passport_sections (
-        id bigserial primary key,
-        passport_id text,
-        version integer,
-        section_type text,
-        field_name text,
-        value text,
-        confidence numeric,
-        explanation text
-    );
-
-    create table if not exists certificates (
-        id bigserial primary key,
-        passport_id text,
-        certificate_index integer,
-        name text
-    );
-
-    create table if not exists certificate_fields (
-        id bigserial primary key,
-        certificate_id bigint,
-        field_name text,
-        value text,
-        confidence numeric
-    );
-
-    create table if not exists evidences (
-        id bigserial primary key,
-        passport_id text,
-        certificate_id bigint,
-        file_name text,
-        hash text,
-        source text
-    );
-
-    create table if not exists images (
-        id bigserial primary key,
-        passport_id text,
-        version integer,
-        file_base64 text,
-        caption text
-    );
-
-    create table if not exists passport_logs (
-        id bigserial primary key,
-        passport_id text,
-        action text,
-        actor text,
-        reason text,
-        created_at timestamptz default now()
+      passport_id text primary key,
+      payload jsonb not null,
+      version integer not null default 0,
+      created_at timestamptz default now(),
+      updated_at timestamptz default now()
     );
     """
 
@@ -775,6 +713,7 @@ def ensure_db_schema():
         cur.execute(ddl)
 
     _DB_SCHEMA_READY = True
+
 
 def _to_dict(payload):
     if payload is None:
@@ -789,237 +728,127 @@ def _to_dict(payload):
     return payload
 
 
-def persist_passport(passport: dict, conn, actor="system", reason=""):
-    cur = conn.cursor()
-    pid = passport["id"]
+def persist_passport(passport: dict, actor: str = "manufacturer", reason: str = "update", shadow_file: bool = False):
+    """
+    DB-first. Fallback su file se DB non configurato.
+    """
+    if not db_enabled():
+        os.makedirs(PASSPORT_DIR, exist_ok=True)
+        with open(os.path.join(PASSPORT_DIR, f"{passport['id']}.json"), "w", encoding="utf-8") as f:
+            json.dump(passport, f, indent=2, ensure_ascii=False)
+        return
 
-    # =========================
-    # UPSERT MASTER
-    # =========================
-    cur.execute("""
-        INSERT INTO passports (id, product_type, version, status, issuer_name)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (id) DO UPDATE SET
-            product_type = EXCLUDED.product_type,
-            version = EXCLUDED.version,
-            status = EXCLUDED.status,
-            issuer_name = EXCLUDED.issuer_name,
-            updated_at = NOW()
-    """, (
-        pid,
-        passport.get("product_type"),
-        passport.get("version"),
-        (passport.get("lifecycle") or {}).get("status"),
-        (passport.get("issuer") or {}).get("legal_name"),
-    ))
+    ensure_db_schema()
 
-    # =========================
-    # CLEAN CHILD TABLES (SAFE RESET PER VERSIONE)
-    # =========================
-    cur.execute("DELETE FROM passport_sections WHERE passport_id=%s", (pid,))
-    cur.execute("DELETE FROM certificates WHERE passport_id=%s", (pid,))
-    cur.execute("DELETE FROM images WHERE passport_id=%s", (pid,))
-    cur.execute("DELETE FROM evidences WHERE passport_id=%s", (pid,))
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            insert into passports(passport_id, payload, version, updated_at)
+            values (%s,%s::jsonb,%s,now())
+            on conflict (passport_id) do update set
+              payload = excluded.payload,
+              version = excluded.version,
+              updated_at = now()
+            """,
+            (passport["id"], json.dumps(passport, ensure_ascii=False), int(passport.get("version", 0)))
+        )
 
-    # =========================
-    # SECTIONS
-    # =========================
-    for section_type, fields in (passport.get("sections") or {}).items():
-        if not isinstance(fields, dict):
-            continue
+    if shadow_file:
+        os.makedirs(PASSPORT_DIR, exist_ok=True)
+        with open(os.path.join(PASSPORT_DIR, f"{passport['id']}.json"), "w", encoding="utf-8") as f:
+            json.dump(passport, f, indent=2, ensure_ascii=False)
 
-        for field_name, f in fields.items():
-            if isinstance(f, dict):
-                value = f.get("value")
-                confidence = f.get("confidence")
-                explanation = f.get("explanation")
-            else:
-                value = f
-                confidence = None
-                explanation = None
 
-            cur.execute("""
-                INSERT INTO passport_sections
-                (passport_id, section_type, field_name, value, confidence, explanation)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (pid, section_type, field_name, value, confidence, explanation))
+def load_passport(pid: str):
+    """
+    DB-first, fallback file.
+    """
+    if not db_enabled():
+        path = os.path.join(PASSPORT_DIR, f"{pid}.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-    # =========================
-    # CERTIFICATES
-    # =========================
-    for cert in passport.get("certificates", []):
-        cur.execute("""
-            INSERT INTO certificates (passport_id, name)
-            VALUES (%s, %s)
-            RETURNING id
-        """, (pid, cert.get("name", "certificate")))
+    ensure_db_schema()
 
-        cert_id = cur.fetchone()[0]
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("select payload from passports where passport_id=%s", (pid,))
+        row = cur.fetchone()
+        return _to_dict(row[0]) if row else None
 
-        for k, v in cert.items():
-            if k == "evidence":
-                continue
 
-            if isinstance(v, dict):
-                value = v.get("value")
-                confidence = v.get("confidence")
-            else:
-                value = v
-                confidence = None
+def db_list_passports_latest(
+    search: str = "",
+    product_type: str = "ALL",
+    lifecycle: str = "ALL",
+    min_version: int = 1,
+    has_pdf: bool = False,
+    has_cert: bool = False,
+    sort_col: str = "updated_at",
+    sort_asc: bool = False,
+    limit: int = 5000
+) -> pd.DataFrame:
+    """
+    Restituisce la vista archivio con le colonne usate nel main:
+    id, product_type, version, lifecycle, pdf_present, cert_count, created_at, updated_at
+    """
+    ensure_db_schema()
 
-            cur.execute("""
-                INSERT INTO certificate_fields
-                (certificate_id, field_name, value, confidence)
-                VALUES (%s, %s, %s, %s)
-            """, (cert_id, k, value, confidence))
+    allowed_sort = {"created_at", "updated_at", "version"}
+    if sort_col not in allowed_sort:
+        sort_col = "updated_at"
+    order = "ASC" if sort_asc else "DESC"
 
-        if cert.get("evidence"):
-            ev = cert["evidence"]
-            cur.execute("""
-                INSERT INTO evidences
-                (passport_id, certificate_id, file_name, hash, source)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                pid,
-                cert_id,
-                ev.get("filename"),
-                ev.get("hash"),
-                ev.get("source"),
-            ))
+    where = ["1=1"]
+    params = []
 
-    # =========================
-    # IMAGES
-    # =========================
-    for img in passport.get("images", []):
-        cur.execute("""
-            INSERT INTO images (passport_id, file_base64, caption)
-            VALUES (%s, %s, %s)
-        """, (pid, img.get("file_base64"), img.get("caption", "")))
+    if search:
+        where.append("(passport_id ILIKE %s OR payload->>'product_type' ILIKE %s OR payload->'issuer'->>'legal_name' ILIKE %s)")
+        like = f"%{search}%"
+        params += [like, like, like]
 
-    # =========================
-    # LOG
-    # =========================
-    cur.execute("""
-        INSERT INTO passport_logs (passport_id, action, actor, reason)
-        VALUES (%s, %s, %s, %s)
-    """, (pid, "persist", actor, reason))
+    if product_type and product_type != "ALL":
+        where.append("(payload->>'product_type') = %s")
+        params.append(product_type)
 
-    conn.commit()
+    if lifecycle and lifecycle != "ALL":
+        where.append("(payload->'lifecycle'->>'status') = %s")
+        params.append(lifecycle)
 
-def load_passport(passport_id: str, conn):
-    cur = conn.cursor()
+    if min_version and int(min_version) > 1:
+        where.append("version >= %s")
+        params.append(int(min_version))
 
-    cur.execute("""
-        SELECT id, product_type, version, status, issuer_name
-        FROM passports
-        WHERE id=%s
-    """, (passport_id,))
+    if has_pdf:
+        where.append("(payload ? 'pdf_document')")
 
-    p = cur.fetchone()
-    if not p:
-        return None
+    if has_cert:
+        where.append("coalesce(jsonb_array_length(payload->'certificates'),0) > 0")
 
-    passport = {
-        "id": p[0],
-        "product_type": p[1],
-        "version": p[2],
-        "lifecycle": {"status": p[3]},
-        "issuer": {"legal_name": p[4]},
-        "sections": {},
-        "certificates": [],
-        "images": [],
-    }
+    sql = f"""
+        select
+            passport_id as id,
+            payload->>'product_type' as product_type,
+            version as version,
+            payload->'lifecycle'->>'status' as lifecycle,
+            (payload ? 'pdf_document') as pdf_present,
+            coalesce(jsonb_array_length(payload->'certificates'),0) as cert_count,
+            created_at,
+            updated_at
+        from passports
+        where {" and ".join(where)}
+        order by {sort_col} {order}
+        limit %s
+    """
 
-    # SECTIONS
-    cur.execute("""
-        SELECT section_type, field_name, value, confidence, explanation
-        FROM passport_sections
-        WHERE passport_id=%s
-    """, (passport_id,))
+    params.append(int(limit))
 
-    for section_type, field_name, value, confidence, explanation in cur.fetchall():
-        passport["sections"].setdefault(section_type, {})
-        passport["sections"][section_type][field_name] = {
-            "value": value,
-            "confidence": confidence,
-            "explanation": explanation,
-        }
+    with db_conn() as conn:
+        return pd.read_sql(sql, conn, params=params)
 
-    # IMAGES
-    cur.execute("""
-        SELECT file_base64, caption
-        FROM images
-        WHERE passport_id=%s
-    """, (passport_id,))
-
-    passport["images"] = [
-        {"file_base64": f, "caption": c}
-        for f, c in cur.fetchall()
-    ]
-
-    # CERTIFICATES
-    cur.execute("""
-        SELECT id, name
-        FROM certificates
-        WHERE passport_id=%s
-    """, (passport_id,))
-
-    for cert_id, name in cur.fetchall():
-        cert_obj = {"name": name}
-
-        cur.execute("""
-            SELECT field_name, value, confidence
-            FROM certificate_fields
-            WHERE certificate_id=%s
-        """, (cert_id,))
-
-        for fn, val, conf in cur.fetchall():
-            cert_obj[fn] = {"value": val, "confidence": conf}
-
-        cur.execute("""
-            SELECT file_name, hash, source
-            FROM evidences
-            WHERE certificate_id=%s
-        """, (cert_id,))
-
-        ev = cur.fetchone()
-        if ev:
-            cert_obj["evidence"] = {
-                "filename": ev[0],
-                "hash": ev[1],
-                "source": ev[2],
-            }
-
-        passport["certificates"].append(cert_obj)
-
-    return passport
-
-def db_list_passports_latest(conn):
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT id, product_type, version, status, updated_at
-        FROM passports
-        ORDER BY updated_at DESC
-    """)
-
-    rows = cur.fetchall()
-
-    return pd.DataFrame(rows, columns=[
-        "id",
-        "product_type",
-        "version",
-        "status",
-        "updated_at"
-    ])
-
-import psycopg2
-
-def get_connection():
-    return psycopg2.connect(
-        os.getenv("SUPABASE_DB_URL")
-    )
-    
 def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v_new: int) -> pd.DataFrame:
     """
     Diff minimale sui campi tra due versioni.
@@ -1330,7 +1159,6 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
     </body>
     </html>
     """
-
     return html
-
+    return html
 
