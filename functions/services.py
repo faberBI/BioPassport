@@ -17,9 +17,8 @@ from datetime import timezone, datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import requests
-import os
-import streamlit as st
-import base64
+import uuid as _uuid
+from contextlib import contextmanager
 
 # ======================================================
 # DPP ESPR MODULES (JSON-LD, Ontology, EPREL, GS1, SCIP)
@@ -2812,16 +2811,6 @@ def derive_certifications_summary(cert_list: list[dict]) -> str:
 # ======================================================
 # DATABASE (Supabase Postgres) — Passport Registry (append-only)
 # ======================================================
-import json
-import os
-import uuid as _uuid
-from contextlib import contextmanager
-from datetime import timezone, datetime
-
-import pandas as pd
-
-#DB URL mancante. Imposta SUPABASE_DB_URL in secrets/env.")# ------------------------------------------------------
-
     # psycopg2 (più comune)
     try:
         import psycopg2
