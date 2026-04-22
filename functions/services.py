@@ -2772,3 +2772,41 @@ def integrate_espr_modules(passport):
     passport["espr_validation"] = validate_espr_compliance(passport)
 
     return passport
+
+def derive_certifications_summary(cert_list: list[dict]) -> str:
+    """
+    Produce una stringa riassuntiva delle certificazioni a partire da passport["certificates"].
+    """
+    if not cert_list:
+        return ""
+
+    # prova a prendere tipo/standard/ente emittente
+    types = []
+    for c in cert_list:
+        if not isinstance(c, dict):
+            continue
+        # campi che tu generi in gpt_extract_cert_info
+        t = (c.get("tipo_certificato") or {}).get("value") if isinstance(c.get("tipo_certificato"), dict) else c.get("tipo_certificato")
+        n = (c.get("norma_riferimento") or {}).get("value") if isinstance(c.get("norma_riferimento"), dict) else c.get("norma_riferimento")
+        e = (c.get("ente_emittente") or {}).get("value") if isinstance(c.get("ente_emittente"), dict) else c.get("ente_emittente")
+
+        for x in [t, n, e]:
+            if x:
+                sx = str(x).strip()
+                if sx and sx.lower() not in ("none", "null", "n/a", "0", "false"):
+                    types.append(sx)
+
+    # de-dup mantenendo ordine
+    seen = set()
+    uniq = []
+    for x in types:
+        k = x.lower()
+        if k not in seen:
+            seen.add(k)
+            uniq.append(x)
+
+    if uniq:
+        return " | ".join(uniq[:6])  # limita a 6 per non esplodere UI
+    return f"{len(cert_list)} certificati caricati"
+
+
