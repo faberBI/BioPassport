@@ -550,40 +550,6 @@ def integrate_espr_modules(passport: dict):
 
 
 # ======================================================
-# HTML + PDF (per il main)
-# ======================================================
-
-def generate_passport_html(passport: dict, qr_base64: str | None = None) -> str:
-    # HTML semplice e robusto (basta per la conversione PDF)
-    pid = passport.get("id", "")
-    ptype = passport.get("product_type", "")
-    ver = passport.get("version", 0)
-
-    qr_html = f"<img src='data:image/png;base64,{qr_base64}' style='width:160px'/>" if qr_base64 else ""
-
-    rows = ""
-    for section, fields in (passport.get("sections", {}) or {}).items():
-        if not isinstance(fields, dict):
-            continue
-        for k, v in fields.items():
-            val = v.get("value") if isinstance(v, dict) else v
-            rows += f"<tr><td><b>{k}</b></td><td>{val}</td></tr>"
-
-    return f"""
-    <html><head><meta charset="utf-8"></head>
-    <body style="font-family:Arial; margin:40px">
-      <h1>Digital Product Passport</h1>
-      <p><b>ID:</b> {pid} &nbsp; <b>Type:</b> {ptype} &nbsp; <b>Version:</b> {ver}</p>
-      {qr_html}
-      <h2>Sections</h2>
-      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%">
-        {rows}
-      </table>
-    </body></html>
-    """
-
-
-# ======================================================
 # SES SIGN (obbligatoria nel main)
 # ======================================================
 
@@ -1025,85 +991,7 @@ def save_passport_to_excel_append(passport: dict):
     _append_df(df_fields, "fields")
     _append_df(df_images, "images")
 
-def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
-    sections_html = ""
 
-    for section, fields in passport.get("sections", {}).items():
-        rows = ""
-        for k, v in fields.items():
-            rows += f"""
-                <tr>
-                    <td style='padding:6px 10px; border:1px solid #ddd;'><b>{k}</b></td>
-                    <td style='padding:6px 10px; border:1px solid #ddd;'>{v.get('value','')}</td>
-                </tr>
-            """
-        sections_html += f"""
-            <h2 style='margin-top:40px; color:#333;'>{section}</h2>
-            <table style='width:100%; border-collapse:collapse; margin-top:10px;'>
-                {rows}
-            </table>
-        """
-
-    images_html = ""
-    for img in passport.get("images", []):
-        images_html += f"""
-            <div style='margin:10px 0;'>
-                <img src="data:image/jpeg;base64,{img['file_base64']}" style="max-width:300px; border:1px solid #ccc;"/>
-                <p style='font-size:12px; color:#555;'>{img.get('caption','')}</p>
-            </div>
-        """
-
-    qr_html = f"<img src='data:image/png;base64,{qr_base64}' style='width:180px;'/>" if qr_base64 else ""
-
-    html = f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-                color: #222;
-            }}
-            h1 {{
-                color: #0A4A9A;
-                border-bottom: 2px solid #0A4A9A;
-                padding-bottom: 10px;
-            }}
-            h2 {{
-                color: #0A4A9A;
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-            }}
-            td {{
-                border: 1px solid #ddd;
-                padding: 8px;
-            }}
-        </style>
-    </head>
-    <body>
-
-        <h1>Digital Product Passport</h1>
-
-        <h2>Metadata</h2>
-        <p><b>ID:</b> {passport.get("id")}</p>
-        <p><b>Tipo:</b> {passport.get("product_type")}</p>
-        <p><b>Versione:</b> {passport.get("version")}</p>
-
-        <h2>QR Code</h2>
-        {qr_html}
-
-        {sections_html}
-
-        <h2>Immagini prodotto</h2>
-        {images_html}
-
-    </body>
-    </html>
-    """
-    return html
 
 def generate_pdf_from_html(html: str) -> bytes:
     API_KEY = st.secrets["OPENAPI_PDF_TOKEN"]
@@ -1130,7 +1018,387 @@ def load_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
+def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
+    import json
+    from datetime import datetime
 
+    # ---------------------------------------------------------
+    # ASSETS
+    # ---------------------------------------------------------
+    logo_base64 = load_image_base64("functions/logo_nuvia.jpeg")
+    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    status = (passport.get("lifecycle") or {}).get("status", "")
+    sustainability_score = passport.get("sustainability_score", 0)
+
+    pdf = passport.get("sections", {}).get("PDF", {})
+    eprel = passport.get("eprel") or {}
+    gs1 = passport.get("gs1_digital_link") or "—"
+    scip = passport.get("scip") or {"scip:substances": []}
+    scip_substances = scip.get("scip:substances", [])
+    certificates = passport.get("certificates", [])
+
+    issuer = passport.get("issuer") or {}
+    attestation = passport.get("attestation") or {}
+    signature = passport.get("digital_signature") or {}
+
+    # ---------------------------------------------------------
+    # SEMAFORO + GAUGE
+    # ---------------------------------------------------------
+    def traffic_light_from_score(score: int):
+        try:
+            s = int(score)
+        except:
+            s = 0
+
+        if s >= 71:
+            return "#27CC6C", "Low impact"
+        elif s >= 41:
+            return "#F6C23C", "Medium impact"
+        else:
+            return "#E63946", "High impact"
+
+    color, label = traffic_light_from_score(sustainability_score)
+    angle = int((sustainability_score / 100) * 360)
+
+    def gauge_html():
+        return f"""
+        <div class="gauge-wrapper">
+            <div class="gauge" style="
+                background: conic-gradient({color} {angle}deg, #E0E0E0 {angle}deg);
+            ">
+                <div class="gauge-inner">
+                    <div class="gauge-value">{sustainability_score}%</div>
+                </div>
+            </div>
+            <div class="gauge-label" style="color:{color};">{label}</div>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # COVER PAGE (logo ridotto)
+    # ---------------------------------------------------------
+    cover_html = f"""
+    <div class="cover">
+        <img src="data:image/jpeg;base64,{logo_base64}" class="cover-logo"/>
+        <h1 class="cover-title">📘 Digital Product Passport</h1>
+        <h2 class="cover-product">{passport.get("product_name") or passport.get("id","")}</h2>
+
+        <div class="cover-meta">
+            <div><b>ID:</b> {passport.get("id","")}</div>
+            <div><b>Version:</b> {passport.get("version","")}</div>
+            <div><b>Status:</b> {status}</div>
+        </div>
+
+        {f"<div class='cover-qr-frame'><img class='cover-qr' src='data:image/png;base64,{qr_base64}' /></div>" if qr_base64 else ""}
+
+        <div class="cover-footer">
+            Generated by Nuvia DPP System<br/>{generated_at}
+        </div>
+    </div>
+    <div class="page-break"></div>
+    """
+
+    # ---------------------------------------------------------
+    # SUMMARY SECTION
+    # ---------------------------------------------------------
+    summary_html = f"""
+    <div class="section summary">
+        <h2>📄 Passport Summary</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Product Name</td><td>{passport.get("product_name")}</td></tr>
+            <tr><td class='field-name'>Product ID</td><td>{passport.get("id")}</td></tr>
+            <tr><td class='field-name'>Environmental Impact</td><td>{gauge_html()}</td></tr>
+            <tr><td class='field-name'>Status</td><td>{status}</td></tr>
+        </table>
+    </div>
+    """
+
+    # ---------------------------------------------------------
+    # BREAKDOWN PEF
+    # ---------------------------------------------------------
+    pef_breakdown = passport.get("sustainability_breakdown", {})
+    pef_rows = "".join(
+        f"<tr><td class='field-name'>{k}</td><td>{v}</td></tr>"
+        for k, v in pef_breakdown.items()
+    )
+
+    breakdown_html = f"""
+    <div class="section">
+        <h2>📊 Environmental Impact Breakdown</h2>
+        <table class="data-table">
+            {pef_rows}
+        </table>
+    </div>
+    """
+
+    # ---------------------------------------------------------
+    # SEZIONI ESPR — con icone
+    # ---------------------------------------------------------
+    espr_html = f"""
+    <div class="section">
+        <h2>🔖 1. Product Identity</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Product Name</td><td>{pdf.get("Nome prodotto",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Model Number</td><td>{pdf.get("Numero di modello",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Manufacturer</td><td>{pdf.get("Produttore",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Place of Production</td><td>{pdf.get("Luogo di Produzione",{}).get("value","—")}</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🧱 2. Materials & Substances</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Materials</td><td>{pdf.get("Materiali/componenti utilizzati",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Recycled Content</td><td>{pdf.get("Percentuale di contenuto riciclato",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Hazardous Substances (SCIP/ECHA)</td>
+                <td>
+    """
+
+    if scip_substances:
+        for s in scip_substances:
+            name = s.get("name","—")
+            uri = s.get("echa_uri")
+            espr_html += f"• {name}<br>"
+            if uri:
+                espr_html += f"<small>{uri}</small><br>"
+    else:
+        espr_html += "None declared"
+
+    espr_html += """
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🛠️ 3. Repairability & Durability</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Durability</td><td>{}</td></tr>
+            <tr><td class='field-name'>Repair Instructions</td><td>{}</td></tr>
+            <tr><td class='field-name'>Replaceable Parts</td><td>{}</td></tr>
+        </table>
+    </div>
+    """.format(
+        pdf.get("Durabilità",{}).get("value","—"),
+        pdf.get("Istruzioni di riparazione",{}).get("value","—"),
+        pdf.get("Parti sostituibili",{}).get("value","—")
+    )
+
+    espr_html += f"""
+    <div class="section">
+        <h2>♻️ 4. End of Life</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Disposal Instructions</td><td>{pdf.get("Indicazioni di smaltimento",{}).get("value","—")}</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>📜 5. Certifications</h2>
+    """
+
+    for c in certificates:
+        espr_html += f"""
+        <table class="data-table">
+            <tr><td class='field-name'>Certificate</td><td>{c.get("tipo_certificato",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Issuer</td><td>{c.get("ente_emittente",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Number</td><td>{c.get("numero_certificato",{}).get("value","—")}</td></tr>
+            <tr><td class='field-name'>Standard</td><td>{c.get("norma_riferimento",{}).get("value","—")}</td></tr>
+        </table>
+        """
+
+    espr_html += f"""
+    <div class="section">
+        <h2>💡 6. EPREL</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Energy Class</td><td>{eprel.get("eprel:energyClass","—")}</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🌐 7. GS1 Digital Link</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>GS1 URI</td><td>{gs1}</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🔗 8. QR Code</h2>
+        <div class="qr-inline">
+            <img src="data:image/png;base64,{qr_base64}" width="160"/>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>✒️ 9. Signature & Integrity</h2>
+        <table class="data-table">
+            <tr><td class='field-name'>Issuer</td><td>{issuer.get("legal_name","—")}</td></tr>
+            <tr><td class='field-name'>Attestation</td><td>{attestation.get("statement","—")}</td></tr>
+            <tr><td class='field-name'>Document Hash</td><td>{signature.get("hash","—")}</td></tr>
+        </table>
+    </div>
+    """
+
+    # ---------------------------------------------------------
+    # LIFECYCLE EVENTS
+    # ---------------------------------------------------------
+    lifecycle_html = ""
+    events = (passport.get("lifecycle") or {}).get("events") or []
+
+    if events:
+        rows = ""
+        for ev in events:
+            rows += f"""
+            <tr>
+                <td>{ev.get('event')}</td>
+                <td>{ev.get('timestamp')}</td>
+                <td><pre>{json.dumps(ev.get('data', {}), ensure_ascii=False, indent=2)}</pre></td>
+            </tr>
+            """
+
+        lifecycle_html = f"""
+        <div class="page-break"></div>
+        <div class="section">
+            <h2>📅 Lifecycle Events</h2>
+            <table class="data-table">
+                <tr><th>Event</th><th>Timestamp</th><th>Details</th></tr>
+                {rows}
+            </table>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # CHANGE LOG
+    # ---------------------------------------------------------
+    changelog_html = ""
+    if passport.get("change_log"):
+        rows = ""
+        for log in passport["change_log"]:
+            rows += f"""
+            <tr>
+                <td>{log.get('version')}</td>
+                <td>{log.get('timestamp')}</td>
+                <td>{log.get('actor')}</td>
+                <td>{log.get('action')}</td>
+                <td>{log.get('reason')}</td>
+            </tr>
+            """
+
+        changelog_html = f"""
+        <div class="section">
+            <h2>📝 Change Log</h2>
+            <table class="data-table">
+                <tr><th>Version</th><th>Date</th><th>Actor</th><th>Action</th><th>Reason</th></tr>
+                {rows}
+            </table>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # IMAGES
+    # ---------------------------------------------------------
+    images_html = ""
+    images = passport.get("images", [])
+
+    if images:
+        cards = ""
+        for img in images:
+            b64 = img.get("file_base64")
+            if not b64:
+                continue
+
+            cards += f"""
+            <div class="image-card">
+                <img src="data:image/jpeg;base64,{b64}" />
+                <div class="caption">{img.get("caption","")}</div>
+            </div>
+            """
+
+        images_html = f"""
+        <div class="page-break"></div>
+        <div class="section">
+            <h2>🖼️ Product Visual Documentation</h2>
+            <div class="image-grid">{cards}</div>
+        </div>
+        """
+
+    # ---------------------------------------------------------
+    # ABOUT + LEGAL (logo ridotto)
+    # ---------------------------------------------------------
+    about_html = f"""
+    <div class="page-break"></div>
+    <div class="about">
+        <img src="data:image/jpeg;base64,{logo_base64}" class="about-logo"/>
+        <h1>About Nuvia</h1>
+        <p>Nuvia è una piattaforma digitale per la generazione automatizzata del Digital Product Passport, progettata per supportare la tracciabilità e la sostenibilità dei prodotti in conformità alle normative europee.</p>
+        <p>Supportiamo il Digital Product Passport secondo regolamento ESPR 2024/1781.</p>
+        <h2>Mission</h2>
+        <p>Abilitare trasparenza e sostenibilità lungo l’intero ciclo di vita dei prodotti.</p>
+        <h2>Contatti</h2>
+        <p>Email: informazioni.nuvia@gmail.com</p>
+        <p>Web: https://nuviadpp.com</p>
+    </div>
+    """
+
+    legal_html = """
+    <div class="page-break"></div>
+    <div class="legal">
+        <h1>Legal Notice</h1>
+        <p>Questo documento è generato automaticamente dal sistema Nuvia DPP.</p>
+        <p>I dati sono forniti dal produttore sotto la propria responsabilità.</p>
+        <p>Nuvia non è responsabile per errori o omissioni.</p>
+        <p>© Nuvia S.r.l. – Tutti i diritti riservati</p>
+    </div>
+    """
+
+    # ---------------------------------------------------------
+    # FINAL HTML (solo aggiunta classi logo)
+    # ---------------------------------------------------------
+    html = f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            @page {{ margin: 40px; @bottom-right {{ content: "Page " counter(page); font-size: 9px; }} }}
+            body {{ font-family: "Inter", Arial, sans-serif; color: #3D0F06; background: #F6F8F8; }}
+            .page-break {{ page-break-before: always; }}
+            .section {{ margin-bottom:25px; background:#F6F8F8; padding:15px; border-radius:6px; }}
+            h2 {{ border-bottom:2px solid #23CE6B; padding-bottom:5px; color:#36120D; }}
+            table {{ width:100%; border-collapse: collapse; font-size:12px; }}
+            th, td {{ border:1px solid #27CC6C; padding:6px; }}
+            .field-name {{ font-weight:bold; background:#F6F8F8; width:30%; color:#3D0F06; }}
+            .image-grid {{ display:flex; flex-wrap:wrap; gap:10px; }}
+            .image-card {{ width:48%; border:1px solid #27CC6C; }}
+            .image-card img {{ width:100%; }}
+            .caption {{ font-size:10px; text-align:center; }}
+
+            /* LOGHI RIDOTTI */
+            .cover-logo {{
+                width: 190px;
+                margin-bottom: 85px;
+            }}
+
+            .about-logo {{
+                width: 120px;
+                margin-bottom: 20px;
+            }}
+        </style>
+    </head>
+    <body>
+        {cover_html}
+        {summary_html}
+        {breakdown_html}
+        {espr_html}
+        {lifecycle_html}
+        {changelog_html}
+        {images_html}
+        {about_html}
+        {legal_html}
+    </body>
+    </html>
+    """
+
+    return html
+    
 
 
 
