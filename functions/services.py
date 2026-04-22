@@ -5,10 +5,14 @@ import os
 import json
 import base64
 import hashlib
+import unicodedata
+
 from io import BytesIO
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from urllib.parse import urlparse
+from difflib import get_close_matches
+from typing import Optional, Dict
 
 import streamlit as st
 import pandas as pd
@@ -16,11 +20,13 @@ import pdfplumber
 from PIL import Image
 from openai import OpenAI
 import qrcode
+import requests
+
+from cryptography.fernet import Fernet
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-import requests
-from typing import Optional, Dict
 from openpyxl import load_workbook
+
 # ======================================================
 # CONFIG
 # ======================================================
