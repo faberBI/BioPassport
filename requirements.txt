@@ -12,5 +12,6 @@ reportlab
 openpyxl
 cryptography
 playwright
-weasyprint 
+weasyprint
+psycopg2-binary
 
