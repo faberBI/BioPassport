@@ -18,6 +18,7 @@ from openai import OpenAI
 import qrcode
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+import request
 
 
 # ======================================================
