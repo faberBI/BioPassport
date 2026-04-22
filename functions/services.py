@@ -991,8 +991,53 @@ def save_passport_to_excel_append(passport: dict):
 
 
 def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
-    sections_html = ""
+    # =====================================================
+    # HELPER
+    # =====================================================
+    def quality_label(v):
+        if v is None:
+            return "—"
+        if v >= 80:
+            return "Alta ✅"
+        if v >= 50:
+            return "Media 🟡"
+        return "Bassa 🔴"
 
+    # =====================================================
+    # DATI BASE
+    # =====================================================
+    lifecycle = passport.get("lifecycle", {}).get("status", "draft")
+    version = passport.get("version", "")
+    issuer = (passport.get("issuer") or {}).get("legal_name", "")
+    attestation = passport.get("attestation") or {}
+    espr = passport.get("espr_validation") or {}
+
+    espr_label = (
+        "✅ Prodotto conforme ai requisiti europei"
+        if espr.get("is_compliant")
+        else "❌ Prodotto NON conforme"
+    )
+
+    dq = passport.get("data_quality") or {}
+    pdf_q = int(round(dq.get("pdf", 0) * 100)) if dq else None
+    img_q = int(round(dq.get("images", 0) * 100)) if dq else None
+    ov_q = int(round(dq.get("overall", 0) * 100)) if dq else None
+
+    evidences = passport.get("evidences") or []
+    audit = passport.get("change_log") or []
+
+    # =====================================================
+    # QR
+    # =====================================================
+    qr_html = (
+        f"<img src='data:image/png;base64,{qr_base64}' style='width:160px;'/>"
+        if qr_base64 else ""
+    )
+
+    # =====================================================
+    # SEZIONI
+    # =====================================================
+    sections_html = ""
     for section, fields in passport.get("sections", {}).items():
         rows = ""
         for k, v in fields.items():
@@ -1009,17 +1054,22 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             </table>
         """
 
+    # =====================================================
+    # IMMAGINI
+    # =====================================================
     images_html = ""
     for img in passport.get("images", []):
         images_html += f"""
             <div style='margin:10px 0;'>
-                <img src="data:image/jpeg;base64,{img['file_base64']}" style="max-width:300px; border:1px solid #ccc;"/>
+                <img src="data:image/jpeg;base64,{img['file_base64']}"
+                     style="max-width:300px; border:1px solid #ccc;"/>
                 <p style='font-size:12px; color:#555;'>{img.get('caption','')}</p>
             </div>
         """
 
-    qr_html = f"<img src='data:image/png;base64,{qr_base64}' style='width:180px;'/>" if qr_base64 else ""
-
+    # =====================================================
+    # HTML
+    # =====================================================
     html = f"""
     <html>
     <head>
@@ -1038,6 +1088,13 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
             h2 {{
                 color: #0A4A9A;
             }}
+            .box {{
+                border:1px solid #ddd;
+                border-radius:8px;
+                padding:15px;
+                margin:20px 0;
+                background:#f9f9f9;
+            }}
             table {{
                 width: 100%;
                 border-collapse: collapse;
@@ -1046,26 +1103,63 @@ def generate_passport_html(passport: dict, qr_base64: str = None) -> str:
                 border: 1px solid #ddd;
                 padding: 8px;
             }}
+            .small {{
+                font-size:12px;
+                color:#555;
+            }}
         </style>
     </head>
     <body>
 
         <h1>Digital Product Passport</h1>
 
+        <!-- METADATA -->
         <h2>Metadata</h2>
         <p><b>ID:</b> {passport.get("id")}</p>
         <p><b>Tipo:</b> {passport.get("product_type")}</p>
-        <p><b>Versione:</b> {passport.get("version")}</p>
+        <p><b>Versione:</b> {version}</p>
 
-        <h2>QR Code</h2>
-        {qr_html}
+        <!-- COPERTINA / STATUS -->
+        <div class="box">
+            <p><b>{espr_label}</b></p>
+            <p><b>Produttore:</b> {issuer}</p>
+            <p><b>Stato prodotto:</b> {lifecycle}</p>
+            {qr_html}
+        </div>
 
+        <!-- QUALITÀ DATI -->
+        <div class="box">
+            <h2>Qualità dei dati</h2>
+            <p><b>Dati PDF:</b> {quality_label(pdf_q)}</p>
+            <p><b>Dati immagini:</b> {quality_label(img_q)}</p>
+            <p><b>Qualità complessiva:</b> {quality_label(ov_q)}</p>
+        </div>
+
+        <!-- PROVE -->
+        <div class="box">
+            <h2>Prove e verifiche</h2>
+            <p><b>Numero prove:</b> {len(evidences)}</p>
+            <p><b>Aggiornamenti:</b> {len(audit)}</p>
+        </div>
+
+        <!-- ATTESTAZIONE -->
+        <div class="box">
+            <h2>Dichiarazione del produttore</h2>
+            <p>{attestation.get("statement","")}</p>
+            <p class="small">Data: {attestation.get("timestamp","")}</p>
+        </div>
+
+        <!-- SEZIONI -->
         {sections_html}
 
+        <!-- IMMAGINI -->
         <h2>Immagini prodotto</h2>
         {images_html}
 
     </body>
     </html>
     """
+
     return html
+
+
