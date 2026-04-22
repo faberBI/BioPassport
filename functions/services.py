@@ -1302,6 +1302,11 @@ def generate_pdf_from_html(html: str) -> bytes:
     resp.raise_for_status()
     return resp.content
 
+def load_image_base64(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
 
 
 
