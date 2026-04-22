@@ -74,7 +74,18 @@ margin-bottom:15px">
         unsafe_allow_html=True,
     )
 
-def render_espr_validation(passport: dict):atori mancanti")
+def render_espr_validation(passport: dict):
+    """
+    Render leggibile della validazione ESPR.
+    Pensata per utenti NON tecnici (audit / compliance).
+    """
+    v = passport.get("espr_validation") or {}
+
+    st.subheader("🛡️ Conformità ESPR")
+
+    # -----------------------------    # -----------------------------
+    if v.get("missing_fields"):
+        st.error("### ❌ Campi obbligatori mancanti")
         for f in v["missing_fields"]:
             st.write(f"- {f}")
 
@@ -90,22 +101,31 @@ def render_espr_validation(passport: dict):atori mancanti")
 
     if v.get("is_compliant"):
         st.success("✅ DPP conforme ai requisiti ESPR ESSENTIAL")
-    v = passport.get("espr_validation") or {}
-
-    st.subheader("🛡️ Conformità ESPR")
-
+    # KPI summary (semaforo)
+    # -----------------------------
     c1, c2, c3 = st.columns(3)
-    c1.metric("Mandatory fields",
-              "❌" if v.get("missing_fields") else "✅",
-              f"{len(v.get('missing_fields', []))} mancanti")
-    c2.metric("Blocchi strutturali",
-              "❌" if v.get("missing_blocks") else "✅",
-              f"{len(v.get('missing_blocks', []))} mancanti")
-    c3.metric("Warning",
-              "⚠️" if v.get("warnings") else "✅",
-              f"{len(v.get('warnings', []))}")
 
-    if v.get("missing_fields"):
+    c1.metric(
+        "Mandatory fields",
+        "❌" if v.get("missing_fields") else "✅",
+        f"{len(v.get('missing_fields', []))} mancanti"
+    )
+
+    c2.metric(
+        "Blocchi strutturali",
+        "❌" if v.get("missing_blocks") else "✅",
+        f"{len(v.get('missing_blocks', []))} mancanti"
+    )
+
+    c3.metric(
+        "Warning",
+        "⚠️" if v.get("warnings") else "✅",
+        f"{len(v.get('warnings', []))}"
+    )
+
+    st.divider()
+
+
 
 
 # ======================================================
