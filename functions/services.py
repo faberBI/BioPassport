@@ -1114,6 +1114,11 @@ def load_image_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
+def upload_image_to_openai(image_file, client: OpenAI):
+    resized = resize_image_for_vision(image_file)
+    uploaded = client.files.create(file=resized, purpose="vision")
+    return uploaded.id
+
 
 
 
