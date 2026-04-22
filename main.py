@@ -26,6 +26,12 @@ def compute_section_confidence(section: dict) -> float:
     ]
     return round(sum(vals) / len(vals), 2) if vals else 0.0
 
+def apply_mixed_confidence(validated: dict, extracted: dict):
+    for k, v in validated.items():
+        orig = (extracted.get(k) or {}).get("value", "")
+        if not v.get("value"):
+            continue
+        v["confidence"] = 1.0 if v["value"] != orig else 0.8
 
 def render_data_quality(passport: dict):
     st.subheader("📊 Qualità dei dati")
@@ -431,6 +437,8 @@ with tabs[2]:
     ENABLE_QESEAL = False
     ENABLE_SES = True
     if st.button("🚀 Finalizza e pubblica DPP"):
+        apply_mixed_confidence(st.session_state.validated_pdf, st.session_state.pdf_data)
+        apply_mixed_confidence(st.session_state.validated_image,st.session_state.image_data)
     
         # 1) CREA PASSPORT
         pid = f"{tipo.upper()}-{uuid.uuid4().hex[:6]}"
