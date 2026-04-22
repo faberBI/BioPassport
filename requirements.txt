@@ -13,4 +13,4 @@ openpyxl
 cryptography
 playwright
 weasyprint
-
+psycopg2-binary
