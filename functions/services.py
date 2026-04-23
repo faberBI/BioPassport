@@ -633,25 +633,38 @@ def sign_passport_pdf_ses_openapi(
 
 def _sec(name: str, default: str = "") -> str:
     try:
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:
+        if name2.connect(url)        if name in st.secrets:
+        conn.autocommit = False
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+    except ImportError:
         pass
-    return str(os.getenv(name, default))
 
-
-def db_enabled() -> bool:
-    return bool(_sec("SUPABASE_DB_URL"))
-
-
-@contextmanager
-def db_conn():
-    """
-    psycopg2 se disponibile; fallback pg8000.
-    """
-    url = _sec("SUPABASE_DB_URL")
-    if not url:
-        raise RuntimeError("SUPABASE_DB_URL mancante")
+    # pg8000 fallback
+    import pg8000
+    u = urlparse(url)
+    conn = pg8000.connect(
+        user=u.username,
+        password=u.password,
+        host=u.hostname,
+        port=u.port or 5432,
+        database=(u.path or "/postgres").lstrip("/"),
+    )
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     # psycopg2
     try:
@@ -692,22 +705,73 @@ def db_conn():
 
 _DB_SCHEMA_READY = False
 
+_DB_SCHEMA_READY = False
+
+
 def ensure_db_schema():
     """
-    Crea tabelle minime se non esistono.
+    Crea le 3 tabelle se non esistono.
+    Se esiste già la vecchia 'passports' (solo payload/version/created/updated),
+    aggiunge le nuove colonne con ALTER TABLE ... IF NOT EXISTS.
     """
     global _DB_SCHEMA_READY
     if _DB_SCHEMA_READY or not db_enabled():
         return
 
     ddl = """
+    -- 1) passports (snapshot/listing)
     create table if not exists passports (
       passport_id text primary key,
-      payload jsonb not null,
+      payload jsonb,
       version integer not null default 0,
       created_at timestamptz default now(),
       updated_at timestamptz default now()
     );
+
+    -- evolve old passports schema safely
+    alter table passports add column if not exists product_type text;
+    alter table passports add column if not exists lifecycle_status text;
+    alter table passports add column if not exists issuer_legal_name text;
+    alter table passports add column if not exists sustainability_score integer;
+    alter table passports add column if not exists pdf_present boolean default false;
+    alter table passports add column if not exists cert_count integer default 0;
+
+    -- 2) passport_fields (versioned fields)
+    create table if not exists passport_fields (
+      passport_id text not null,
+      version integer not null,
+      section text not null,
+      field_name text not null,
+      field_value text,
+      confidence numeric,
+      source text,
+      updated_at timestamptz default now(),
+      primary key (passport_id, version, section, field_name)
+    );
+
+    -- 3) passport_assets (images/evidences/certs/binding)
+    create table if not exists passport_assets (
+      asset_id text primary key,
+      passport_id text not null,
+      version integer not null,
+      asset_type text,
+      hash_sha256 text,
+      filename text,
+      metadata jsonb,
+      created_at timestamptz default now()
+    );
+
+    -- Index utili (list + diff + lookup)
+    create index if not exists idx_passports_updated_at on passports(updated_at);
+    create index if not exists idx_passports_product_type on passports(product_type);
+    create index if not exists idx_passports_lifecycle on passports(lifecycle_status);
+    create index if not exists idx_passports_version on passports(version);
+
+    create index if not exists idx_fields_pid_ver on passport_fields(passport_id, version);
+    create index if not exists idx_fields_section on passport_fields(section);
+
+    create index if not exists idx_assets_pid_ver on passport_assets(passport_id, version);
+    create index if not exists idx_assets_type on passport_assets(asset_type);
     """
 
     with db_conn() as conn:
@@ -715,7 +779,6 @@ def ensure_db_schema():
         cur.execute(ddl)
 
     _DB_SCHEMA_READY = True
-
 
 def _to_dict(payload):
     if payload is None:
@@ -730,11 +793,39 @@ def _to_dict(payload):
     return payload
 
 
-def persist_passport(passport: dict, actor: str = "manufacturer", reason: str = "update", shadow_file: bool = False):
+def _infer_field_source(section: str) -> str:
+    s = (section or "").lower()
+    if s == "pdf":
+        return "pdf"
+    if s == "images" or s == "image":
+        return "image"
+    if s == "certificates" or s == "certificate":
+        return "certificate"
+    return "computed"
+
+
+def _safe_hash_b64_image(b64: str) -> str:
     """
-    DB-first. Fallback su file se DB non configurato.
+    Hash stabile dei bytes reali dell'immagine.
+    Se decode fallisce, hash della stringa.
+    """
+    try:
+        raw = base64.b64decode(b64)
+        return compute_sha256_bytes(raw)
+    except Exception:
+        return compute_sha256_bytes((b64 or "").encode("utf-8"))
+
+
+def persist_passport(passport: dict, actor="manufacturer", reason="update"):
+    """
+    Persist completo:
+      - upsert su passports (snapshot)
+      - rewrite per-version su passport_fields
+      - rewrite per-version su passport_assets (images, evidences, certs, binding)
+    Idempotente: se richiami sulla stessa version, non duplica.
     """
     if not db_enabled():
+        # fallback file (se vuoi mantenere fallback legacy, qui puoi rimetterlo)
         os.makedirs(PASSPORT_DIR, exist_ok=True)
         with open(os.path.join(PASSPORT_DIR, f"{passport['id']}.json"), "w", encoding="utf-8") as f:
             json.dump(passport, f, indent=2, ensure_ascii=False)
@@ -742,29 +833,154 @@ def persist_passport(passport: dict, actor: str = "manufacturer", reason: str = 
 
     ensure_db_schema()
 
+    pid = str(passport.get("id") or "").strip()
+    if not pid:
+        raise ValueError("passport['id'] mancante")
+    ver = int(passport.get("version", 0) or 0)
+
+    product_type = passport.get("product_type")
+    lifecycle_status = (passport.get("lifecycle") or {}).get("status")
+    issuer_legal_name = (passport.get("issuer") or {}).get("legal_name")
+    sustainability_score = passport.get("sustainability_score")
+    pdf_present = bool(passport.get("pdf_document"))
+    cert_count = len(passport.get("certificates") or [])
+
+    payload_json = json.dumps(passport, ensure_ascii=False)
+
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            insert into passports(passport_id, payload, version, updated_at)
-            values (%s,%s::jsonb,%s,now())
+
+        # 1) passports snapshot (1 row per passport_id)
+        cur.execute("""
+            insert into passports(
+              passport_id, payload, version,
+              product_type, lifecycle_status, issuer_legal_name,
+              sustainability_score, pdf_present, cert_count,
+              updated_at
+            )
+            values (%s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, now())
             on conflict (passport_id) do update set
               payload = excluded.payload,
               version = excluded.version,
+              product_type = excluded.product_type,
+              lifecycle_status = excluded.lifecycle_status,
+              issuer_legal_name = excluded.issuer_legal_name,
+              sustainability_score = excluded.sustainability_score,
+              pdf_present = excluded.pdf_present,
+              cert_count = excluded.cert_count,
               updated_at = now()
-            """,
-            (passport["id"], json.dumps(passport, ensure_ascii=False), int(passport.get("version", 0)))
-        )
+        """, (
+            pid, payload_json, ver,
+            product_type, lifecycle_status, issuer_legal_name,
+            sustainability_score, pdf_present, cert_count
+        ))
 
-    if shadow_file:
-        os.makedirs(PASSPORT_DIR, exist_ok=True)
-        with open(os.path.join(PASSPORT_DIR, f"{passport['id']}.json"), "w", encoding="utf-8") as f:
-            json.dump(passport, f, indent=2, ensure_ascii=False)
+        # 2) passport_fields (rewrite this version)
+        cur.execute("delete from passport_fields where passport_id=%s and version=%s", (pid, ver))
+
+        sections = passport.get("sections") or {}
+        if isinstance(sections, dict):
+            for section, fields in sections.items():
+                if not isinstance(fields, dict):
+                    continue
+                source = _infer_field_source(section)
+                for fname, f in fields.items():
+                    if isinstance(f, dict):
+                        val = f.get("value", "")
+                        conf = f.get("confidence", None)
+                    else:
+                        val = "" if f is None else str(f)
+                        conf = None
+
+                    cur.execute("""
+                        insert into passport_fields
+                        (passport_id, version, section, field_name, field_value, confidence, source, updated_at)
+                        values (%s,%s,%s,%s,%s,%s,%s, now())
+                    """, (
+                        pid, ver,
+                        str(section),
+                        str(fname),
+                        "" if val is None else str(val),
+                        conf,
+                        source
+                    ))
+
+        # 3) passport_assets (rewrite this version)
+        cur.execute("delete from passport_assets where passport_id=%s and version=%s", (pid, ver))
+
+        # 3a) images[] (base64 + caption)
+        for j, img in enumerate(passport.get("images") or []):
+            b64 = (img or {}).get("file_base64") or ""
+            if not b64:
+                continue
+            img_hash = _safe_hash_b64_image(b64)
+            asset_id = f"img_{pid}_{ver}_{j}_{img_hash[:12]}"
+            cur.execute("""
+                insert into passport_assets
+                (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
+                values (%s,%s,%s,'image',%s,%s,%s::jsonb, now())
+            """, (
+                asset_id, pid, ver,
+                img_hash,
+                (img or {}).get("filename", "") or "",
+                json.dumps(img, ensure_ascii=False)
+            ))
+
+        # 3b) evidences[] (hash, filename, source...)
+        for k, ev in enumerate(passport.get("evidences") or []):
+            ev = ev or {}
+            ev_hash = ev.get("hash") or ""
+            asset_id = (ev.get("evidence_id") or "").strip()
+            if not asset_id:
+                asset_id = f"evid_{pid}_{ver}_{k}_{(ev_hash or 'nohash')[:12]}"
+            cur.execute("""
+                insert into passport_assets
+                (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
+                values (%s,%s,%s,'evidence',%s,%s,%s::jsonb, now())
+            """, (
+                asset_id, pid, ver,
+                ev_hash,
+                ev.get("filename", "") or "",
+                json.dumps(ev, ensure_ascii=False)
+            ))
+
+        # 3c) certificates[] (parsed cert)
+        for i, cert in enumerate(passport.get("certificates") or []):
+            cert = cert or {}
+            cert_hash = compute_sha256_bytes(json.dumps(cert, ensure_ascii=False).encode("utf-8"))
+            asset_id = f"cert_{pid}_{ver}_{i}_{cert_hash[:12]}"
+            cur.execute("""
+                insert into passport_assets
+                (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
+                values (%s,%s,%s,'certificate',%s,%s,%s::jsonb, now())
+            """, (
+                asset_id, pid, ver,
+                cert_hash,
+                cert.get("filename", "") if isinstance(cert, dict) else "",
+                json.dumps(cert, ensure_ascii=False)
+            ))
+
+        # 3d) physical_binding (qr/link)
+        if passport.get("physical_binding"):
+            pb = passport["physical_binding"]
+            pb_hash = compute_sha256_bytes(json.dumps(pb, ensure_ascii=False).encode("utf-8"))
+            asset_id = f"bind_{pid}_{ver}_{pb_hash[:12]}"
+            cur.execute("""
+                insert into passport_assets
+                (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
+                values (%s,%s,%s,'binding',%s,%s,%s::jsonb, now())
+            """, (
+                asset_id, pid, ver,
+                pb_hash,
+                "",
+                json.dumps(pb, ensure_ascii=False)
+            ))
 
 
 def load_passport(pid: str):
     """
     DB-first, fallback file.
+    Nota: qui ritorni ancora il payload completo (compatibilità con UI attuale).
     """
     if not db_enabled():
         path = os.path.join(PASSPORT_DIR, f"{pid}.json")
@@ -791,11 +1007,12 @@ def db_list_passports_latest(
     has_cert: bool = False,
     sort_col: str = "updated_at",
     sort_asc: bool = False,
-    limit: int = 5000
+    limit: int = 5000,
 ) -> pd.DataFrame:
     """
-    Restituisce la vista archivio con le colonne usate nel main:
-    id, product_type, version, lifecycle, pdf_present, cert_count, created_at, updated_at
+    LIST VIEW basata SOLO su passports (no JSON traversal).
+    Colonne:
+      id | product_type | version | lifecycle | pdf_present | cert_count | created_at | updated_at
     """
     ensure_db_schema()
 
@@ -808,16 +1025,22 @@ def db_list_passports_latest(
     params = []
 
     if search:
-        where.append("(passport_id ILIKE %s OR payload->>'product_type' ILIKE %s OR payload->'issuer'->>'legal_name' ILIKE %s)")
+        where.append("""
+            (
+              passport_id ILIKE %s
+              OR coalesce(issuer_legal_name,'') ILIKE %s
+              OR coalesce(product_type,'') ILIKE %s
+            )
+        """)
         like = f"%{search}%"
         params += [like, like, like]
 
     if product_type and product_type != "ALL":
-        where.append("(payload->>'product_type') = %s")
+        where.append("product_type = %s")
         params.append(product_type)
 
     if lifecycle and lifecycle != "ALL":
-        where.append("(payload->'lifecycle'->>'status') = %s")
+        where.append("lifecycle_status = %s")
         params.append(lifecycle)
 
     if min_version and int(min_version) > 1:
@@ -825,19 +1048,19 @@ def db_list_passports_latest(
         params.append(int(min_version))
 
     if has_pdf:
-        where.append("(payload ? 'pdf_document')")
+        where.append("pdf_present = true")
 
     if has_cert:
-        where.append("coalesce(jsonb_array_length(payload->'certificates'),0) > 0")
+        where.append("cert_count > 0")
 
     sql = f"""
         select
             passport_id as id,
-            payload->>'product_type' as product_type,
-            version as version,
-            payload->'lifecycle'->>'status' as lifecycle,
-            (payload ? 'pdf_document') as pdf_present,
-            coalesce(jsonb_array_length(payload->'certificates'),0) as cert_count,
+            product_type,
+            version,
+            lifecycle_status as lifecycle,
+            pdf_present,
+            cert_count,
             created_at,
             updated_at
         from passports
@@ -845,48 +1068,67 @@ def db_list_passports_latest(
         order by {sort_col} {order}
         limit %s
     """
-
     params.append(int(limit))
 
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
-
-def compute_diff_fields(df_fields: pd.DataFrame, passport_id: str, v_old: int, v_new: int) -> pd.DataFrame:
+        
+def compute_diff_fields(
+    passport_id: str,
+    v_old: int,
+    v_new: int
+) -> pd.DataFrame:
     """
-    Diff minimale sui campi tra due versioni.
-    Richiede df_fields con colonne: passport_id, version, section, field_name, value
-    Ritorna: section | field_name | old_value | new_value
+    Diff SQL-nativo sui campi versionati.
+    Output:
+      section | field_name | old_value | new_value
     """
-    if df_fields is None or df_fields.empty:
-        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+    ensure_db_schema()
 
-    required = {"passport_id", "version", "section", "field_name", "value"}
-    if not required.issubset(df_fields.columns):
-        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+    sql = """
+    select
+        f_old.section,
+        f_old.field_name,
+        f_old.field_value as old_value,
+        f_new.field_value as new_value
+    from passport_fields f_old
+    join passport_fields f_new
+      on f_old.passport_id = f_new.passport_id
+     and f_old.section = f_new.section
+     and f_old.field_name = f_new.field_name
+    where
+        f_old.passport_id = %s
+        and f_old.version = %s
+        and f_new.version = %s
+        and coalesce(f_old.field_value,'') <> coalesce(f_new.field_value,'')
+    order by f_old.section, f_old.field_name
+    """
+    with db_conn() as conn:
+        return pd.read_sql(sql, conn, params=[passport_id, v_old, v_new])
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return str(os.getenv(name, default))
 
-    sub = df_fields[df_fields["passport_id"].astype(str).str.strip() == str(passport_id).strip()].copy()
-    if sub.empty:
-        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
 
-    sub["version"] = pd.to_numeric(sub["version"], errors="coerce")
-    sub = sub.dropna(subset=["version"])
-    if sub.empty:
-        return pd.DataFrame(columns=["section", "field_name", "old_value", "new_value"])
+def db_enabled() -> bool:
+    return bool(_sec("SUPABASE_DB_URL"))
 
-    sub["section"] = sub["section"].astype(str).str.strip()
-    sub["field_name"] = sub["field_name"].astype(str).str.strip()
-    sub["value"] = sub["value"].astype(str)
 
-    old = sub[sub["version"] == int(v_old)][["section", "field_name", "value"]].rename(columns={"value": "old_value"})
-    new = sub[sub["version"] == int(v_new)][["section", "field_name", "value"]].rename(columns={"value": "new_value"})
+@contextmanager
+def db_conn():
+    """
+    psycopg2 se disponibile; fallback pg8000.
+    Transazione gestita dal contextmanager (commit/rollback).
+    """
+    url = _sec("SUPABASE_DB_URL")
+    if not url:
+        raise RuntimeError("SUPABASE_DB_URL mancante")
 
-    m = old.merge(new, on=["section", "field_name"], how="outer")
-    m["old_value"] = m["old_value"].fillna("")
-    m["new_value"] = m["new_value"].fillna("")
-
-    changed = m[m["old_value"] != m["new_value"]].copy()
-    return changed.sort_values(["section", "field_name"]).reset_index(drop=True)
-    
+    # psycopg2
+    try:
+        import psycopg2
+        
 def save_passport_to_excel_append(passport: dict):
     """
     Salva/append su Excel legacy per Archivio + Diff versioni.
