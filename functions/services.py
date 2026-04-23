@@ -163,9 +163,10 @@ def gpt_extract_from_pdf(pdf_text: str, client, tipo: str, fields: list[str], mo
     template = {k: {"value": "", "confidence": 0.0, "explanation": ""} for k in fields}
 
     system = (
-        "You are a strict information extraction engine. "
-        "Return ONLY valid JSON. No markdown. No commentary. "
-        "Do not hallucinate values."
+        "Sei un motore di estrazione dati rigoroso. "
+        "Rispondi SOLO in JSON valido. Nessun markdown. Nessun commento. "
+        "Non inventare dati. "
+        "TUTTI i campi 'explanation' devono essere in italiano."
     )
 
     user = (
@@ -522,9 +523,18 @@ def espr_stamp(passport: dict, actor: str, action: str, reason: str):
     })
     passport.setdefault("issuer", get_default_issuer())
     passport["attestation"] = {
-        "statement": "The issuer declares that the information contained in this Digital Product Passport is accurate and compliant with ESPR Regulation (EU) 2024/1781.",
-        "timestamp": passport["last_updated_at"],
-    }
+    "type": "ESPR_PROCESS_ATTESTATION",
+    "statement": (
+        "Il presente Digital Product Passport è stato generato tramite la piattaforma NUVIA "
+        "secondo policy ESPR dichiarate e versionate (ESPR framework – compliance enabling). "
+        "La responsabilità della conformità finale del prodotto resta in capo "
+        "all’operatore economico."
+    ),
+    "policy_version": passport.get("espr_policy_version", "v1.0"),
+    "timestamp": passport["last_updated_at"],
+    "responsible_actor": actor,               
+}
+
     h = compute_passport_hash(passport)
     passport["digital_signature"] = {
         "algorithm": "SHA-256",
