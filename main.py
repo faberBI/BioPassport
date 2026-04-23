@@ -686,14 +686,13 @@ with tabs[3]:
         f_has_pdf = st.sidebar.checkbox("Solo con PDF generato", key="arch_pdf")
         f_has_cert = st.sidebar.checkbox("Solo con certificazioni", key="arch_cert")
 
-        sort_options = 
-            {
+        sort_options = {
                 "Aggiornamento (recenti ↓)": ("updated_at", False),
                 "Aggiornamento (vecchi ↑)": ("updated_at", True),
                 "Creazione (recenti ↓)": ("created_at", False),
                 "Creazione (vecchi ↑)": ("created_at", True),
                 "Versione (alta ↓)": ("version", False),
-                "Versione (bassa ↑)": ("version", True),
+                "Versione (bassa ↑)": ("version", True)
             }
 
         sort_choice = st.selectbox("Ordina per", list(sort_options.keys()), key="arch_sort")
