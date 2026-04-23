@@ -568,7 +568,7 @@ with tabs[2]:
             passport["pdf_document"] = base64.b64encode(pdf_bytes).decode()
 
         # 10) SALVA SU DB (Passport Registry) — append-only
-        services.persist_passport(passport, actor="manufacturer", reason="publish_final", shadow_file=False)
+        services.persist_passport(passport, actor="manufacturer", reason="publish_final")
         services.save_passport_to_excel_append(passport)
         st.session_state["published_passport"] = passport
 
@@ -645,7 +645,7 @@ with tabs[2]:
                         reason="Requested SES (OTP) signature"
                     )
 
-                    services.persist_passport(pp, actor="manufacturer", reason="ses_requested", shadow_file=False)
+                    services.persist_passport(pp, actor="manufacturer", reason="ses_requested")
                     st.session_state["published_passport"] = pp
 
                     st.success("✅ Richiesta SES inviata")
