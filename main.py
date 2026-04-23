@@ -686,20 +686,16 @@ with tabs[3]:
         f_has_pdf = st.sidebar.checkbox("Solo con PDF generato", key="arch_pdf")
         f_has_cert = st.sidebar.checkbox("Solo con certificazioni", key="arch_cert")
 
-        sort_options = {
-            "Aggiornamento (recenti ↓)": ("updated_at", False),
-            "Aggiornamento (vecchi ↑)": ("updated_at", True),
-            "Creazione (recenti ↓)": ("created_at", False),
-            "Creazione (vecchi ↑)": ("created_at", True),
-            "Versione (alta ↓)": ("current_version", False),
-            "Versione (bassa ↑)": ("current_version", True),
-            "Produttore (A → Z)": ("issuer_legal_name", True),
-            "Produttore (Z → A)": ("issuer_legal_name", False),
-            "Tipo prodotto (A → Z)": ("product_type", True),
-            "Tipo prodotto (Z → A)": ("product_type", False),
-            "Lifecycle (A → Z)": ("status", True),
-            "Lifecycle (Z → A)": ("status", False),
-        }
+        sort_options = 
+            {
+                "Aggiornamento (recenti ↓)": ("updated_at", False),
+                "Aggiornamento (vecchi ↑)": ("updated_at", True),
+                "Creazione (recenti ↓)": ("created_at", False),
+                "Creazione (vecchi ↑)": ("created_at", True),
+                "Versione (alta ↓)": ("version", False),
+                "Versione (bassa ↑)": ("version", True),
+            }
+
         sort_choice = st.selectbox("Ordina per", list(sort_options.keys()), key="arch_sort")
         sort_col, sort_asc = sort_options[sort_choice]
 
@@ -746,7 +742,7 @@ with tabs[3]:
             open_col, pdf_col = a4.columns(2)
 
             if open_col.button("🔍 Apri", key=f"open_{pid}"):
-                st.experimental_set_query_params(passport_id=pid)
+                st.query_params["passport_id"] = pid
                 st.rerun()
 
             if pdf_col.button("📄 PDF", key=f"pdf_{pid}"):
@@ -812,7 +808,7 @@ with tabs[3]:
                     if int(v_old) == int(v_new):
                         st.warning("Seleziona due versioni diverse per vedere le differenze.")
                     else:
-                        diff_df = compute_diff_fields(df_f, selected_id, int(v_old), int(v_new))
+                        diff_df = services.compute_diff_fields(selected_id, int(v_old), int(v_new))
         
                         if diff_df.empty:
                             st.success("✅ Nessuna differenza sui campi")
