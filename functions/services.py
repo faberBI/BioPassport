@@ -1006,16 +1006,12 @@ def db_list_passports_latest(
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=params)
         
+
 def compute_diff_fields(
     passport_id: str,
     v_old: int,
     v_new: int
 ) -> pd.DataFrame:
-    """
-    Diff SQL-nativo sui campi versionati.
-    Output:
-      section | field_name | old_value | new_value
-    """
     ensure_db_schema()
 
     sql = """
@@ -1036,12 +1032,9 @@ def compute_diff_fields(
         and coalesce(f_old.field_value,'') <> coalesce(f_new.field_value,'')
     order by f_old.section, f_old.field_name
     """
+
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=[passport_id, v_old, v_new])
-    except Exception:
-        pass
-    return str(os.getenv(name, default))
-
 
 def db_enabled() -> bool:
     return bool(_sec("SUPABASE_DB_URL"))
