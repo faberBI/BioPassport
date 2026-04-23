@@ -70,6 +70,9 @@ def render_dpp_status_bar(passport: dict):
         "sealed": ("🔐", "SEALED (QeSeal)", "#14532d"),
         "updated": ("🔄", "UPDATED", "#6f42c1"),
         "withdrawn": ("⛔", "WITHDRAWN", "#dc3545"),
+        "certified": ("📜", "CERTIFIED", "#20c997"),
+        "end_of_life": ("🏁", "END OF LIFE", "#343a40")
+
     }
 
     icon, label, color = STATUS_MAP.get(
@@ -189,11 +192,10 @@ passport_id = st.query_params.get("passport_id")
 if passport_id:
     # DB-first (wrapper), fallback file se DB non ha ancora quel record
     passport = services.load_passport(passport_id)
-    render_dpp_status_bar(passport)
     if not passport:
         st.error("Passport non trovato")
         st.stop()
-
+render_dpp_status_bar(passport)
     st.title("🇪🇺 Digital Product Passport — Public View")
 
     # ======================================================
@@ -519,6 +521,8 @@ with tabs[2]:
         # 6) VALIDAZIONE ESPR (se presente)
         if hasattr(services, "validate_espr_furniture"):
             check = services.validate_espr_furniture(passport)
+            passport["espr_validation"] = check
+            render_espr_validation(passport)
             if check.get("warnings"):
                 st.warning("⚠️ Warning di qualità dati")
                 for w in check["warnings"]:
