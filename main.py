@@ -195,7 +195,7 @@ if passport_id:
     if not passport:
         st.error("Passport non trovato")
         st.stop()
-render_dpp_status_bar(passport)
+    render_dpp_status_bar(passport)
     st.title("🇪🇺 Digital Product Passport — Public View")
 
     # ======================================================
