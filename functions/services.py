@@ -630,83 +630,16 @@ def sign_passport_pdf_ses_openapi(
 # ======================================================
 # DB / STORAGE (Supabase Postgres)
 # ======================================================
-
 def _sec(name: str, default: str = "") -> str:
     try:
-        if name2.connect(url)        if name in st.secrets:
-        conn.autocommit = False
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-        return
-    except ImportError:
-        pass
-
-    # pg8000 fallback
-    import pg8000
-    u = urlparse(url)
-    conn = pg8000.connect(
-        user=u.username,
-        password=u.password,
-        host=u.hostname,
-        port=u.port or 5432,
-        database=(u.path or "/postgres").lstrip("/"),
-    )
-    try:
-        yield conn
-        conn.commit()
+        if name in st.secrets:
+            return str(st.secrets[name])
     except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-    # psycopg2
-    try:
-        import psycopg2
-        conn = psycopg2.connect(url)
-        conn.autocommit = False
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-        return
-    except ImportError:
         pass
-
-    # pg8000 fallback
-    import pg8000
-    u = urlparse(url)
-    conn = pg8000.connect(
-        user=u.username,
-        password=u.password,
-        host=u.hostname,
-        port=u.port or 5432,
-        database=(u.path or "/postgres").lstrip("/"),
-    )
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    return str(os.getenv(name, default))
 
 
 _DB_SCHEMA_READY = False
-
-_DB_SCHEMA_READY = False
-
 
 def ensure_db_schema():
     """
@@ -1105,7 +1038,6 @@ def compute_diff_fields(
     """
     with db_conn() as conn:
         return pd.read_sql(sql, conn, params=[passport_id, v_old, v_new])
-            return str(st.secrets[name])
     except Exception:
         pass
     return str(os.getenv(name, default))
@@ -1117,18 +1049,50 @@ def db_enabled() -> bool:
 
 @contextmanager
 def db_conn():
-    """
-    psycopg2 se disponibile; fallback pg8000.
-    Transazione gestita dal contextmanager (commit/rollback).
-    """
     url = _sec("SUPABASE_DB_URL")
     if not url:
         raise RuntimeError("SUPABASE_DB_URL mancante")
 
-    # psycopg2
+    # prova psycopg2
     try:
         import psycopg2
-        
+        conn = psycopg2.connect(url)
+        conn.autocommit = False
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+    except ImportError:
+        pass
+
+    # fallback pg8000
+    import pg8000
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    conn = pg8000.connect(
+        user=u.username,
+        password=u.password,
+        host=u.hostname,
+        port=u.port or 5432,
+        database=(u.path or "/postgres").lstrip("/"),
+    )
+
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def save_passport_to_excel_append(passport: dict):
     """
     Salva/append su Excel legacy per Archivio + Diff versioni.
