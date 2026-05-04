@@ -768,7 +768,6 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
     Idempotente: se richiami sulla stessa version, non duplica.
     """
     if not db_enabled():
-        # fallback file (se vuoi mantenere fallback legacy, qui puoi rimetterlo)
         os.makedirs(PASSPORT_DIR, exist_ok=True)
         with open(os.path.join(PASSPORT_DIR, f"{passport['id']}.json"), "w", encoding="utf-8") as f:
             json.dump(passport, f, indent=2, ensure_ascii=False)
@@ -793,7 +792,7 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
     with db_conn() as conn:
         cur = conn.cursor()
 
-        # 1) passports snapshot (1 row per passport_id)
+        # 1) passports snapshot
         cur.execute("""
             insert into passports(
               passport_id, payload, version,
@@ -818,7 +817,7 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
             sustainability_score, pdf_present, cert_count
         ))
 
-        # 2) passport_fields (rewrite this version)
+        # 2) passport_fields
         cur.execute("delete from passport_fields where passport_id=%s and version=%s", (pid, ver))
 
         sections = passport.get("sections") or {}
@@ -848,16 +847,17 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
                         source
                     ))
 
-        # 3) passport_assets (rewrite this version)
+        # 3) passport_assets
         cur.execute("delete from passport_assets where passport_id=%s and version=%s", (pid, ver))
 
-        # 3a) images[] (base64 + caption)
+        # 3a) images
         for j, img in enumerate(passport.get("images") or []):
             b64 = (img or {}).get("file_base64") or ""
             if not b64:
                 continue
             img_hash = _safe_hash_b64_image(b64)
             asset_id = f"img_{pid}_{ver}_{j}_{img_hash[:12]}"
+
             cur.execute("""
                 insert into passport_assets
                 (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
@@ -869,13 +869,18 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
                 json.dumps(img, ensure_ascii=False)
             ))
 
-        # 3b) evidences[] (hash, filename, source...)
+        # 3b) evidences ✅ FIX QUI
         for k, ev in enumerate(passport.get("evidences") or []):
             ev = ev or {}
             ev_hash = ev.get("hash") or ""
-            asset_id = (ev.get("evidence_id") or "").strip()
-            if not asset_id:
-                asset_id = f"evid_{pid}_{ver}_{k}_{(ev_hash or 'nohash')[:12]}"
+
+            base_id = (ev.get("evidence_id") or "").strip()
+            if not base_id:
+                base_id = f"evid_{k}_{(ev_hash or 'nohash')[:12]}"
+
+            # 👇 FIX: sempre unico per passport + version
+            asset_id = f"{base_id}_{pid}_{ver}"
+
             cur.execute("""
                 insert into passport_assets
                 (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
@@ -887,11 +892,12 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
                 json.dumps(ev, ensure_ascii=False)
             ))
 
-        # 3c) certificates[] (parsed cert)
+        # 3c) certificates
         for i, cert in enumerate(passport.get("certificates") or []):
             cert = cert or {}
             cert_hash = compute_sha256_bytes(json.dumps(cert, ensure_ascii=False).encode("utf-8"))
             asset_id = f"cert_{pid}_{ver}_{i}_{cert_hash[:12]}"
+
             cur.execute("""
                 insert into passport_assets
                 (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
@@ -903,11 +909,12 @@ def persist_passport(passport: dict, actor="manufacturer", reason="update"):
                 json.dumps(cert, ensure_ascii=False)
             ))
 
-        # 3d) physical_binding (qr/link)
+        # 3d) binding
         if passport.get("physical_binding"):
             pb = passport["physical_binding"]
             pb_hash = compute_sha256_bytes(json.dumps(pb, ensure_ascii=False).encode("utf-8"))
             asset_id = f"bind_{pid}_{ver}_{pb_hash[:12]}"
+
             cur.execute("""
                 insert into passport_assets
                 (asset_id, passport_id, version, asset_type, hash_sha256, filename, metadata, created_at)
